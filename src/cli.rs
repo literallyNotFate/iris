@@ -2,7 +2,7 @@ use clap::{Parser, Subcommand};
 
 #[derive(Parser)]
 #[command(name = "iris")]
-#[command(about = "Simple theme switcher for CLI", long_about = None)]
+#[command(about = "Simple theme switcher", long_about = None)]
 pub struct Cli {
     #[command(subcommand)]
     pub command: Commands,
