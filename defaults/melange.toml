@@ -1,0 +1,25 @@
+name = "Melange"
+description = "Warm earthy tones"
+
+[colors]
+background = "292522"
+foreground = "ece1d7"
+cursor = "ece1d7"
+
+[palette]
+0 = "292522"
+1 = "8b5939"
+2 = "78997a"
+3 = "bb9751"
+4 = "6e7e8c"
+5 = "c6735a"
+6 = "a18d66"
+7 = "ece1d7"
+8 = "34302c"
+9 = "b17e5a"
+10 = "8eb090"
+11 = "ccab66"
+12 = "8292a1"
+13 = "d38d78"
+14 = "b5a480"
+15 = "ffffff"

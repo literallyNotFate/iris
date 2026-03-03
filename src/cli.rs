@@ -10,6 +10,8 @@ pub struct Cli {
 
 #[derive(Subcommand)]
 pub enum Commands {
+    /// Initialize folders and default themes
+    Init,
     /// List available themes
     List,
     /// Switch to preset (theme)
