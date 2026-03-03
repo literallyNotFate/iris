@@ -1,64 +1,36 @@
-use crate::models::Theme;
-use std::fs;
+use crate::{context::AppContext, models::Theme};
+use anyhow::{Context as _, Result};
 
-pub fn apply(theme: &Theme) {
-    let home = dirs::home_dir().expect("Home dir not found");
-    let cache_dir = home.join(".cache/iris");
-    let cache_file = cache_dir.join("fzf.sh");
+pub fn apply(theme: &Theme, ctx: &AppContext) -> Result<()> {
+    let cache_file = ctx.fzf_cache_path();
 
-    let bg = theme
-        .colors
-        .get("background")
-        .cloned()
-        .unwrap_or("#292522".into());
-    let fg = theme
-        .colors
-        .get("foreground")
-        .cloned()
-        .unwrap_or("#ece1d7".into());
+    let get = |map: &std::collections::BTreeMap<String, String>, key: &str, default: &str| {
+        let val = map.get(key).map(|s| s.as_str()).unwrap_or(default);
+        val.trim_start_matches('#').to_string()
+    };
 
-    let black = theme.palette.get("0").cloned().unwrap_or("#34302c".into());
-    let red = theme.palette.get("1").cloned().unwrap_or("#c6735a".into());
-    let green = theme.palette.get("2").cloned().unwrap_or("#78997a".into());
-    let yellow = theme.palette.get("3").cloned().unwrap_or("#bb9751".into());
-    let magenta = theme.palette.get("5").cloned().unwrap_or("#b38d6b".into());
-    let br_black = theme.palette.get("8").cloned().unwrap_or("#8b5939".into());
+    let fg = get(&theme.colors, "foreground", "ece1d7");
+    let accent = get(&theme.palette, "3", "bb9751");
+    let match_c = get(&theme.palette, "5", "c6735a");
+    let dimmed = get(&theme.palette, "8", "34302c");
 
     let fzf_colors = format!(
-        "bg:#{bg},\
-        fg:#{fg},\
-        bg+:#{bg_plus},\
-        fg+:#{fg},\
-        hl:#{red},\
-        hl+:#{yellow},\
-        header:#{green},\
-        info:#{yellow},\
-        pointer:#{fg},\
-        marker:#{red},\
-        prompt:#{green},\
-        query:#{fg},\
-        spinner:#{magenta},\
-        disabled:#{br_black},\
-        border:#{border},\
-        scrollbar:#{br_black},\
-        label:#{fg},\
-        preview-label:#{fg}",
-        bg = clean_hex(&bg),
-        bg_plus = clean_hex(&black),
-        fg = clean_hex(&fg),
-        red = clean_hex(&red),
-        green = clean_hex(&green),
-        yellow = clean_hex(&yellow),
-        magenta = clean_hex(&magenta),
-        border = clean_hex(&br_black),
+        "bg:-1,fg:#{fg},\
+            bg+:-1,fg+:#{accent}:bold,\
+            hl:#{match_c},hl+:#{match_c}:underline,\
+            pointer:#{accent},info:#{dimmed},border:#{dimmed},\
+            prompt:#{accent},marker:#{accent},spinner:#{match_c}",
+        fg = fg,
+        accent = accent,
+        match_c = match_c,
+        dimmed = dimmed
     );
 
-    let content = format!("export FZF_DEFAULT_OPTS=\"$FZF_DEFAULT_OPTS --color='{fzf_colors}'\"");
+    let content: String =
+        format!("export FZF_DEFAULT_OPTS=\"$FZF_DEFAULT_OPTS --color='{fzf_colors}'\"");
 
-    fs::create_dir_all(&cache_dir).ok();
-    fs::write(&cache_file, content).expect("Failed to write FZF cache");
-}
+    std::fs::write(&cache_file, content)
+        .with_context(|| format!("Failed to write FZF config to {:?}", cache_file))?;
 
-fn clean_hex(s: &str) -> String {
-    s.trim_start_matches('#').to_string()
+    Ok(())
 }

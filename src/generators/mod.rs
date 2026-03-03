@@ -1,15 +1,18 @@
 pub mod fzf;
 pub mod ghostty;
 
-use crate::models::Theme;
+use crate::{context::AppContext, models::Theme};
+use anyhow::Result;
 
-/// Apply themes to available programs
-pub fn apply_enabled(theme: &Theme, enabled: &[String]) {
-    for app in enabled {
+/// Apply themes to available programs (enabled generators)
+pub fn apply_all(theme: &Theme, ctx: &AppContext) -> Result<()> {
+    for app in &ctx.state.enabled_generators {
         match app.as_str() {
-            "ghostty" => ghostty::apply(theme),
-            "fzf" => fzf::apply(theme),
-            _ => println!("Unknown generator: {}", app),
+            "fzf" => fzf::apply(theme, ctx)?,
+            "ghostty" => ghostty::apply(theme, ctx)?,
+            _ => println!(" Unknown generator: {}", app),
         }
     }
+
+    Ok(())
 }

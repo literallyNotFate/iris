@@ -1,11 +1,13 @@
-use crate::models::Theme;
-use std::fs;
+use crate::{context::AppContext, models::Theme};
+use anyhow::{Context, Result};
+use std::{fs, os::unix::fs::symlink, path::PathBuf};
 
 /// Generate ghostty config based on selected theme
-pub fn apply(theme: &Theme) {
-    let home = dirs::home_dir().expect("Home dir not found");
-    let ghostty_dir = home.join(".config/ghostty");
-    let cache_file = home.join(".cache/iris/ghostty.conf");
+pub fn apply(theme: &Theme, ctx: &AppContext) -> Result<()> {
+    let home = dirs::home_dir().context("Home dir not found")?;
+    let ghostty_dir: PathBuf = home.join(".config/ghostty");
+    let cache_file: PathBuf = ctx.cache_path.join("ghostty.conf");
+    let link_path: PathBuf = ghostty_dir.join("current_theme.conf");
 
     let mut cfg = String::new();
     let fix = |v: &String| {
@@ -27,10 +29,24 @@ pub fn apply(theme: &Theme) {
         cfg.push_str(&format!("palette = {}={}\n", idx, fix(val)));
     }
 
-    fs::create_dir_all(cache_file.parent().unwrap()).ok();
-    fs::write(&cache_file, cfg).ok();
+    fs::create_dir_all(cache_file.parent().unwrap())?;
+    fs::write(&cache_file, cfg)
+        .with_context(|| format!("Failed to write ghostty cache to {:?}", cache_file))?;
 
-    let link = ghostty_dir.join("current_theme.conf");
-    let _ = fs::remove_file(&link);
-    let _ = std::os::unix::fs::symlink(&cache_file, &link);
+    if link_path.exists() || link_path.is_symlink() {
+        fs::remove_file(&link_path).ok();
+    }
+
+    if !ghostty_dir.exists() {
+        fs::create_dir_all(&ghostty_dir).ok();
+    }
+
+    symlink(&cache_file, &link_path).with_context(|| {
+        format!(
+            "Failed to create symlink {:?} -> {:?}",
+            link_path, cache_file
+        )
+    })?;
+
+    Ok(())
 }

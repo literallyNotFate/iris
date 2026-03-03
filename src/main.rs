@@ -1,29 +1,35 @@
+use anyhow::{Context as _, Result};
 use clap::Parser;
 use colored::*;
 use iris::{
     cli::{Cli, Commands},
-    config, generators, models, render,
+    context::AppContext,
+    generators,
+    models::Theme,
+    render,
+    setup::Setup,
 };
 use std::fs;
 
-fn main() {
-    let cli: Cli = Cli::parse();
+fn main() -> Result<()> {
+    let cli = Cli::parse();
+    let mut ctx: AppContext = AppContext::new()?;
 
     match &cli.command {
         Commands::Init => {
-            config::init_project();
+            println!("\n{}", " Initializing Iris ".on_blue().white().bold());
+            Setup::run(&ctx)?;
+            println!("{}", " Iris is ready to go!".green());
         }
 
         Commands::List => {
-            let state = config::get_state();
-            let themes_dir = config::get_base_path().join("themes");
-
             println!(
                 "\n{}",
                 " Available Themes ".on_bright_black().white().bold()
             );
 
-            if let Ok(entries) = fs::read_dir(themes_dir) {
+            let themes_dir = ctx.themes_dir();
+            if let Ok(entries) = fs::read_dir(&themes_dir) {
                 let mut entries: Vec<_> = entries.flatten().collect();
                 entries.sort_by_key(|e| e.file_name());
 
@@ -34,7 +40,8 @@ fn main() {
                         .unwrap()
                         .to_string_lossy()
                         .to_string();
-                    if name == state.current_theme {
+
+                    if name == ctx.state.current_theme {
                         println!(
                             "  {} {} {}",
                             "●".green(),
@@ -50,46 +57,34 @@ fn main() {
         }
 
         Commands::Switch { name } => {
-            let theme_path = config::get_base_path()
-                .join("themes")
-                .join(format!("{}.toml", name));
+            let theme = Theme::load_by_name(name, &ctx)
+                .with_context(|| format!("Failed to load theme '{}'", name))?;
 
-            if let Ok(content) = fs::read_to_string(theme_path) {
-                let theme: models::Theme = toml::from_str(&content).expect("Invalid TOML format");
-                let state = config::get_state();
+            generators::apply_all(&theme, &ctx)?;
+            ctx.update_theme(name)?;
+            render::display_palette(&theme);
 
-                generators::apply_enabled(&theme, &state.enabled_generators);
-
-                config::save_state(name);
-                render::display_palette(&theme);
-
-                println!(
-                    "{} Theme '{}' is now active across all enabled apps.",
-                    "Done!".bold().green(),
-                    name.yellow()
-                );
-            } else {
-                eprintln!(
-                    "{} Theme '{}' not found in themes folder.",
-                    "Error:".bold().red(),
-                    name
-                );
-            }
+            println!(
+                "{} Theme '{}' is now active.",
+                "Done!".bold().green(),
+                name.yellow()
+            );
         }
 
         Commands::Status => {
-            let state = config::get_state();
             println!("\n{}", " Iris Status ".on_cyan().black().bold());
-            println!("  Active theme: {}", state.current_theme.bold().cyan());
+            println!("  Active theme: {}", ctx.state.current_theme.bold().cyan());
             println!(
                 "  Enabled apps: {}",
-                state.enabled_generators.join(", ").yellow()
+                ctx.state.enabled_generators.join(", ").yellow()
             );
             println!(
                 "  Config path:  {}",
-                config::get_base_path().display().to_string().bright_black()
+                ctx.base_path.display().to_string().bright_black()
             );
             println!();
         }
     }
+
+    Ok(())
 }
