@@ -4,12 +4,10 @@ use colored::*;
 use iris::{
     cli::{Cli, Commands},
     context::AppContext,
-    generators,
-    models::Theme,
-    render,
+    models::Palette,
+    modules, render,
     setup::Setup,
 };
-use std::fs;
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
@@ -19,61 +17,32 @@ fn main() -> Result<()> {
         Commands::Init => {
             println!("\n{}", " Initializing Iris ".on_blue().white().bold());
             Setup::run(&ctx)?;
+
+            let theme: String = Palette::current()?;
+            let palette: Palette = Palette::fetch(&theme)?;
+
+            modules::apply_all(&palette, &ctx)?;
             println!("{}", " Iris is ready to go!".green());
         }
 
-        Commands::List => {
-            println!(
-                "\n{}",
-                " Available Themes ".on_bright_black().white().bold()
-            );
-
-            let themes_dir = ctx.themes_dir();
-            if let Ok(entries) = fs::read_dir(&themes_dir) {
-                let mut entries: Vec<_> = entries.flatten().collect();
-                entries.sort_by_key(|e| e.file_name());
-
-                for entry in entries {
-                    let name = entry
-                        .path()
-                        .file_stem()
-                        .unwrap()
-                        .to_string_lossy()
-                        .to_string();
-
-                    if name == ctx.state.current_theme {
-                        println!(
-                            "  {} {} {}",
-                            "●".green(),
-                            name.green().bold(),
-                            "(active)".bright_black()
-                        );
-                    } else {
-                        println!("  {} {}", "○".bright_black(), name.white());
-                    }
-                }
-            }
-            println!();
-        }
-
         Commands::Switch { name } => {
-            let theme = Theme::load_by_name(name, &ctx)
-                .with_context(|| format!("Failed to load theme '{}'", name))?;
+            let theme: String = match name {
+                Some(n) => n.clone(),
+                None => Palette::current()?,
+            };
 
-            generators::apply_all(&theme, &ctx)?;
-            ctx.update_theme(name)?;
-            render::display_palette(&theme);
+            let palette: Palette = Palette::fetch(&theme)
+                .with_context(|| format!("Failed to fetch colors for '{}'", theme))?;
 
-            println!(
-                "{} Theme '{}' is now active.",
-                "Done!".bold().green(),
-                name.yellow()
-            );
+            modules::apply_all(&palette, &ctx)?;
+            ctx.update(&theme)?;
         }
 
         Commands::Status => {
             println!("\n{}", " Iris Status ".on_cyan().black().bold());
-            println!("  Active theme: {}", ctx.state.current_theme.bold().cyan());
+            let current = &ctx.state.current_theme;
+
+            println!("  Active theme: {}", current.bold().cyan());
             println!(
                 "  Enabled apps: {}",
                 ctx.state.enabled_generators.join(", ").yellow()
@@ -82,7 +51,24 @@ fn main() -> Result<()> {
                 "  Config path:  {}",
                 ctx.base_path.display().to_string().bright_black()
             );
-            println!();
+
+            if let Ok(palette) = Palette::fetch(current) {
+                if let Ok(nvim_theme) = Palette::current() {
+                    if nvim_theme != *current {
+                        println!(
+                            "\n  {} {}",
+                            "⚠".yellow(),
+                            "Out of sync with active Neovim session".yellow()
+                        );
+                        println!("    Current in Nvim: {}", nvim_theme.bright_yellow());
+                        println!("    Run `iris switch` to sync.");
+                    }
+                }
+
+                render::display_palette(&palette, current);
+            } else {
+                println!("\n  {}", "✕ Could not load palette for preview".red());
+            }
         }
     }
 

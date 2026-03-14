@@ -2,7 +2,7 @@ use clap::{Parser, Subcommand};
 
 #[derive(Parser)]
 #[command(name = "iris")]
-#[command(about = "Simple theme switcher", long_about = None)]
+#[command(about = "CLI theme generator/switcher based on nvim colorcheme", long_about = None)]
 pub struct Cli {
     #[command(subcommand)]
     pub command: Commands,
@@ -10,12 +10,15 @@ pub struct Cli {
 
 #[derive(Subcommand)]
 pub enum Commands {
-    /// Initialize folders and default themes
+    /// Initialize folders, state and zsh hooks
     Init,
-    /// List available themes
-    List,
-    /// Switch to preset (theme)
-    Switch { name: String },
-    /// Show current status and selected theme
+
+    /// Switch to a theme (defaults to current Neovim theme if name is omitted)
+    Switch {
+        /// Name of the theme to apply
+        name: Option<String>,
+    },
+
+    /// Show current status, active theme and enabled apps
     Status,
 }
