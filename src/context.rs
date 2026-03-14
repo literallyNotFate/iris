@@ -33,7 +33,7 @@ impl AppContext {
     }
 
     /// Switch to specifc theme
-    pub fn update_theme(&mut self, name: &str) -> Result<()> {
+    pub fn update(&mut self, name: &str) -> Result<()> {
         self.state.set_theme(name);
 
         let json: String = self.state.to_json()?;
@@ -41,26 +41,6 @@ impl AppContext {
 
         fs::write(&path, json).with_context(|| format!("Failed to save state to {:?}", path))?;
         Ok(())
-    }
-
-    /// Get themes directory
-    pub fn themes_dir(&self) -> PathBuf {
-        self.base_path.join("themes")
-    }
-
-    /// Get path of theme by name
-    pub fn theme_path(&self, name: &str) -> PathBuf {
-        self.themes_dir().join(format!("{}.toml", name))
-    }
-
-    /// Get fzf cahe path
-    pub fn fzf_cache_path(&self) -> PathBuf {
-        self.cache_path.join("fzf.sh")
-    }
-
-    /// Get ghostty theme path
-    pub fn ghostty_theme_path(&self) -> PathBuf {
-        self.cache_path.join("ghostty_theme.conf")
     }
 
     /// Get base path (.config)

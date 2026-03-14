@@ -1,5 +1,5 @@
+pub mod palette;
 pub mod state;
-pub mod theme;
 
+pub use palette::Palette;
 pub use state::State;
-pub use theme::Theme;

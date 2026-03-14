@@ -48,8 +48,8 @@ impl State {
 impl Default for State {
     fn default() -> Self {
         Self {
-            current_theme: "melange".to_string(),
-            enabled_generators: vec!["ghostty".to_string(), "fzf".to_string()],
+            current_theme: String::new(),
+            enabled_generators: Vec::new(),
         }
     }
 }
