@@ -10,6 +10,7 @@ pub fn apply_all(palette: &Palette, ctx: &AppContext) -> Result<()> {
     for generator in &ctx.state.enabled_generators {
         match generator.as_str() {
             "ghostty" => ghostty::apply(palette, ctx)?,
+            "bat" => bat::apply(palette, ctx)?,
             "fzf" => fzf::apply(palette, ctx)?,
             _ => {}
         }
