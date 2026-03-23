@@ -1,24 +1,25 @@
 use crate::{
-    context::AppContext,
+    core::IrisContext,
     models::{Palette, State},
-    status::Status,
+    modules::ConfigGenerator,
+    utils::Status,
 };
 use anyhow::{Context as _, Result};
 use colored::Colorize;
 use std::{
     fs::{self, OpenOptions},
     io::Write,
-    path::PathBuf,
 };
 
-pub struct Setup;
+/// Struct for initializing state of application
+pub struct IrisSetup;
 
-impl Setup {
-    pub fn run(ctx: &AppContext) -> Result<()> {
+impl IrisSetup {
+    pub fn run(ctx: &IrisContext) -> Result<()> {
         println!("\n{}\n", "Starting Iris Initialization".bold().blue());
 
         let task = Status::step("Preparing infrastructure...", 0);
-        fs::create_dir_all(&ctx.cache_path).context("Failed to create cache directory for Iris")?;
+        ctx.paths.ensure_dirs()?;
         task.done(Some("Cache directory is ready."));
 
         let task = Status::step("Initializing application state...", 0);
@@ -26,16 +27,15 @@ impl Setup {
         task.done(Some("Application state initialized."));
 
         let task = Status::step("Integrating with shell...", 0);
-        Self::setup_zsh_hook()?;
+        Self::setup_zsh_hook(ctx)?;
         task.done(Some("Shell integration complete."));
 
         println!("\n{}", "Setup complete! Ready to sync.".green().bold());
         Ok(())
     }
 
-    fn setup_initial_state(ctx: &AppContext) -> Result<()> {
-        let path: PathBuf = ctx.base_path.join("state.json");
-        if path.exists() {
+    fn setup_initial_state(ctx: &IrisContext) -> Result<()> {
+        if ctx.paths.state_file.exists() {
             Status::success("Found existing state.json, skipping.", 1);
             return Ok(());
         }
@@ -49,32 +49,34 @@ impl Setup {
         )));
 
         let scan_task = Status::step("Scanning for installed tools...", 1);
-        let mut enabled = Vec::new();
-        let home: PathBuf = dirs::home_dir().context("Could not find home directory")?;
+        let available_generators: Vec<Box<dyn ConfigGenerator>> = vec![
+            Box::new(crate::modules::GhosttyGenerator),
+            Box::new(crate::modules::BatGenerator),
+            Box::new(crate::modules::FzfGenerator),
+        ];
 
-        if home.join(".config/ghostty").exists() && which::which("ghostty").is_ok() {
-            enabled.push("ghostty".to_string());
-            Status::success("Ghostty found", 2);
-        }
-
-        if home.join(".zshrc").exists() || home.join(".config/zsh").exists() {
-            enabled.push("fzf".to_string());
-            Status::success("fzf found", 2);
-        }
-
-        if which::which("bat").is_ok() {
-            enabled.push("bat".to_string());
-            Status::success("bat found", 2);
-        }
+        let enabled: Vec<String> = available_generators
+            .into_iter()
+            .filter(|g| {
+                if g.is_installed() {
+                    Status::success(&format!("Found {}", g.name()), 2);
+                    true
+                } else {
+                    false
+                }
+            })
+            .map(|g| g.name().to_string())
+            .collect();
 
         let initial_state: State = State::new(current_theme, enabled);
-        initial_state.save_to(&path)?;
+        let json = initial_state.to_json()?;
+        std::fs::write(&ctx.paths.state_file, json)?;
 
         scan_task.done(Some("Scanning complete and state.json created."));
         Ok(())
     }
 
-    pub fn setup_zsh_hook() -> Result<()> {
+    pub fn setup_zsh_hook(ctx: &IrisContext) -> Result<()> {
         let home = dirs::home_dir().context("Home dir not found")?;
         let zshrc = home.join(".zshrc");
 
@@ -91,7 +93,7 @@ impl Setup {
             return Ok(());
         }
 
-        let cache_file_path = home.join(".cache/iris/fzf.sh");
+        let cache_file = ctx.paths.cache.join("fzf.sh");
         let task = Status::step("Injecting Zsh hook...", 1);
 
         let hook: String = format!(
@@ -111,7 +113,7 @@ _iris_fzf_sync() {{
 add-zsh-hook precmd _iris_fzf_sync
 # ---------------------
 "#,
-            cache_file_path.display()
+            cache_file.display()
         );
 
         let full_hook: String = format!("\n{}\n", hook);

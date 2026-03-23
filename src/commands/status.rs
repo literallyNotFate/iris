@@ -1,8 +1,51 @@
-use crate::models::palette::Palette;
+use crate::{
+    core::IrisContext,
+    models::Palette,
+    utils::{CustomColor, hex_to_rgb},
+};
+use anyhow::Result;
 use colored::*;
 
+/// Handle application status command
+pub fn exec(ctx: &IrisContext) -> Result<()> {
+    println!("\n{}\n", "Iris System Status".purple());
+    let current = &ctx.state.current_theme;
+
+    println!("  {} Active theme: {}", "●".blue(), current.bold().blue());
+    println!(
+        "  {} Enabled apps: {}",
+        "●".yellow(),
+        ctx.state.enabled_generators.join(", ").white()
+    );
+    println!(
+        "  {} Config path:  {}",
+        "●".white(),
+        ctx.paths.config.display().to_string().bright_black()
+    );
+
+    if let Ok(nvim_theme) = Palette::current() {
+        if nvim_theme.to_lowercase() != current.to_lowercase() {
+            println!(
+                "\n  {} {}",
+                "⚠".yellow(),
+                "Out of sync with Neovim".yellow().bold()
+            );
+            println!("    Neovim: {}", nvim_theme.bright_yellow());
+            println!("    Iris:   {}", current.dimmed());
+        } else {
+            println!("\n  {} {}", "✔".green(), "Synchronized with Neovim".green());
+        }
+    }
+
+    if let Ok(palette) = Palette::fetch(current) {
+        display_palette(&palette, current);
+    }
+
+    Ok(())
+}
+
 /// Display current theme colors
-pub fn display_palette(p: &Palette, name: &str) {
+fn display_palette(p: &Palette, name: &str) {
     println!("\n  {} {}\n", "   Theme:".bold(), name.red().bold());
 
     let syntax_labels = [
@@ -52,6 +95,7 @@ pub fn display_palette(p: &Palette, name: &str) {
     );
 }
 
+/// Helper function to print row
 fn print_row(left: (&str, &String), right: (&str, &String), p: &Palette) {
     let format_col = |label: &str, hex: &str| {
         let (r, g, b) = hex_to_rgb(hex);
@@ -75,35 +119,4 @@ fn print_row(left: (&str, &String), right: (&str, &String), p: &Palette) {
         format_col(left.0, left.1),
         format_col(right.0, right.1)
     );
-}
-
-/// Helper trait for colored to be able to work with hex
-trait CustomColor {
-    fn on_color_code(&self, hex: &str) -> ColoredString;
-    fn color_code_fg(&self, hex: &str) -> ColoredString;
-}
-
-impl CustomColor for str {
-    fn on_color_code(&self, hex: &str) -> ColoredString {
-        let (r, g, b) = hex_to_rgb(hex);
-        self.on_truecolor(r, g, b)
-    }
-
-    fn color_code_fg(&self, hex: &str) -> ColoredString {
-        let (r, g, b) = hex_to_rgb(hex);
-        self.truecolor(r, g, b)
-    }
-}
-
-/// Helper function to convert hex to rgb
-fn hex_to_rgb(hex: &str) -> (u8, u8, u8) {
-    let hex = hex.trim_start_matches('#');
-    if hex.len() != 6 {
-        return (128, 128, 128);
-    }
-
-    let r = u8::from_str_radix(&hex[0..2], 16).unwrap_or(0);
-    let g = u8::from_str_radix(&hex[2..4], 16).unwrap_or(0);
-    let b = u8::from_str_radix(&hex[4..6], 16).unwrap_or(0);
-    (r, g, b)
 }

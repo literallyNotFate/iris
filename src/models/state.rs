@@ -17,6 +17,16 @@ impl State {
         }
     }
 
+    /// Casting to string (serialization) with anyhow error handling
+    pub fn to_json(&self) -> Result<String> {
+        serde_json::to_string_pretty(self).context("Failed to serialize UI state to JSON")
+    }
+
+    /// Set current theme to specific one
+    pub fn set_theme(&mut self, name: &str) {
+        self.current_theme = name.to_string();
+    }
+
     /// Load state from file
     pub fn load_from(path: &PathBuf) -> Result<Self> {
         if !path.exists() {
@@ -29,25 +39,5 @@ impl State {
             serde_json::from_str(&content).with_context(|| "Failed to parse state.json")?;
 
         Ok(state)
-    }
-
-    /// Save current UIState to file
-    pub fn save_to(&self, path: &PathBuf) -> Result<()> {
-        let json: String =
-            serde_json::to_string_pretty(self).with_context(|| "Failed to serialize UI state")?;
-
-        std::fs::write(path, json)
-            .with_context(|| format!("Failed to write state to {:?}", path))?;
-        Ok(())
-    }
-
-    /// Set current theme to specific one
-    pub fn set_theme(&mut self, name: &str) {
-        self.current_theme = name.to_string();
-    }
-
-    /// Casting to string (serialization) with anyhow error handling
-    pub fn to_json(&self) -> Result<String> {
-        serde_json::to_string_pretty(self).context("Failed to serialize UI state to JSON")
     }
 }

@@ -1,4 +1,4 @@
-use crate::status::Status;
+use crate::utils::Status;
 use anyhow::{Context, Result};
 use colored::Colorize;
 use serde::{Deserialize, Serialize};
