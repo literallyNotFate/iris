@@ -9,7 +9,7 @@ use colored::Colorize;
 /// Apply themes to available programs (enabled generators)
 pub fn apply_all(palette: &Palette, ctx: &AppContext) -> Result<()> {
     println!();
-    Status::step(
+    let total_task = Status::step(
         &format!(
             "Applying palette to {} targets...",
             ctx.state.enabled_generators.len()
@@ -19,26 +19,27 @@ pub fn apply_all(palette: &Palette, ctx: &AppContext) -> Result<()> {
 
     for generator in &ctx.state.enabled_generators {
         let name = generator.as_str();
-        Status::step(&format!("Configuring {}...", name.cyan()), 1);
+        let app_task = Status::step(&format!("Configuring {}...", name.cyan()), 1);
 
         let result = match name {
             "ghostty" => ghostty::apply(palette, ctx),
             "bat" => bat::apply(palette, ctx),
             "fzf" => fzf::apply(palette, ctx),
             _ => {
-                Status::error(&format!("Unknown generator: {}", name), 1);
+                app_task.fail(&format!("Unknown generator: {}", name));
                 continue;
             }
         };
 
         match result {
-            Ok(_) => Status::success(&format!("{} is ready!", name.cyan()), 1),
+            Ok(_) => app_task.done(Some(&format!("{} is ready!", name.cyan()))),
             Err(e) => {
-                Status::error(&format!("Failed to configure {}: {}", name.red(), e), 1);
+                app_task.fail(&format!("{}", e));
                 return Err(e);
             }
         }
     }
 
+    total_task.done(Some("All targets updated successfully."));
     Ok(())
 }

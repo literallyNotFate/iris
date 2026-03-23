@@ -17,15 +17,17 @@ impl Setup {
     pub fn run(ctx: &AppContext) -> Result<()> {
         println!("\n{}\n", "Starting Iris Initialization".bold().blue());
 
-        Status::step("Preparing infrastructure...", 0);
+        let task = Status::step("Preparing infrastructure...", 0);
         fs::create_dir_all(&ctx.cache_path).context("Failed to create cache directory for Iris")?;
-        Status::success("Cache directory is ready.", 1);
+        task.done(Some("Cache directory is ready."));
 
-        Status::step("Initializing application state...", 0);
+        let task = Status::step("Initializing application state...", 0);
         Self::setup_initial_state(ctx)?;
+        task.done(Some("Application state initialized."));
 
-        Status::step("Integrating with shell...", 0);
+        let task = Status::step("Integrating with shell...", 0);
         Self::setup_zsh_hook()?;
+        task.done(Some("Shell integration complete."));
 
         println!("\n{}", "Setup complete! Ready to sync.".green().bold());
         Ok(())
@@ -38,37 +40,37 @@ impl Setup {
             return Ok(());
         }
 
-        Status::step("Detecting active Neovim theme...", 1);
+        let task = Status::step("Detecting active Neovim theme...", 1);
         let current_theme = Palette::current()
             .context("Neovim theme not detected. Please set a colorscheme in Neovim first.")?;
-        Status::success(
-            &format!("Detected theme: {}", current_theme.bold().cyan()),
-            1,
-        );
+        task.done(Some(&format!(
+            "Detected theme: {}",
+            current_theme.bold().cyan()
+        )));
 
-        Status::step("Scanning for installed tools...", 1);
+        let scan_task = Status::step("Scanning for installed tools...", 1);
         let mut enabled = Vec::new();
         let home: PathBuf = dirs::home_dir().context("Could not find home directory")?;
 
         if home.join(".config/ghostty").exists() && which::which("ghostty").is_ok() {
             enabled.push("ghostty".to_string());
-            Status::success("Ghostty found", 1);
+            Status::success("Ghostty found", 2);
         }
 
         if home.join(".zshrc").exists() || home.join(".config/zsh").exists() {
             enabled.push("fzf".to_string());
-            Status::success("fzf found", 1);
+            Status::success("fzf found", 2);
         }
 
         if which::which("bat").is_ok() {
             enabled.push("bat".to_string());
-            Status::success("bat found", 1);
+            Status::success("bat found", 2);
         }
 
         let initial_state: State = State::new(current_theme, enabled);
         initial_state.save_to(&path)?;
 
-        Status::success("Initial state.json created.", 1);
+        scan_task.done(Some("Scanning complete and state.json created."));
         Ok(())
     }
 
@@ -90,6 +92,7 @@ impl Setup {
         }
 
         let cache_file_path = home.join(".cache/iris/fzf.sh");
+        let task = Status::step("Injecting Zsh hook...", 1);
 
         let hook: String = format!(
             r#"
@@ -116,7 +119,7 @@ add-zsh-hook precmd _iris_fzf_sync
         let mut file = OpenOptions::new().append(true).open(&zshrc)?;
         writeln!(file, "{}", full_hook)?;
 
-        Status::success("Zsh hook successfully injected into .zshrc.", 1);
+        task.done(Some("Zsh hook successfully injected into .zshrc."));
         Ok(())
     }
 }

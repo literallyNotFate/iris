@@ -3,48 +3,77 @@ use colored::*;
 
 /// Display current theme colors
 pub fn display_palette(p: &Palette, name: &str) {
-    println!("\n{}", format!("   Theme: {}  ", name).red().bold());
+    println!("\n  {} {}\n", "   Theme:".bold(), name.red().bold());
 
-    let section = |title: &str| println!("\n  {}", title.color_code_fg(&p.comment).bold());
-
-    section("Core Palette");
-    print_color("Background", &p.bg, p);
-    print_color("Foreground", &p.fg, p);
-    print_color("Selection ", &p.sel, p);
-    print_color("Caret     ", &p.caret, p);
-
-    section("Syntax Highlights");
-    let syntax = [
+    let syntax_labels = [
         ("Keyword ", &p.keyword),
         ("Function", &p.func),
         ("String  ", &p.string),
         ("Constant", &p.constant),
-        ("Comment ", &p.comment),
+        ("Variable", &p.variable),
     ];
 
-    for (label, color) in syntax {
-        print_color(label, color, p);
+    let core_labels = [
+        ("Background", &p.bg),
+        ("Foreground", &p.fg),
+        ("Selection ", &p.sel),
+        ("Caret     ", &p.caret),
+        ("Gutter    ", &p.gutter_fg),
+    ];
+
+    for i in 0..5 {
+        print_row(core_labels[i], syntax_labels[i], p);
     }
 
-    section("Terminal Colors");
-    print!("  ");
-    for (i, color) in p.ansi.iter().enumerate() {
-        print!("{}", "  ".on_color_code(color));
-        if i == 7 {
-            print!("\n  ");
+    println!("\n  {}", "Terminal Colors".bold().color_code_fg(&p.comment));
+
+    for row in 0..2 {
+        print!("  ");
+        for col in 0..8 {
+            let idx = row * 8 + col;
+            let color = &p.ansi[idx];
+            let label = format!(" {:02} ", idx);
+            print!("{}", label.on_color_code(color).black());
         }
+        println!();
     }
-    println!("\n");
-}
-
-fn print_color(label: &str, hex: &str, p: &Palette) {
-    let block = "    ".on_color_code(hex);
 
     println!(
-        "  {} {} {}",
-        label.color_code_fg(&p.fg),
-        block,
-        hex.color_code_fg(&p.comment)
+        "\n  {}",
+        "Sample Text Preview:".bold().color_code_fg(&p.comment)
+    );
+    println!(
+        "  {} {} {} {} {}",
+        "fn".color_code_fg(&p.keyword),
+        "main".color_code_fg(&p.func),
+        "() {".color_code_fg(&p.fg),
+        "\"Hello World\"".color_code_fg(&p.string),
+        "};".color_code_fg(&p.fg)
+    );
+}
+
+fn print_row(left: (&str, &String), right: (&str, &String), p: &Palette) {
+    let format_col = |label: &str, hex: &str| {
+        let (r, g, b) = hex_to_rgb(hex);
+        let rgb_str = format!("({},{},{})", r, g, b);
+        let block = "  ".on_color_code(hex);
+
+        // {:<12} - for label (Background, Function etc.)
+        // {:<9}  - for hex
+        // {:<15} - for rgb tuple
+        format!(
+            "{:<12} {}  {:<9} {:<15}",
+            label.color_code_fg(&p.fg),
+            block,
+            hex.color_code_fg(&p.comment),
+            rgb_str.bright_black()
+        )
+    };
+
+    println!(
+        "  {} │ {}",
+        format_col(left.0, left.1),
+        format_col(right.0, right.1)
     );
 }
 

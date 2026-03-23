@@ -36,10 +36,19 @@ impl AppContext {
     pub fn update(&mut self, name: &str) -> Result<()> {
         self.state.set_theme(name);
 
-        let json: String = self.state.to_json()?;
-        let path: PathBuf = self.base_path.join("state.json");
+        let json = self.state.to_json()?;
+        let state_path = self.base_path.join("state.json");
 
-        fs::write(&path, json).with_context(|| format!("Failed to save state to {:?}", path))?;
+        fs::create_dir_all(&self.base_path)?;
+        fs::write(&state_path, json)
+            .with_context(|| format!("Failed to save state to {:?}", state_path))?;
+
+        let theme_cache_path = self.cache_path.join("current_theme");
+
+        fs::create_dir_all(&self.cache_path)?;
+        fs::write(&theme_cache_path, name)
+            .with_context(|| format!("Failed to update theme cache at {:?}", theme_cache_path))?;
+
         Ok(())
     }
 

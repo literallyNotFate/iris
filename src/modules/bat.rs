@@ -7,6 +7,7 @@ pub fn apply(palette: &Palette, ctx: &AppContext) -> Result<()> {
     let iris_bat_dir = ctx.cache_path.join("bat_themes");
     fs::create_dir_all(&iris_bat_dir)?;
 
+    let config_task = Status::step("Locating bat configuration...", 2);
     let bat_config_dir = Command::new("bat")
         .arg("--config-dir")
         .output()
@@ -17,15 +18,16 @@ pub fn apply(palette: &Palette, ctx: &AppContext) -> Result<()> {
     let link_path = bat_themes_dir.join("iris_themes");
 
     if !bat_themes_dir.exists() {
-        Status::step("Creating bat themes directory...", 2);
         fs::create_dir_all(&bat_themes_dir)?;
     }
+    config_task.done(Some("Bat configuration directory located!"));
 
     if !link_path.exists() {
         #[cfg(unix)]
         {
-            Status::step("Linking iris themes to bat...", 2);
+            let link_task = Status::step("Linking iris themes to bat...", 2);
             std::os::unix::fs::symlink(&iris_bat_dir, &link_path)?;
+            link_task.done(Some("Symlink created."));
         }
     }
 
@@ -61,16 +63,19 @@ pub fn apply(palette: &Palette, ctx: &AppContext) -> Result<()> {
     );
     std::fs::write(config_file, bat_config).context("Failed to write bat.conf")?;
 
-    Status::step("Rebuilding bat cache...", 2);
+    let cache_task = Status::step("Rebuilding bat cache...", 2);
     let output = std::process::Command::new("bat")
         .arg("cache")
         .arg("--build")
         .output()?;
 
     if output.status.success() {
-        Status::success("Bat cache updated.", 2);
+        cache_task.done(Some("Bat cache updated."));
     } else {
-        Status::error("Failed to rebuild bat cache.", 2);
+        let err = String::from_utf8_lossy(&output.stderr);
+        cache_task.fail(&err);
+        anyhow::bail!("Bat cache build failed");
     }
+
     Ok(())
 }

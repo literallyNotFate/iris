@@ -59,8 +59,11 @@ impl Palette {
 
     /// Fetch palette from nvim using lua script
     pub fn fetch(theme: &str) -> Result<Self> {
-        Status::step(
-            &format!("Fetching colors from Neovim using theme: {}", theme.bold()),
+        let sync_task = Status::step(
+            &format!(
+                "Fetching colors from Neovim using theme: {}",
+                theme.bold().cyan()
+            ),
             1,
         );
 
@@ -103,7 +106,7 @@ impl Palette {
                 io.write(vim.fn.json_encode(res))
             "##;
 
-        Status::step("Executing Lua bridge in headless mode...", 2);
+        let nvim_task = Status::step("Executing Lua bridge in headless mode...", 2);
 
         let output = Command::new("nvim")
             .args([
@@ -122,11 +125,13 @@ impl Palette {
             .output()?;
 
         if !output.status.success() {
-            Status::error("Neovim failed to provide theme data.", 2);
             let error_msg = String::from_utf8_lossy(&output.stderr);
-            anyhow::bail!("Neovim failed with: {}", error_msg.red());
+            nvim_task.fail("Neovim failed to provide theme data");
+            sync_task.fail("Synchronization failed");
+            anyhow::bail!("Neovim error: {}", error_msg.red());
         }
 
+        nvim_task.done(Some("Lua bridge executed successfully."));
         let stdout = String::from_utf8_lossy(&output.stdout);
 
         let json_start = stdout.find('{').context("Nvim did not return JSON")?;
@@ -135,7 +140,33 @@ impl Palette {
         let palette: Palette = serde_json::from_str(&stdout[json_start..json_end])
             .context("Failed to parse palette JSON")?;
 
-        Status::success("Palette successfully synchronized with Neovim.", 1);
+        sync_task.done(Some("Palette successfully synchronized with Neovim."));
         Ok(palette)
+    }
+
+    /// Checks whether this theme exists in nvim colorscheme
+    pub fn exists(theme: &str) -> bool {
+        let init_plugins = "lua vim.opt.rtp:append(vim.fn.stdpath('data') .. '/lazy/*')";
+        let check_cmd = format!(
+            "try | colorscheme {} | qa! | catch | cquit 1 | endtry",
+            theme.to_lowercase()
+        );
+
+        let output = std::process::Command::new("nvim")
+            .args([
+                "--headless",
+                "-u",
+                "NONE",
+                "-c",
+                init_plugins,
+                "-c",
+                &check_cmd,
+            ])
+            .output();
+
+        match output {
+            Ok(o) => o.status.success(),
+            Err(_) => false,
+        }
     }
 }

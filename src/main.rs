@@ -19,12 +19,14 @@ fn main() -> Result<()> {
             Setup::run(&ctx)?;
 
             println!();
-            Status::step("Performing initial sync...", 0);
+            let sync_task = Status::step("Performing initial sync...", 0);
 
             let theme: String = Palette::current()?;
             let palette: Palette = Palette::fetch(&theme)?;
 
             modules::apply_all(&palette, &ctx)?;
+
+            sync_task.done(Some("Initial sync complete."));
             println!(
                 "\n{}",
                 " Iris is now fully configured and ready to go!"
@@ -34,28 +36,47 @@ fn main() -> Result<()> {
         }
 
         Commands::Switch { name } => {
-            let theme: String = match name {
-                Some(n) => n.clone(),
+            let (theme, is_manual) = match name {
+                Some(n) => (n.clone(), true),
                 None => {
-                    Status::step("Detecting theme from Neovim...", 0);
-                    Palette::current()?
+                    let task = Status::step("Detecting theme from Neovim...", 0);
+                    let t = Palette::current()?;
+                    task.done(Some("Name not specified, returning last used"));
+                    (t, false)
                 }
             };
+
+            if is_manual && !Palette::exists(&theme) {
+                Status::error(
+                    &format!("Theme '{}' not found in Neovim.", theme.red().bold()),
+                    0,
+                );
+                println!(
+                    "  {} Run `:colorscheme <Tab>` in Neovim to see available themes.",
+                    "Tip:".blue()
+                );
+                return Ok(());
+            }
 
             println!(
                 "\n{}\n",
                 format!("Switching to {}...", theme).bold().yellow()
             );
+            let switch_task = Status::step(&format!("Applying {} palette...", theme.cyan()), 0);
             let palette: Palette = Palette::fetch(&theme)
                 .with_context(|| format!("Failed to fetch colors for '{}'", theme))?;
 
             modules::apply_all(&palette, &ctx)?;
 
-            Status::step("Updating local state...", 1);
+            let state_task = Status::step("Updating local state...", 1);
             ctx.update(&theme)?;
+            state_task.done(Some("Local state updated!"));
 
             println!();
-            Status::success(&format!("Theme {} applied to all apps.", theme.cyan()), 0);
+            switch_task.done(Some(&format!(
+                "Theme {} applied to all apps.",
+                theme.cyan()
+            )));
         }
 
         Commands::Status => {
