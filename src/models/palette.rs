@@ -1,3 +1,4 @@
+use crate::status::Status;
 use anyhow::{Context, Result};
 use colored::Colorize;
 use serde::{Deserialize, Serialize};
@@ -39,6 +40,7 @@ impl Palette {
 
             let trimmed: &str = name.trim();
             if trimmed.is_empty() {
+                Status::error("Theme cache file is empty.", 1);
                 anyhow::bail!("Theme cache is empty");
             }
 
@@ -46,6 +48,7 @@ impl Palette {
             return Ok(capitalized);
         }
 
+        Status::error("No active theme found in cache.", 1);
         anyhow::bail!(
             "No active theme detected.\n\
              {} Make sure to switch theme in Neovim (e.g, :colorscheme <theme>) \n\
@@ -56,6 +59,11 @@ impl Palette {
 
     /// Fetch palette from nvim using lua script
     pub fn fetch(theme: &str) -> Result<Self> {
+        Status::step(
+            &format!("Fetching colors from Neovim using theme: {}", theme.bold()),
+            1,
+        );
+
         let lua_script = r##"
                 local function g(name, attr)
                     local hl = vim.api.nvim_get_hl(0, { name = name, link = true })
@@ -95,6 +103,8 @@ impl Palette {
                 io.write(vim.fn.json_encode(res))
             "##;
 
+        Status::step("Executing Lua bridge in headless mode...", 2);
+
         let output = Command::new("nvim")
             .args([
                 "--headless",
@@ -112,6 +122,7 @@ impl Palette {
             .output()?;
 
         if !output.status.success() {
+            Status::error("Neovim failed to provide theme data.", 2);
             let error_msg = String::from_utf8_lossy(&output.stderr);
             anyhow::bail!("Neovim failed with: {}", error_msg.red());
         }
@@ -124,6 +135,7 @@ impl Palette {
         let palette: Palette = serde_json::from_str(&stdout[json_start..json_end])
             .context("Failed to parse palette JSON")?;
 
+        Status::success("Palette successfully synchronized with Neovim.", 1);
         Ok(palette)
     }
 }

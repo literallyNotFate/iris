@@ -3,13 +3,20 @@ pub use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
 /// UI State of app which is being saved
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Default, Serialize, Deserialize, Debug)]
 pub struct State {
     pub current_theme: String,
     pub enabled_generators: Vec<String>,
 }
 
 impl State {
+    pub fn new(current_theme: String, enabled_generators: Vec<String>) -> Self {
+        Self {
+            current_theme,
+            enabled_generators,
+        }
+    }
+
     /// Load state from file
     pub fn load_from(path: &PathBuf) -> Result<Self> {
         if !path.exists() {
@@ -42,14 +49,5 @@ impl State {
     /// Casting to string (serialization) with anyhow error handling
     pub fn to_json(&self) -> Result<String> {
         serde_json::to_string_pretty(self).context("Failed to serialize UI state to JSON")
-    }
-}
-
-impl Default for State {
-    fn default() -> Self {
-        Self {
-            current_theme: String::new(),
-            enabled_generators: Vec::new(),
-        }
     }
 }

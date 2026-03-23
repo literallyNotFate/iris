@@ -1,4 +1,4 @@
-use crate::{context::AppContext, models::Palette};
+use crate::{context::AppContext, models::Palette, status::Status};
 use anyhow::{Context, Result};
 use std::{fs, path::PathBuf, process::Command};
 
@@ -17,12 +17,16 @@ pub fn apply(palette: &Palette, ctx: &AppContext) -> Result<()> {
     let link_path = bat_themes_dir.join("iris_themes");
 
     if !bat_themes_dir.exists() {
+        Status::step("Creating bat themes directory...", 2);
         fs::create_dir_all(&bat_themes_dir)?;
     }
 
     if !link_path.exists() {
         #[cfg(unix)]
-        std::os::unix::fs::symlink(&iris_bat_dir, &link_path)?;
+        {
+            Status::step("Linking iris themes to bat...", 2);
+            std::os::unix::fs::symlink(&iris_bat_dir, &link_path)?;
+        }
     }
 
     let theme_name = &ctx.state.current_theme;
@@ -57,10 +61,16 @@ pub fn apply(palette: &Palette, ctx: &AppContext) -> Result<()> {
     );
     std::fs::write(config_file, bat_config).context("Failed to write bat.conf")?;
 
-    let _ = std::process::Command::new("bat")
+    Status::step("Rebuilding bat cache...", 2);
+    let output = std::process::Command::new("bat")
         .arg("cache")
         .arg("--build")
-        .output();
+        .output()?;
 
+    if output.status.success() {
+        Status::success("Bat cache updated.", 2);
+    } else {
+        Status::error("Failed to rebuild bat cache.", 2);
+    }
     Ok(())
 }
