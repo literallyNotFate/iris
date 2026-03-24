@@ -1,5 +1,6 @@
-use crate::{core::IrisContext, models::Palette, modules::ConfigGenerator};
+use crate::{core::IrisContext, models::Palette, modules::ConfigGenerator, utils::Status};
 use anyhow::{Context, Result};
+use colored::Colorize;
 
 /// Config generator for fzf utility
 pub struct FzfGenerator;
@@ -15,6 +16,8 @@ impl ConfigGenerator for FzfGenerator {
     }
 
     fn apply(&self, p: &Palette, ctx: &IrisContext) -> Result<()> {
+        let task = Status::step(&format!("Configuring {}...", self.name().cyan()), 2);
+
         let cache_file = ctx.paths.cache.join("fzf.sh");
         let fzf_colors: String = self.build_config(p);
 
@@ -25,8 +28,15 @@ impl ConfigGenerator for FzfGenerator {
             colors = fzf_colors
         );
 
+        task.info(&format!("Generating script in: {}", cache_file.display()));
+
         std::fs::write(&cache_file, content)
             .with_context(|| format!("Failed to write FZF config to {:?}", cache_file))?;
+
+        #[cfg(unix)]
+        task.info("Fzf colors exported to shell script.");
+
+        task.done(Some("Fzf is ready to source."));
         Ok(())
     }
 }

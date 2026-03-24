@@ -1,5 +1,6 @@
 use crate::{core::IrisContext, models::Palette, modules::ConfigGenerator, utils::Status};
 use anyhow::{Context, Result};
+use colored::Colorize;
 use std::{fs, path::PathBuf, process::Command};
 
 /// Config generator for bat
@@ -14,7 +15,9 @@ impl ConfigGenerator for BatGenerator {
         let iris_bat_dir = ctx.paths.cache.join("bat_themes");
         fs::create_dir_all(&iris_bat_dir)?;
 
-        let config_task = Status::step("Locating bat configuration...", 2);
+        let config_task = Status::step(&format!("Configuring {}...", self.name().cyan()), 2);
+        config_task.info("Fetching bat configuration directory...");
+
         let bat_config_dir = Command::new("bat")
             .arg("--config-dir")
             .output()
@@ -23,20 +26,21 @@ impl ConfigGenerator for BatGenerator {
 
         let bat_themes_dir = bat_config_dir.join("themes");
         let link_path = bat_themes_dir.join("iris_themes");
+        config_task.info(&format!("Config found at: {}", bat_config_dir.display()));
 
         if !bat_themes_dir.exists() {
             fs::create_dir_all(&bat_themes_dir)?;
         }
-        config_task.done(Some("Bat configuration directory located!"));
 
         if !link_path.exists() {
             #[cfg(unix)]
             {
-                let link_task = Status::step("Linking iris themes to bat...", 2);
+                config_task.info("Creating symlink for iris themes...");
                 std::os::unix::fs::symlink(&iris_bat_dir, &link_path)?;
-                link_task.done(Some("Symlink created."));
             }
         }
+
+        config_task.done(Some("Bat configuration environment ready."));
 
         let theme_name = &ctx.state.current_theme;
         let theme_dir = ctx.paths.cache.join("bat_themes");
@@ -77,7 +81,7 @@ impl ConfigGenerator for BatGenerator {
             .output()?;
 
         if output.status.success() {
-            cache_task.done(Some("Bat cache updated."));
+            cache_task.done(Some(&format!("{} cache updated.", self.name().cyan())));
         } else {
             let err = String::from_utf8_lossy(&output.stderr);
             cache_task.fail(&err);

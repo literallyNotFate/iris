@@ -8,7 +8,6 @@ pub use ghostty::GhosttyGenerator;
 
 use crate::{core::IrisContext, models::Palette, utils::Status};
 use anyhow::Result;
-use colored::Colorize;
 
 /// Main trait for all generators
 pub trait ConfigGenerator {
@@ -33,14 +32,9 @@ pub fn apply_all(palette: &Palette, ctx: &IrisContext) -> Result<()> {
     );
 
     for generator in &ctx.generators {
-        let app_task = Status::step(&format!("Configuring {}...", generator.name().cyan()), 1);
-        match generator.apply(palette, ctx) {
-            Ok(_) => app_task.done(Some(&format!("{} is ready!", generator.name().cyan()))),
-            Err(e) => {
-                app_task.fail(&format!("Failed to configure {}: {}", generator.name(), e));
-
-                return Err(e);
-            }
+        if let Err(e) = generator.apply(palette, ctx) {
+            total_task.fail(&format!("Failed at {}: {}", generator.name(), e));
+            return Err(e);
         }
     }
 

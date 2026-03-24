@@ -1,7 +1,6 @@
-use crate::{core::IrisContext, models::Palette, modules::ConfigGenerator};
+use crate::{core::IrisContext, models::Palette, modules::ConfigGenerator, utils::Status};
 use anyhow::{Context, Result};
-#[cfg(unix)]
-use std::os::unix::fs::symlink;
+use colored::Colorize;
 
 /// Config generator for ghostty terminal
 pub struct GhosttyGenerator;
@@ -12,6 +11,8 @@ impl ConfigGenerator for GhosttyGenerator {
     }
 
     fn apply(&self, p: &Palette, ctx: &IrisContext) -> Result<()> {
+        let task = Status::step(&format!("Configuring {}...", self.name().cyan()), 2);
+
         let ghostty_dir = ctx.paths.config.join("ghostty");
         let cache_file = ctx.paths.cache.join("ghostty.conf");
         let link_path = ghostty_dir.join("current_theme.conf");
@@ -21,8 +22,10 @@ impl ConfigGenerator for GhosttyGenerator {
         std::fs::create_dir_all(&ctx.paths.cache).context("Failed to create cache directory")?;
         std::fs::write(&cache_file, config_content)
             .with_context(|| format!("Failed to write ghostty cache to {:?}", cache_file))?;
+        task.info("Theme file generated in cache.");
 
         if !ghostty_dir.exists() {
+            Status::warn("Ghostty config directory not found. Creating it...", 3);
             std::fs::create_dir_all(&ghostty_dir).ok();
         }
 
@@ -31,13 +34,18 @@ impl ConfigGenerator for GhosttyGenerator {
         }
 
         #[cfg(unix)]
-        symlink(&cache_file, &link_path).with_context(|| {
-            format!(
-                "Failed to create symlink {:?} -> {:?}",
-                link_path, cache_file
-            )
-        })?;
+        {
+            use std::os::unix::fs::symlink;
+            task.info("Linking cache to Ghostty config...");
+            symlink(&cache_file, &link_path).with_context(|| {
+                format!(
+                    "Failed to create symlink {:?} -> {:?}",
+                    link_path, cache_file
+                )
+            })?;
+        }
 
+        task.done(Some(&format!("{} sync complete.", self.name().cyan())));
         Ok(())
     }
 }

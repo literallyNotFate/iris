@@ -2,7 +2,7 @@ use crate::{
     core::IrisContext,
     models::{Palette, State},
     modules::ConfigGenerator,
-    utils::Status,
+    utils::{Status, Task},
 };
 use anyhow::{Context as _, Result};
 use colored::Colorize;
@@ -20,35 +20,32 @@ impl IrisSetup {
 
         let task = Status::step("Preparing infrastructure...", 0);
         ctx.paths.ensure_dirs()?;
-        task.done(Some("Cache directory is ready."));
+        task.info(&format!("Data directory: {}", ctx.paths.config.display()));
+        task.done(Some("File system is ready."));
 
         let task = Status::step("Initializing application state...", 0);
-        Self::setup_initial_state(ctx)?;
+        Self::setup_initial_state(ctx, &task)?;
         task.done(Some("Application state initialized."));
 
         let task = Status::step("Integrating with shell...", 0);
-        Self::setup_zsh_hook(ctx)?;
+        Self::setup_zsh_hook(ctx, &task)?;
         task.done(Some("Shell integration complete."));
 
         println!("\n{}", "Setup complete! Ready to sync.".green().bold());
         Ok(())
     }
 
-    fn setup_initial_state(ctx: &IrisContext) -> Result<()> {
+    fn setup_initial_state(ctx: &IrisContext, parent_task: &Task) -> Result<()> {
         if ctx.paths.state_file.exists() {
-            Status::success("Found existing state.json, skipping.", 1);
+            parent_task.info("Found existing state.json, loading defaults.");
             return Ok(());
         }
 
-        let task = Status::step("Detecting active Neovim theme...", 1);
+        parent_task.info("Detecting active Neovim theme...");
         let current_theme = Palette::current()
             .context("Neovim theme not detected. Please set a colorscheme in Neovim first.")?;
-        task.done(Some(&format!(
-            "Detected theme: {}",
-            current_theme.bold().cyan()
-        )));
 
-        let scan_task = Status::step("Scanning for installed tools...", 1);
+        parent_task.info("Scanning for compatible tools...");
         let available_generators: Vec<Box<dyn ConfigGenerator>> = vec![
             Box::new(crate::modules::GhosttyGenerator),
             Box::new(crate::modules::BatGenerator),
@@ -59,7 +56,7 @@ impl IrisSetup {
             .into_iter()
             .filter(|g| {
                 if g.is_installed() {
-                    Status::success(&format!("Found {}", g.name()), 2);
+                    parent_task.info(&format!("Found {}", g.name()));
                     true
                 } else {
                     false
@@ -72,16 +69,16 @@ impl IrisSetup {
         let json = initial_state.to_json()?;
         std::fs::write(&ctx.paths.state_file, json)?;
 
-        scan_task.done(Some("Scanning complete and state.json created."));
+        parent_task.info("Application state saved to state.json");
         Ok(())
     }
 
-    pub fn setup_zsh_hook(ctx: &IrisContext) -> Result<()> {
+    pub fn setup_zsh_hook(ctx: &IrisContext, parent_task: &Task) -> Result<()> {
         let home = dirs::home_dir().context("Home dir not found")?;
         let zshrc = home.join(".zshrc");
 
         if !zshrc.exists() {
-            Status::error(".zshrc not found, skipping hook injection.", 1);
+            Status::warn(".zshrc not found, skipping hook injection.", 1);
             return Ok(());
         }
 
@@ -89,12 +86,12 @@ impl IrisSetup {
         let content: String = fs::read_to_string(&zshrc)?;
 
         if content.contains(hook_id) {
-            Status::success("Zsh hook already present in .zshrc.", 1);
+            parent_task.info("Zsh hook already present in .zshrc.");
             return Ok(());
         }
 
         let cache_file = ctx.paths.cache.join("fzf.sh");
-        let task = Status::step("Injecting Zsh hook...", 1);
+        parent_task.info("Injecting synchronization hook into .zshrc...");
 
         let hook: String = format!(
             r#"
@@ -121,7 +118,7 @@ add-zsh-hook precmd _iris_fzf_sync
         let mut file = OpenOptions::new().append(true).open(&zshrc)?;
         writeln!(file, "{}", full_hook)?;
 
-        task.done(Some("Zsh hook successfully injected into .zshrc."));
+        parent_task.info("Hook successfully appended.");
         Ok(())
     }
 }

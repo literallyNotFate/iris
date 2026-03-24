@@ -9,11 +9,12 @@ pub struct Task {
     message: String,
     start_time: Instant,
     level: u8,
+    finished: bool,
 }
 
 impl Status {
     // Helper function to create levels of indent for nesting
-    fn get_indent(level: u8) -> String {
+    pub fn get_indent(level: u8) -> String {
         "  ".repeat(level as usize)
     }
 
@@ -29,6 +30,7 @@ impl Status {
             message: message.to_string(),
             start_time: Instant::now(),
             level,
+            finished: false,
         }
     }
 
@@ -42,6 +44,16 @@ impl Status {
         );
     }
 
+    /// Warning without timer
+    pub fn warn(message: &str, level: u8) {
+        println!(
+            "{} {} {}",
+            Self::get_indent(level),
+            "!".yellow().bold(),
+            message.yellow()
+        );
+    }
+
     /// Error without timer
     pub fn error(message: &str, level: u8) {
         let p = Self::get_indent(level);
@@ -51,7 +63,8 @@ impl Status {
 
 impl Task {
     /// Finalizing task with elapsed time
-    pub fn done(self, custom_message: Option<&str>) {
+    pub fn done(mut self, custom_message: Option<&str>) {
+        self.finished = true;
         let duration = self.start_time.elapsed();
 
         let time_str = if duration.as_millis() > 0 {
@@ -73,7 +86,8 @@ impl Task {
     }
 
     /// Task fail with elapsed time
-    pub fn fail(self, error: &str) {
+    pub fn fail(mut self, error: &str) {
+        self.finished = true;
         let indent = Status::get_indent(self.level);
         println!(
             "{} {} {} {}",
@@ -82,5 +96,27 @@ impl Task {
             self.message,
             format!("(failed: {})", error).red()
         );
+    }
+
+    /// To show info message for task
+    pub fn info(&self, message: &str) {
+        let indent = Status::get_indent(self.level + 1);
+        println!("{} {} {}", indent, "•".dimmed(), message.dimmed());
+    }
+}
+
+/// Made for dealing with panic (interrupting)
+impl Drop for Task {
+    fn drop(&mut self) {
+        if !self.finished && !std::thread::panicking() {
+            let indent = Status::get_indent(self.level);
+            println!(
+                "{} {} {} {}",
+                indent,
+                "⚠".yellow().bold(),
+                self.message,
+                "(interrupted)".dimmed()
+            );
+        }
     }
 }
