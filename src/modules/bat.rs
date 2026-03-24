@@ -44,7 +44,7 @@ impl ConfigGenerator for BatGenerator {
 
         let theme_name = &ctx.state.current_theme;
         let theme_dir = ctx.paths.cache.join("bat_themes");
-        std::fs::create_dir_all(&theme_dir).context("Failed to create bat theme directory")?;
+        fs::create_dir_all(&theme_dir).context("Failed to create bat theme directory")?;
 
         let rules = self.build_config(p);
 
@@ -65,14 +65,14 @@ impl ConfigGenerator for BatGenerator {
         );
 
         let theme_file = theme_dir.join(format!("{}.tmTheme", theme_name));
-        std::fs::write(&theme_file, content).context("Failed to write theme file")?;
+        fs::write(&theme_file, content).context("Failed to write theme file")?;
 
         let config_file = ctx.paths.cache.join("bat.conf");
         let bat_config = format!(
             "--theme=\"{name}\"\n--style=\"numbers,changes\"\n--color=\"always\"\n",
             name = theme_name
         );
-        std::fs::write(config_file, bat_config).context("Failed to write bat.conf")?;
+        fs::write(config_file, bat_config).context("Failed to write bat.conf")?;
 
         let cache_task = Status::step("Rebuilding bat cache...", 2);
         let output = std::process::Command::new("bat")

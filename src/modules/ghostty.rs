@@ -13,7 +13,9 @@ impl ConfigGenerator for GhosttyGenerator {
     fn apply(&self, p: &Palette, ctx: &IrisContext) -> Result<()> {
         let task = Status::step(&format!("Configuring {}...", self.name().cyan()), 2);
 
-        let ghostty_dir = ctx.paths.config.join("ghostty");
+        let ghostty_dir = dirs::home_dir()
+            .context("Cannot get the home directory!")?
+            .join(".config/ghostty");
         let cache_file = ctx.paths.cache.join("ghostty.conf");
         let link_path = ghostty_dir.join("current_theme.conf");
 

@@ -1,8 +1,10 @@
 pub mod bat;
+pub mod btop;
 pub mod fzf;
 pub mod ghostty;
 
 pub use bat::BatGenerator;
+pub use btop::BtopGenerator;
 pub use fzf::FzfGenerator;
 pub use ghostty::GhosttyGenerator;
 
