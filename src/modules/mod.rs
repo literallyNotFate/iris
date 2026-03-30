@@ -1,9 +1,11 @@
+pub mod alacritty;
 pub mod bat;
 pub mod btop;
 pub mod fzf;
 pub mod ghostty;
 pub mod yazi;
 
+pub use alacritty::AlacrittyGenerator;
 pub use bat::BatGenerator;
 pub use btop::BtopGenerator;
 pub use fzf::FzfGenerator;

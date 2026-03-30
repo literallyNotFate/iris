@@ -52,6 +52,7 @@ impl IrisSetup {
             Box::new(crate::modules::FzfGenerator),
             Box::new(crate::modules::BtopGenerator),
             Box::new(crate::modules::YaziGenerator),
+            Box::new(crate::modules::AlacrittyGenerator),
         ];
 
         let enabled: Vec<String> = available_generators
