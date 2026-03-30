@@ -35,13 +35,16 @@ impl IrisContext {
 
     /// Helper function to add all supported generators
     fn init_generators(&mut self) {
-        use crate::modules::{BatGenerator, BtopGenerator, FzfGenerator, GhosttyGenerator};
+        use crate::modules::{
+            BatGenerator, BtopGenerator, FzfGenerator, GhosttyGenerator, YaziGenerator,
+        };
 
         let all: Vec<Box<dyn crate::modules::ConfigGenerator>> = vec![
             Box::new(GhosttyGenerator),
             Box::new(BatGenerator),
             Box::new(FzfGenerator),
             Box::new(BtopGenerator),
+            Box::new(YaziGenerator),
         ];
 
         self.generators = all

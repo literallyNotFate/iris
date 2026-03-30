@@ -1,4 +1,9 @@
-use crate::{core::IrisContext, models::Palette, modules::ConfigGenerator, utils::Status};
+use crate::{
+    core::IrisContext,
+    models::Palette,
+    modules::ConfigGenerator,
+    utils::{self, Status},
+};
 use anyhow::{Context, Result};
 use colored::Colorize;
 
@@ -19,12 +24,17 @@ impl ConfigGenerator for GhosttyGenerator {
         let cache_file = ctx.paths.cache.join("ghostty.conf");
         let link_path = ghostty_dir.join("current_theme.conf");
 
-        let config_content: String = self.build_config(p, &ctx.state.current_theme);
+        let config_content: String =
+            self.build_config(p, &utils::capitalize(&ctx.state.current_theme));
 
         std::fs::create_dir_all(&ctx.paths.cache).context("Failed to create cache directory")?;
         std::fs::write(&cache_file, config_content)
             .with_context(|| format!("Failed to write ghostty cache to {:?}", cache_file))?;
-        task.info("Theme file generated in cache.");
+
+        task.info(&format!(
+            "Theme {} generated in cache.",
+            utils::capitalize(&ctx.state.current_theme).yellow()
+        ));
 
         if !ghostty_dir.exists() {
             Status::warn("Ghostty config directory not found. Creating it...", 3);

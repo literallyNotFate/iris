@@ -2,14 +2,17 @@ pub mod bat;
 pub mod btop;
 pub mod fzf;
 pub mod ghostty;
+pub mod yazi;
 
 pub use bat::BatGenerator;
 pub use btop::BtopGenerator;
 pub use fzf::FzfGenerator;
 pub use ghostty::GhosttyGenerator;
+pub use yazi::YaziGenerator;
 
 use crate::{core::IrisContext, models::Palette, utils::Status};
 use anyhow::Result;
+use colored::Colorize;
 
 /// Main trait for all generators
 pub trait ConfigGenerator {
@@ -28,14 +31,19 @@ pub trait ConfigGenerator {
 /// Apply themes to available programs (enabled generators)
 pub fn apply_all(palette: &Palette, ctx: &IrisContext) -> Result<()> {
     println!();
+    let generators_len = ctx.generators.len().to_string();
     let total_task = Status::step(
-        &format!("Applying palette to {} targets...", ctx.generators.len()),
+        &format!("Applying palette to {} targets...", generators_len.green()),
         0,
     );
 
     for generator in &ctx.generators {
         if let Err(e) = generator.apply(palette, ctx) {
-            total_task.fail(&format!("Failed at {}: {}", generator.name(), e));
+            total_task.fail(&format!(
+                "Failed at {}: {}",
+                generator.name().cyan(),
+                e.to_string().red()
+            ));
             return Err(e);
         }
     }

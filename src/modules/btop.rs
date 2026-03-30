@@ -1,4 +1,9 @@
-use crate::{core::IrisContext, models::Palette, modules::ConfigGenerator, utils::Status};
+use crate::{
+    core::IrisContext,
+    models::Palette,
+    modules::ConfigGenerator,
+    utils::{self, Status},
+};
 use anyhow::{Context, Result};
 use colored::Colorize;
 use std::{fs, path::Path};
@@ -13,6 +18,7 @@ impl ConfigGenerator for BtopGenerator {
 
     fn apply(&self, p: &Palette, ctx: &IrisContext) -> Result<()> {
         let theme_name = &ctx.state.current_theme;
+        let display_name = utils::capitalize(theme_name);
         let task = Status::step(&format!("Configuring {}...", self.name().cyan()), 2);
 
         let btop_dir = dirs::home_dir()
@@ -32,14 +38,14 @@ impl ConfigGenerator for BtopGenerator {
         let btop_theme_link = themes_dir.join(format!("{}.theme", theme_name));
 
         fs::create_dir_all(cache_file.parent().unwrap())?;
-        let content = self.build_config(p, theme_name);
+        let content = self.build_config(p, &display_name);
 
         fs::write(&cache_file, content)
             .with_context(|| format!("Failed to write btop theme to {:?}", cache_file))?;
 
         task.info(&format!(
             "Theme {} generated in cache.",
-            theme_name.yellow()
+            display_name.yellow()
         ));
 
         if !themes_dir.exists() {
@@ -52,11 +58,16 @@ impl ConfigGenerator for BtopGenerator {
         #[cfg(unix)]
         {
             use std::os::unix::fs::symlink;
-            symlink(&cache_file, &btop_theme_link)?;
             task.info(&format!(
-                "Created link in btop/themes/ for {}",
-                theme_name.cyan()
+                "Creating link in btop/themes/ for {}",
+                display_name.yellow()
             ));
+            symlink(&cache_file, &btop_theme_link).with_context(|| {
+                format!(
+                    "Failed to create symlink {:?} -> {:?}",
+                    btop_theme_link, cache_file
+                )
+            })?;
         }
 
         let conf_path = btop_dir.join("btop.conf");
@@ -70,10 +81,7 @@ impl ConfigGenerator for BtopGenerator {
             Status::warn("btop.conf not found. Theme generated but not activated.", 3);
         }
 
-        task.done(Some(&format!(
-            "{} theme generated and ready to sync!",
-            self.name().cyan()
-        )));
+        task.done(Some(&format!("{} is ready to sync!", self.name().cyan())));
         Ok(())
     }
 }

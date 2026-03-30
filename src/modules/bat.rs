@@ -1,4 +1,9 @@
-use crate::{core::IrisContext, models::Palette, modules::ConfigGenerator, utils::Status};
+use crate::{
+    core::IrisContext,
+    models::Palette,
+    modules::ConfigGenerator,
+    utils::{self, Status},
+};
 use anyhow::{Context, Result};
 use colored::Colorize;
 use std::{fs, path::PathBuf, process::Command};
@@ -12,8 +17,31 @@ impl ConfigGenerator for BatGenerator {
     }
 
     fn apply(&self, p: &Palette, ctx: &IrisContext) -> Result<()> {
+        let theme_name = &ctx.state.current_theme;
+        let display_name = utils::capitalize(theme_name);
+
+        let rules = self.build_config(p);
+        let content = format!(
+            r#"<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple Computer//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>name</key><string>{name}</string>
+    <key>settings</key>
+    <array>
+{rules}
+    </array>
+</dict>
+</plist>"#,
+            name = display_name,
+            rules = rules
+        );
+
         let iris_bat_dir = ctx.paths.cache.join("bat_themes");
         fs::create_dir_all(&iris_bat_dir)?;
+
+        let theme_file = iris_bat_dir.join(format!("{}.tmTheme", theme_name));
+        fs::write(&theme_file, &content).context("Failed to write theme file")?;
 
         let config_task = Status::step(&format!("Configuring {}...", self.name().cyan()), 2);
         config_task.info("Fetching bat configuration directory...");
@@ -24,61 +52,43 @@ impl ConfigGenerator for BatGenerator {
             .map(|o| PathBuf::from(String::from_utf8_lossy(&o.stdout).trim()))
             .context("Failed to get bat config dir")?;
 
-        let bat_themes_dir = bat_config_dir.join("themes");
-        let link_path = bat_themes_dir.join("iris_themes");
         config_task.info(&format!("Config found at: {}", bat_config_dir.display()));
 
-        if !bat_themes_dir.exists() {
-            fs::create_dir_all(&bat_themes_dir)?;
-        }
+        let bat_themes_dir = bat_config_dir.join("themes");
+        fs::create_dir_all(&bat_themes_dir)?;
 
-        if !link_path.exists() {
-            #[cfg(unix)]
-            {
-                config_task.info("Creating symlink for iris themes...");
-                std::os::unix::fs::symlink(&iris_bat_dir, &link_path)?;
+        let link_path = bat_themes_dir.join(format!("{}.tmTheme", theme_name));
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::symlink;
+            if link_path.exists() || link_path.symlink_metadata().is_ok() {
+                fs::remove_file(&link_path)?;
             }
+            config_task.info("Linking theme to bat/themes...");
+
+            symlink(&theme_file, &link_path).with_context(|| {
+                format!(
+                    "Failed to create symlink {:?} -> {:?}",
+                    link_path, theme_file
+                )
+            })?;
         }
 
-        config_task.done(Some("Bat configuration environment ready."));
+        config_task.done(Some(&format!(
+            "Generated {} theme and created symlink.",
+            self.name().cyan()
+        )));
 
-        let theme_name = &ctx.state.current_theme;
-        let theme_dir = ctx.paths.cache.join("bat_themes");
-        fs::create_dir_all(&theme_dir).context("Failed to create bat theme directory")?;
-
-        let rules = self.build_config(p);
-
-        let content = format!(
-            r#"<?xml version="1.0" encoding="UTF-8"?>
-    <!DOCTYPE plist PUBLIC "-//Apple Computer//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-    <plist version="1.0">
-    <dict>
-        <key>name</key><string>{name}</string>
-        <key>settings</key>
-        <array>
-    {rules}
-        </array>
-    </dict>
-    </plist>"#,
-            name = theme_name,
-            rules = rules
-        );
-
-        let theme_file = theme_dir.join(format!("{}.tmTheme", theme_name));
-        fs::write(&theme_file, content).context("Failed to write theme file")?;
-
-        let config_file = ctx.paths.cache.join("bat.conf");
         let bat_config = format!(
             "--theme=\"{name}\"\n--style=\"numbers,changes\"\n--color=\"always\"\n",
-            name = theme_name
+            name = display_name
         );
+        let config_file = ctx.paths.cache.join("bat.conf");
         fs::write(config_file, bat_config).context("Failed to write bat.conf")?;
 
-        let cache_task = Status::step("Rebuilding bat cache...", 2);
-        let output = std::process::Command::new("bat")
-            .arg("cache")
-            .arg("--build")
-            .output()?;
+        let cache_task = Status::step("Rebuilding cache...", 2);
+        let output = Command::new("bat").arg("cache").arg("--build").output()?;
 
         if output.status.success() {
             cache_task.done(Some(&format!("{} cache updated.", self.name().cyan())));
