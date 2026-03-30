@@ -62,7 +62,7 @@ impl Palette {
         let sync_task = Status::step(
             &format!(
                 "Fetching colors from Neovim using theme: {}",
-                theme.bold().cyan()
+                theme.bold().green()
             ),
             1,
         );
@@ -155,10 +155,10 @@ impl Palette {
         }
 
         println!(
-            "\n{} {} Checking theme availability: {}...",
+            "\n{} {} Checking theme availability: {}",
             Status::get_indent(0),
             "•".dimmed(),
-            theme.cyan()
+            theme.yellow().bold()
         );
 
         let init_plugins = "lua vim.opt.rtp:append(vim.fn.stdpath('data') .. '/lazy/*')";

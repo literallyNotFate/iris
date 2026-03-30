@@ -6,7 +6,7 @@ use crate::{
 };
 use anyhow::{Context, Result};
 use colored::Colorize;
-use std::fs;
+use std::{fs, path::PathBuf};
 
 /// Config generator for yazi
 pub struct YaziGenerator;
@@ -17,19 +17,20 @@ impl ConfigGenerator for YaziGenerator {
     }
 
     fn apply(&self, p: &Palette, ctx: &IrisContext) -> Result<()> {
-        let theme_name = &ctx.state.current_theme;
+        let theme_name: &String = &ctx.state.current_theme;
         let task = Status::step(&format!("Configuring {}...", self.name().cyan()), 2);
 
-        let yazi_dir = dirs::home_dir()
+        let yazi_dir: PathBuf = dirs::home_dir()
             .context("Cannot get the home directory!")?
             .join(".config/yazi");
-        let cache_file = ctx
+
+        let cache_file: PathBuf = ctx
             .paths
             .cache
             .join(format!("yazi_themes/{}.toml", theme_name));
-        let theme_link = yazi_dir.join("theme.toml");
+        let theme_link: PathBuf = yazi_dir.join("theme.toml");
 
-        let content = self.build_config(p, theme_name);
+        let content: String = self.build_config(p, theme_name);
 
         fs::create_dir_all(cache_file.parent().unwrap())?;
         fs::write(&cache_file, content)?;
@@ -59,6 +60,19 @@ impl ConfigGenerator for YaziGenerator {
 
         task.done(Some(&format!("Theme applied to {}.", self.name().cyan())));
         Ok(())
+    }
+
+    fn setup_hint(&self) -> Option<String> {
+        let yazi_dir: PathBuf = dirs::home_dir()?.join(".config/yazi");
+
+        if !yazi_dir.exists() {
+            return Some(format!(
+                "No {} found — make sure Yazi is installed and run it once to initialize config.",
+                "~/.config/yazi".cyan(),
+            ));
+        }
+
+        None
     }
 }
 

@@ -6,6 +6,7 @@ use crate::{
 };
 use anyhow::{Context, Result};
 use colored::Colorize;
+use std::{fs, path::PathBuf};
 
 /// Config generator for fzf utility
 pub struct FzfGenerator;
@@ -16,14 +17,14 @@ impl ConfigGenerator for FzfGenerator {
     }
 
     fn is_installed(&self) -> bool {
-        let home = dirs::home_dir().unwrap_or_default();
+        let home: PathBuf = dirs::home_dir().unwrap_or_default();
         which::which("fzf").is_ok() || home.join(".zshrc").exists()
     }
 
     fn apply(&self, p: &Palette, ctx: &IrisContext) -> Result<()> {
         let task = Status::step(&format!("Configuring {}...", self.name().cyan()), 2);
 
-        let cache_file = ctx.paths.cache.join("fzf.sh");
+        let cache_file: PathBuf = ctx.paths.cache.join("fzf.sh");
         let fzf_colors: String = self.build_config(p);
 
         let content: String = format!(
@@ -35,7 +36,7 @@ export FZF_DEFAULT_OPTS="--color='{colors}' --layout=reverse --height=40% --bord
 
         task.info(&format!("Generating script in: {}", cache_file.display()));
 
-        std::fs::write(&cache_file, content)
+        fs::write(&cache_file, content)
             .with_context(|| format!("Failed to write FZF config to {:?}", cache_file))?;
 
         #[cfg(unix)]
@@ -43,6 +44,26 @@ export FZF_DEFAULT_OPTS="--color='{colors}' --layout=reverse --height=40% --bord
 
         task.done(Some("Fzf is ready to source."));
         Ok(())
+    }
+
+    fn setup_hint(&self) -> Option<String> {
+        let cache_file: PathBuf = dirs::home_dir()?.join(".cache/iris/fzf.sh");
+        let zshrc: PathBuf = dirs::home_dir()?.join(".zshrc");
+
+        let source_line: String = format!("source \"{}\"", cache_file.display());
+
+        if zshrc.exists() {
+            let content: String = fs::read_to_string(&zshrc).unwrap_or_default();
+            if content.contains("fzf.sh") {
+                return None;
+            }
+        }
+
+        Some(format!(
+            "Fzf theme won't load until you add to {}:\n     {}",
+            ".zshrc".cyan(),
+            source_line.yellow()
+        ))
     }
 }
 

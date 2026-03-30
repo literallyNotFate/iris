@@ -1,4 +1,9 @@
-use crate::{core::IrisContext, models::Palette, modules, utils::Status};
+use crate::{
+    core::IrisContext,
+    models::Palette,
+    modules,
+    utils::{self, Status},
+};
 use anyhow::{Context, Result};
 use colored::*;
 
@@ -31,7 +36,7 @@ pub fn exec(name: Option<String>, ctx: &mut IrisContext) -> Result<()> {
         format!("Switching to {}...", theme).bold().yellow()
     );
 
-    let switch_task = Status::step(&format!("Applying {} palette...", theme.cyan()), 0);
+    let switch_task = Status::step("Applying palette...", 0);
     let palette = Palette::fetch(&theme)
         .with_context(|| format!("Failed to fetch colors for '{}'", theme))?;
 
@@ -43,8 +48,8 @@ pub fn exec(name: Option<String>, ctx: &mut IrisContext) -> Result<()> {
 
     println!();
     switch_task.done(Some(&format!(
-        "Theme {} applied to all apps.",
-        theme.cyan()
+        "{} applied to all apps.",
+        utils::capitalize(&theme).magenta()
     )));
 
     Ok(())

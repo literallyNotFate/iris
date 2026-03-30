@@ -28,6 +28,11 @@ pub trait ConfigGenerator {
 
     /// Logic of applying the theme (file writing, building cache etc)
     fn apply(&self, p: &Palette, ctx: &IrisContext) -> Result<()>;
+
+    /// Optional post-apply hint (e.g. "add import to config")
+    fn setup_hint(&self) -> Option<String> {
+        None
+    }
 }
 
 /// Apply themes to available programs (enabled generators)
@@ -47,6 +52,10 @@ pub fn apply_all(palette: &Palette, ctx: &IrisContext) -> Result<()> {
                 e.to_string().red()
             ));
             return Err(e);
+        }
+
+        if let Some(hint) = generator.setup_hint() {
+            Status::warn(&hint, 3);
         }
     }
 

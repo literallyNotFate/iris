@@ -6,6 +6,7 @@ use crate::{
 };
 use anyhow::{Context, Result};
 use colored::Colorize;
+use std::{fs, path::PathBuf};
 
 /// Config generator for ghostty terminal
 pub struct GhosttyGenerator;
@@ -18,17 +19,17 @@ impl ConfigGenerator for GhosttyGenerator {
     fn apply(&self, p: &Palette, ctx: &IrisContext) -> Result<()> {
         let task = Status::step(&format!("Configuring {}...", self.name().cyan()), 2);
 
-        let ghostty_dir = dirs::home_dir()
+        let ghostty_dir: PathBuf = dirs::home_dir()
             .context("Cannot get the home directory!")?
             .join(".config/ghostty");
-        let cache_file = ctx.paths.cache.join("ghostty.conf");
-        let link_path = ghostty_dir.join("current_theme.conf");
+        let cache_file: PathBuf = ctx.paths.cache.join("ghostty.conf");
+        let link_path: PathBuf = ghostty_dir.join("current_theme.conf");
 
         let config_content: String =
             self.build_config(p, &utils::capitalize(&ctx.state.current_theme));
 
-        std::fs::create_dir_all(&ctx.paths.cache).context("Failed to create cache directory")?;
-        std::fs::write(&cache_file, config_content)
+        fs::create_dir_all(&ctx.paths.cache).context("Failed to create cache directory")?;
+        fs::write(&cache_file, config_content)
             .with_context(|| format!("Failed to write ghostty cache to {:?}", cache_file))?;
 
         task.info(&format!(
@@ -59,6 +60,29 @@ impl ConfigGenerator for GhosttyGenerator {
 
         task.done(Some(&format!("{} sync complete.", self.name().cyan())));
         Ok(())
+    }
+
+    fn setup_hint(&self) -> Option<String> {
+        let ghostty_config: PathBuf = dirs::home_dir()?.join(".config/ghostty/config");
+
+        if ghostty_config.exists() {
+            let content = fs::read_to_string(&ghostty_config).unwrap_or_default();
+            if content.contains("current_theme.conf") {
+                return None;
+            }
+
+            return Some(format!(
+                "Theme won't load until you add to {}:\n     {}",
+                "~/.config/ghostty/config".cyan(),
+                "config-file = ~/.config/ghostty/current_theme.conf".yellow()
+            ));
+        }
+
+        Some(format!(
+            "No {} found. Create it and add:\n     {}",
+            "~/.config/ghostty/config".cyan(),
+            "config-file = ~/.config/ghostty/current_theme.conf".yellow()
+        ))
     }
 }
 

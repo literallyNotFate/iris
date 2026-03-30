@@ -17,11 +17,11 @@ impl ConfigGenerator for BatGenerator {
     }
 
     fn apply(&self, p: &Palette, ctx: &IrisContext) -> Result<()> {
-        let theme_name = &ctx.state.current_theme;
-        let display_name = utils::capitalize(theme_name);
+        let theme_name: &String = &ctx.state.current_theme;
+        let display_name: String = utils::capitalize(theme_name);
 
-        let rules = self.build_config(p);
-        let content = format!(
+        let rules: String = self.build_config(p);
+        let content: String = format!(
             r#"<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple Computer//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -37,16 +37,16 @@ impl ConfigGenerator for BatGenerator {
             rules = rules
         );
 
-        let iris_bat_dir = ctx.paths.cache.join("bat_themes");
+        let iris_bat_dir: PathBuf = ctx.paths.cache.join("bat_themes");
         fs::create_dir_all(&iris_bat_dir)?;
 
-        let theme_file = iris_bat_dir.join(format!("{}.tmTheme", theme_name));
+        let theme_file: PathBuf = iris_bat_dir.join(format!("{}.tmTheme", theme_name));
         fs::write(&theme_file, &content).context("Failed to write theme file")?;
 
         let config_task = Status::step(&format!("Configuring {}...", self.name().cyan()), 2);
         config_task.info("Fetching bat configuration directory...");
 
-        let bat_config_dir = Command::new("bat")
+        let bat_config_dir: PathBuf = Command::new("bat")
             .arg("--config-dir")
             .output()
             .map(|o| PathBuf::from(String::from_utf8_lossy(&o.stdout).trim()))
@@ -54,10 +54,10 @@ impl ConfigGenerator for BatGenerator {
 
         config_task.info(&format!("Config found at: {}", bat_config_dir.display()));
 
-        let bat_themes_dir = bat_config_dir.join("themes");
+        let bat_themes_dir: PathBuf = bat_config_dir.join("themes");
         fs::create_dir_all(&bat_themes_dir)?;
 
-        let link_path = bat_themes_dir.join(format!("{}.tmTheme", theme_name));
+        let link_path: PathBuf = bat_themes_dir.join(format!("{}.tmTheme", theme_name));
 
         #[cfg(unix)]
         {
@@ -80,11 +80,11 @@ impl ConfigGenerator for BatGenerator {
             self.name().cyan()
         )));
 
-        let bat_config = format!(
+        let bat_config: String = format!(
             "--theme=\"{name}\"\n--style=\"numbers,changes\"\n--color=\"always\"\n",
             name = display_name
         );
-        let config_file = ctx.paths.cache.join("bat.conf");
+        let config_file: PathBuf = ctx.paths.cache.join("bat.conf");
         fs::write(config_file, bat_config).context("Failed to write bat.conf")?;
 
         let cache_task = Status::step("Rebuilding cache...", 2);
@@ -99,6 +99,20 @@ impl ConfigGenerator for BatGenerator {
         }
 
         Ok(())
+    }
+
+    fn setup_hint(&self) -> Option<String> {
+        let bat_config_path: PathBuf = dirs::home_dir()?.join(".cache/iris/bat.conf");
+
+        let env_var: String = std::env::var("BAT_CONFIG_PATH").unwrap_or_default();
+        if env_var != bat_config_path.to_string_lossy().as_ref() {
+            return Some(format!(
+                "Bat theme won't load until you add to your shell config:\n     {}",
+                format!("export BAT_CONFIG_PATH=\"{}\"", bat_config_path.display()).yellow()
+            ));
+        }
+
+        None
     }
 }
 

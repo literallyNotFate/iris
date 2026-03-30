@@ -6,7 +6,7 @@ use crate::{
 };
 use anyhow::{Context, Result};
 use colored::Colorize;
-use std::{fs, path::Path};
+use std::{fs, path::PathBuf};
 
 /// Config generator for btop utility
 pub struct BtopGenerator;
@@ -17,28 +17,28 @@ impl ConfigGenerator for BtopGenerator {
     }
 
     fn apply(&self, p: &Palette, ctx: &IrisContext) -> Result<()> {
-        let theme_name = &ctx.state.current_theme;
-        let display_name = utils::capitalize(theme_name);
+        let theme_name: &String = &ctx.state.current_theme;
+        let display_name: String = utils::capitalize(theme_name);
         let task = Status::step(&format!("Configuring {}...", self.name().cyan()), 2);
 
-        let btop_dir = dirs::home_dir()
+        let btop_dir: PathBuf = dirs::home_dir()
             .context("Cannot get the home directory!")?
             .join(".config/btop");
-        let themes_dir = btop_dir.join("themes");
+        let themes_dir: PathBuf = btop_dir.join("themes");
 
         if !themes_dir.exists() {
             task.info("Creating btop themes directory...");
             fs::create_dir_all(&themes_dir)?;
         }
 
-        let cache_file = ctx
+        let cache_file: PathBuf = ctx
             .paths
             .cache
             .join(format!("btop_themes/{}.theme", theme_name));
-        let btop_theme_link = themes_dir.join(format!("{}.theme", theme_name));
+        let btop_theme_link: PathBuf = themes_dir.join(format!("{}.theme", theme_name));
 
         fs::create_dir_all(cache_file.parent().unwrap())?;
-        let content = self.build_config(p, &display_name);
+        let content: String = self.build_config(p, &display_name);
 
         fs::write(&cache_file, content)
             .with_context(|| format!("Failed to write btop theme to {:?}", cache_file))?;
@@ -70,7 +70,7 @@ impl ConfigGenerator for BtopGenerator {
             })?;
         }
 
-        let conf_path = btop_dir.join("btop.conf");
+        let conf_path: PathBuf = btop_dir.join("btop.conf");
         if conf_path.exists() {
             task.info(&format!(
                 "Setting color_theme = \"{}\" in btop.conf",
@@ -83,6 +83,29 @@ impl ConfigGenerator for BtopGenerator {
 
         task.done(Some(&format!("{} is ready to sync!", self.name().cyan())));
         Ok(())
+    }
+
+    fn setup_hint(&self) -> Option<String> {
+        let btop_conf: PathBuf = dirs::home_dir()?.join(".config/btop/btop.conf");
+
+        if !btop_conf.exists() {
+            return Some(format!(
+                "No {} found. Create it and add:\n     {}",
+                "btop.conf".cyan(),
+                "color_theme = \"<theme_name>\"".yellow()
+            ));
+        }
+
+        let content: String = fs::read_to_string(&btop_conf).unwrap_or_default();
+        if !content.contains("color_theme") {
+            return Some(format!(
+                "Theme won't load until you add to {}:\n     {}",
+                "btop.conf".cyan(),
+                "color_theme = \"<theme_name>\"".yellow()
+            ));
+        }
+
+        None
     }
 }
 
@@ -168,7 +191,7 @@ theme[temp_low]="{green}"
     }
 
     /// Update color_theme setting in btop.conf
-    fn update_btop_conf(&self, path: &Path, name: &str) -> Result<()> {
+    fn update_btop_conf(&self, path: &PathBuf, name: &str) -> Result<()> {
         if !path.exists() {
             return Ok(());
         }
