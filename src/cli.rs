@@ -16,9 +16,32 @@ pub enum Commands {
     /// Switch to a theme (defaults to current Neovim theme if name is omitted)
     Switch {
         /// Name of the theme to apply
-        name: Option<String>,
+        name: String,
     },
+
+    /// Sync all apps with current Neovim theme
+    Sync,
 
     /// Show current status, active theme and enabled apps
     Status,
+
+    /// Manage generators through selection
+    Gen {
+        #[command(subcommand)]
+        action: GenAction,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum GenAction {
+    /// Automatically enable all installed generators
+    Auto,
+    /// Enable generator
+    Enable { name: String },
+    /// Disable generator
+    Disable { name: String },
+    /// Interactive selection
+    Select,
+    /// List of all available generators and their status
+    List,
 }

@@ -1,16 +1,16 @@
 use anyhow::{Context, Result};
 pub use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
+use std::{collections::BTreeSet, path::PathBuf};
 
 /// UI State of app which is being saved
 #[derive(Default, Serialize, Deserialize, Debug)]
 pub struct State {
     pub current_theme: String,
-    pub enabled_generators: Vec<String>,
+    pub enabled_generators: BTreeSet<String>,
 }
 
 impl State {
-    pub fn new(current_theme: String, enabled_generators: Vec<String>) -> Self {
+    pub fn new(current_theme: String, enabled_generators: BTreeSet<String>) -> Self {
         Self {
             current_theme,
             enabled_generators,
@@ -25,6 +25,27 @@ impl State {
     /// Set current theme to specific one
     pub fn set_theme(&mut self, name: &str) {
         self.current_theme = name.to_string();
+    }
+
+    /// Enable generator
+    pub fn enable_generator(&mut self, name: String) {
+        self.enabled_generators.insert(name);
+    }
+
+    /// Disable generator
+    pub fn disable_generator(&mut self, name: &str) {
+        self.enabled_generators.remove(name);
+    }
+
+    /// Check if generator is enabled
+    pub fn is_enabled(&self, name: &str) -> bool {
+        self.enabled_generators.contains(name)
+    }
+
+    /// Save state to disk
+    pub fn save_to(&self, path: &PathBuf) -> Result<()> {
+        let json: String = self.to_json()?;
+        std::fs::write(path, json).with_context(|| format!("Failed to save state to {:?}", path))
     }
 
     /// Load state from file

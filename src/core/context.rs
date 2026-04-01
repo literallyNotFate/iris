@@ -80,10 +80,7 @@ impl IrisContext {
     /// Saves current state of application to a file
     pub fn save(&self) -> Result<()> {
         self.paths.ensure_dirs()?;
-        let json: String = self.state.to_json()?;
-
-        std::fs::write(&self.paths.state_file, json)
-            .with_context(|| format!("Failed to save state to {:?}", self.paths.state_file))?;
+        self.state.save_to(&self.paths.state_file)?;
         Ok(())
     }
 }

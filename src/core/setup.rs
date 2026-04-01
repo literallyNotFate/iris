@@ -1,12 +1,12 @@
 use crate::{
     core::IrisContext,
     models::{Palette, State},
-    modules::ConfigGenerator,
     utils::{Status, Task},
 };
 use anyhow::{Context as _, Result};
 use colored::Colorize;
 use std::{
+    collections::BTreeSet,
     fs::{self, OpenOptions},
     io::Write,
 };
@@ -37,7 +37,7 @@ impl IrisSetup {
 
     fn setup_initial_state(ctx: &IrisContext, parent_task: &Task) -> Result<()> {
         if ctx.paths.state_file.exists() {
-            parent_task.info("Found existing state.json, loading defaults.");
+            parent_task.info("Found existing state.json, loading current configuration.");
             return Ok(());
         }
 
@@ -46,33 +46,34 @@ impl IrisSetup {
             .context("Neovim theme not detected. Please set a colorscheme in Neovim first.")?;
 
         parent_task.info("Scanning for compatible tools...");
-        let available_generators: Vec<Box<dyn ConfigGenerator>> = vec![
-            Box::new(crate::modules::GhosttyGenerator),
-            Box::new(crate::modules::BatGenerator),
-            Box::new(crate::modules::FzfGenerator),
-            Box::new(crate::modules::BtopGenerator),
-            Box::new(crate::modules::YaziGenerator),
-            Box::new(crate::modules::AlacrittyGenerator),
-        ];
+        let generators = crate::modules::all_generators();
 
-        let enabled: Vec<String> = available_generators
-            .into_iter()
-            .filter(|g| {
+        let enabled: Vec<String> = generators
+            .iter()
+            .filter_map(|g| {
                 if g.is_installed() {
-                    parent_task.info(&format!("Found {}", g.name()));
-                    true
+                    parent_task.info(&format!("Found {}", g.name().cyan()));
+                    Some(g.name().to_string())
                 } else {
-                    false
+                    None
                 }
             })
-            .map(|g| g.name().to_string())
             .collect();
 
-        let initial_state: State = State::new(current_theme, enabled);
-        let json = initial_state.to_json()?;
-        std::fs::write(&ctx.paths.state_file, json)?;
+        if enabled.is_empty() {
+            parent_task.warn(
+                "No compatible tools found. You can enable them later via 'iris gen select'.",
+            );
+        }
 
-        parent_task.info("Application state saved to state.json");
+        let enabled_set: BTreeSet<String> = enabled.into_iter().collect();
+        let initial_state: State = State::new(current_theme, enabled_set);
+        initial_state.save_to(&ctx.paths.state_file)?;
+
+        parent_task.info(&format!(
+            "State saved to {}",
+            ctx.paths.state_file.display()
+        ));
         Ok(())
     }
 

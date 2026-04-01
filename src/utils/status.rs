@@ -1,5 +1,5 @@
 use colored::*;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 /// Struct to show status of current operation
 pub struct Status;
@@ -66,18 +66,7 @@ impl Task {
     pub fn done(mut self, custom_message: Option<&str>) {
         self.finished = true;
         let duration = self.start_time.elapsed();
-
-        let time_str = if duration.as_millis() > 0 {
-            let formatted_time = if duration.as_secs() > 0 {
-                format!("{:.2}s", duration.as_secs_f32())
-            } else {
-                format!("{}ms", duration.as_millis())
-            };
-
-            format!(" {}", formatted_time.bright_yellow().bold())
-        } else {
-            String::new()
-        };
+        let time_str = self.format_duration(duration);
 
         let msg = custom_message.unwrap_or(&self.message);
         let indent = Status::get_indent(self.level);
@@ -88,14 +77,24 @@ impl Task {
     /// Task fail with elapsed time
     pub fn fail(mut self, error: &str) {
         self.finished = true;
+        let duration = self.start_time.elapsed();
+        let time_str = self.format_duration(duration);
         let indent = Status::get_indent(self.level);
+
         println!(
-            "{} {} {} {}",
+            "{} {} {} {} {}",
             indent,
             "✘".red().bold(),
-            self.message,
-            format!("(failed: {})", error).red()
+            self.message.red(),
+            format!("→ {}", error).red().bold(),
+            time_str.dimmed()
         );
+    }
+
+    /// To show a warning message related to the task
+    pub fn warn(&self, message: &str) {
+        let indent = Status::get_indent(self.level + 1);
+        println!("{} {} {}", indent, "⚠".yellow().bold(), message.yellow());
     }
 
     /// To show info message for task
@@ -103,20 +102,36 @@ impl Task {
         let indent = Status::get_indent(self.level + 1);
         println!("{} {} {}", indent, "•".dimmed(), message.dimmed());
     }
+
+    /// Helper function to format elapsed time (not to duplicate code)
+    fn format_duration(&self, duration: Duration) -> String {
+        let millis = duration.as_millis();
+        if millis == 0 {
+            return String::new();
+        }
+
+        let text = if duration.as_secs() > 0 {
+            format!("{:.2}s", duration.as_secs_f32())
+        } else {
+            format!("{}ms", millis)
+        };
+
+        format!(" {}{}{}", "[".dimmed(), text.yellow().bold(), "]".dimmed())
+    }
 }
 
 /// Made for dealing with panic (interrupting)
 impl Drop for Task {
     fn drop(&mut self) {
-        if !self.finished && !std::thread::panicking() {
+        if !self.finished {
             let indent = Status::get_indent(self.level);
-            println!(
-                "{} {} {} {}",
-                indent,
-                "⚠".yellow().bold(),
-                self.message,
-                "(interrupted)".dimmed()
-            );
+            let (icon, label) = if std::thread::panicking() {
+                ("✘".red(), "(panic)".red().bold())
+            } else {
+                ("⚠".yellow(), "(interrupted)".dimmed())
+            };
+
+            println!("{} {} {} {}", indent, icon, self.message, label);
         }
     }
 }

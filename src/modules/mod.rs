@@ -35,6 +35,23 @@ pub trait ConfigGenerator {
     }
 }
 
+/// Get all generators
+pub fn all_generators() -> Vec<Box<dyn ConfigGenerator>> {
+    vec![
+        Box::new(crate::modules::GhosttyGenerator),
+        Box::new(crate::modules::BatGenerator),
+        Box::new(crate::modules::FzfGenerator),
+        Box::new(crate::modules::BtopGenerator),
+        Box::new(crate::modules::YaziGenerator),
+        Box::new(crate::modules::AlacrittyGenerator),
+    ]
+}
+
+/// Return generator based on string name
+pub fn generator(name: &str) -> Option<Box<dyn ConfigGenerator>> {
+    all_generators().into_iter().find(|g| g.name() == name)
+}
+
 /// Apply themes to available programs (enabled generators)
 pub fn apply_all(palette: &Palette, ctx: &IrisContext) -> Result<()> {
     println!();

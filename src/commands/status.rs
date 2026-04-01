@@ -1,49 +1,86 @@
 use crate::{
     core::IrisContext,
     models::Palette,
+    modules,
     utils::{CustomColor, hex_to_rgb},
 };
-use anyhow::Result;
 use colored::*;
 
 /// Handle application status command
-pub fn exec(ctx: &IrisContext) -> Result<()> {
-    println!("\n{}\n", "Iris System Status".purple());
+pub fn exec(ctx: &IrisContext) -> anyhow::Result<()> {
+    println!(
+        "\n {}  {}",
+        "󰄬".purple().bold(),
+        "Iris System Status".bold()
+    );
+    println!("{}", " ─────────────────────────────────────────".dimmed());
+
     let current = &ctx.state.current_theme;
 
-    println!("  {} Active theme: {}", "●".blue(), current.bold().blue());
+    println!("  {}  Active theme:  {}", "󰏘".blue(), current.bold().blue());
     println!(
-        "  {} Enabled apps: {}",
-        "●".yellow(),
-        ctx.state.enabled_generators.join(", ").white()
-    );
-    println!(
-        "  {} Config path:  {}",
-        "●".white(),
+        "  {}  Config path:   {}",
+        "󰉖".white(),
         ctx.paths.config.display().to_string().bright_black()
     );
 
+    println!("\n  {}  {}", "󰒓".yellow(), "Enabled Generators:".bold());
+
+    let enabled = &ctx.state.enabled_generators;
+    if enabled.is_empty() {
+        println!(
+            "    {}",
+            "No generators enabled. Use 'iris gen auto' to find apps.".dimmed()
+        );
+    } else {
+        for name in enabled {
+            let is_installed: bool = modules::generator(name)
+                .map(|g| g.is_installed())
+                .unwrap_or(false);
+
+            let status_icon = if is_installed {
+                "󰄬".green()
+            } else {
+                "󰀦".yellow()
+            };
+
+            print!("    {} {}  ", status_icon, name.dimmed());
+        }
+        println!();
+    }
+
     if let Ok(nvim_theme) = Palette::current() {
+        println!();
         if nvim_theme.to_lowercase() != current.to_lowercase() {
             println!(
-                "\n  {} {}",
-                "⚠".yellow(),
+                "  {} {}",
+                "󰀦".yellow().bold(),
                 "Out of sync with Neovim".yellow().bold()
             );
-            println!("    Neovim: {}", nvim_theme.bright_yellow());
-            println!("    Iris:   {}", current.dimmed());
+            println!(
+                "    {} {} {}",
+                "Neovim:".dimmed(),
+                nvim_theme.bright_yellow(),
+                "󰄬".dimmed()
+            );
+            println!(
+                "    {} {} {}",
+                "Iris:  ".dimmed(),
+                current.dimmed(),
+                "󰚔 run 'iris sync'".cyan().italic()
+            );
         } else {
-            println!("\n  {} {}", "✔".green(), "Synchronized with Neovim".green());
+            println!("  {} {}", "󰄬".green(), "Synchronized with Neovim".green());
         }
     }
 
     if let Ok(palette) = Palette::fetch(current) {
+        println!();
         display_palette(&palette, current);
     }
 
     Ok(())
 }
-
 /// Display current theme colors
 fn display_palette(p: &Palette, name: &str) {
     println!("\n  {} {}\n", "   Theme:".bold(), name.red().bold());

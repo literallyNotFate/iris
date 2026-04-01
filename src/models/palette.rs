@@ -180,14 +180,7 @@ impl Palette {
             .output();
 
         match output {
-            Ok(o) => {
-                if o.status.success() {
-                    true
-                } else {
-                    Status::warn(&format!("Theme '{}' not found in Neovim.", theme), 2);
-                    false
-                }
-            }
+            Ok(o) => o.status.success(),
             Err(_) => false,
         }
     }

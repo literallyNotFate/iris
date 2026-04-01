@@ -4,11 +4,10 @@ use crate::{
     modules,
     utils::Status,
 };
-use anyhow::Result;
 use colored::*;
 
 /// Handle application setup command
-pub fn exec(ctx: &IrisContext) -> Result<()> {
+pub fn exec(ctx: &IrisContext) -> anyhow::Result<()> {
     IrisSetup::run(ctx)?;
 
     println!();
