@@ -16,22 +16,37 @@ pub struct IrisSetup;
 
 impl IrisSetup {
     pub fn run(ctx: &IrisContext) -> Result<()> {
-        println!("\n{}\n", "Starting Iris Initialization".bold().blue());
+        println!(
+            "\n {}  {}",
+            "󰒓".purple().bold(),
+            "Iris Initialization".bold()
+        );
+        println!("{}", " ─────────────────────────────────────────".dimmed());
 
-        let task = Status::step("Preparing infrastructure...", 0);
+        let task = Status::step(
+            &format!("{}  Preparing infrastructure", "󰉖".cyan().bold()),
+            0,
+        );
         ctx.paths.ensure_dirs()?;
-        task.info(&format!("Data directory: {}", ctx.paths.config.display()));
         task.done(Some("File system is ready."));
 
-        let task = Status::step("Initializing application state...", 0);
+        let task = Status::step(
+            &format!("{}  Initializing application state", "󰏘".red().bold()),
+            0,
+        );
         Self::setup_initial_state(ctx, &task)?;
         task.done(Some("Application state initialized."));
 
-        let task = Status::step("Integrating with shell...", 0);
+        let task = Status::step(
+            &format!("{}  Integrating with shell", "󰒍".green().bold()),
+            0,
+        );
         Self::setup_zsh_hook(ctx, &task)?;
         task.done(Some("Shell integration complete."));
 
-        println!("\n{}", "Setup complete! Ready to sync.".green().bold());
+        println!("{}", " ─────────────────────────────────────────".dimmed());
+        println!("{}  {}", "󰄬".green().bold(), "Done!".green().bold(),);
+
         Ok(())
     }
 

@@ -81,6 +81,7 @@ pub fn exec(ctx: &IrisContext) -> anyhow::Result<()> {
 
     Ok(())
 }
+
 /// Display current theme colors
 fn display_palette(p: &Palette, name: &str) {
     println!("\n  {} {}\n", "   Theme:".bold(), name.red().bold());

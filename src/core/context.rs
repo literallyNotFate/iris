@@ -1,5 +1,8 @@
 use super::IrisPaths;
-use crate::{models::State, modules::ConfigGenerator};
+use crate::{
+    models::State,
+    modules::{ConfigGenerator, all_generators},
+};
 use anyhow::{Context as _, Result};
 
 /// Application context with state and paths (config/cache/base)
@@ -35,19 +38,7 @@ impl IrisContext {
 
     /// Helper function to add all supported generators
     fn init_generators(&mut self) {
-        use crate::modules::{
-            AlacrittyGenerator, BatGenerator, BtopGenerator, FzfGenerator, GhosttyGenerator,
-            YaziGenerator,
-        };
-
-        let all: Vec<Box<dyn crate::modules::ConfigGenerator>> = vec![
-            Box::new(GhosttyGenerator),
-            Box::new(BatGenerator),
-            Box::new(FzfGenerator),
-            Box::new(BtopGenerator),
-            Box::new(YaziGenerator),
-            Box::new(AlacrittyGenerator),
-        ];
+        let all: Vec<Box<dyn ConfigGenerator>> = all_generators();
 
         self.generators = all
             .into_iter()

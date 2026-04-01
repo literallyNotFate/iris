@@ -3,6 +3,7 @@ pub mod bat;
 pub mod btop;
 pub mod fzf;
 pub mod ghostty;
+pub mod starship;
 pub mod yazi;
 
 pub use alacritty::AlacrittyGenerator;
@@ -10,6 +11,7 @@ pub use bat::BatGenerator;
 pub use btop::BtopGenerator;
 pub use fzf::FzfGenerator;
 pub use ghostty::GhosttyGenerator;
+pub use starship::StarshipGenerator;
 pub use yazi::YaziGenerator;
 
 use crate::{core::IrisContext, models::Palette, utils::Status};
@@ -44,6 +46,7 @@ pub fn all_generators() -> Vec<Box<dyn ConfigGenerator>> {
         Box::new(crate::modules::BtopGenerator),
         Box::new(crate::modules::YaziGenerator),
         Box::new(crate::modules::AlacrittyGenerator),
+        Box::new(crate::modules::StarshipGenerator),
     ]
 }
 
