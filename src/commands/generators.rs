@@ -17,7 +17,7 @@ pub fn exec(action: GenAction, ctx: &mut IrisContext) -> anyhow::Result<()> {
                 .collect();
 
             println!(
-                "\n {} {}",
+                "\n {}  {}",
                 "󰒓".green().bold(),
                 "Configuration: Generator Management".bold()
             );
@@ -46,7 +46,11 @@ pub fn exec(action: GenAction, ctx: &mut IrisContext) -> anyhow::Result<()> {
                     ctx.state.enabled_generators.insert(name);
                 }
             } else {
-                println!("\n {} {}", "󰔟".yellow(), "No generators selected.".yellow());
+                println!(
+                    "\n {}  {}",
+                    "󰔟".yellow(),
+                    "No generators selected.".yellow()
+                );
             }
 
             println!();
@@ -125,7 +129,7 @@ pub fn exec(action: GenAction, ctx: &mut IrisContext) -> anyhow::Result<()> {
 
         GenAction::List => {
             println!(
-                "\n {} {}",
+                "\n {}  {}",
                 "󰈙".yellow().bold(),
                 "Available generators:".bold()
             );
@@ -150,7 +154,7 @@ pub fn exec(action: GenAction, ctx: &mut IrisContext) -> anyhow::Result<()> {
 
         GenAction::Auto => {
             println!(
-                "\n {} {}",
+                "\n {}  {}",
                 "󰩊".blue().bold(),
                 "Autodiscovering generators...".bold()
             );

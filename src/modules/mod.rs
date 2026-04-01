@@ -1,18 +1,6 @@
-pub mod alacritty;
-pub mod bat;
-pub mod btop;
-pub mod fzf;
-pub mod ghostty;
-pub mod starship;
-pub mod yazi;
-
-pub use alacritty::AlacrittyGenerator;
-pub use bat::BatGenerator;
-pub use btop::BtopGenerator;
-pub use fzf::FzfGenerator;
-pub use ghostty::GhosttyGenerator;
-pub use starship::StarshipGenerator;
-pub use yazi::YaziGenerator;
+pub mod shells;
+pub mod terminals;
+pub mod tools;
 
 use crate::{core::IrisContext, models::Palette, utils::Status};
 use anyhow::Result;
@@ -39,15 +27,13 @@ pub trait ConfigGenerator {
 
 /// Get all generators
 pub fn all_generators() -> Vec<Box<dyn ConfigGenerator>> {
-    vec![
-        Box::new(crate::modules::GhosttyGenerator),
-        Box::new(crate::modules::BatGenerator),
-        Box::new(crate::modules::FzfGenerator),
-        Box::new(crate::modules::BtopGenerator),
-        Box::new(crate::modules::YaziGenerator),
-        Box::new(crate::modules::AlacrittyGenerator),
-        Box::new(crate::modules::StarshipGenerator),
-    ]
+    let mut all: Vec<Box<dyn ConfigGenerator>> = Vec::new();
+
+    all.extend(terminals::get_all());
+    all.extend(shells::get_all());
+    all.extend(tools::get_all());
+
+    all
 }
 
 /// Return generator based on string name
