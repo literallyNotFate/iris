@@ -3,10 +3,14 @@ use std::path::PathBuf;
 
 /// Paths manager for application
 pub struct IrisPaths {
-    pub config: PathBuf,        // ~/.config/iris
-    pub cache: PathBuf,         // ~/.cache/iris
-    pub state_file: PathBuf,    // ~/.config/iris/state.json
-    pub current_theme: PathBuf, // ~/.cache/iris/current_theme
+    /// Points to: ~/.config/iris
+    pub config: PathBuf,
+    /// Points to: ~/.cache/iris
+    pub cache: PathBuf,
+    /// Points to: ~/.config/iris/state.json
+    pub state_file: PathBuf,
+    /// Points to: ~/.cache/iris/current_theme
+    pub current_theme: PathBuf,
 }
 
 impl IrisPaths {

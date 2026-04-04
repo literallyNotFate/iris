@@ -3,9 +3,9 @@ pub mod btop;
 pub mod fzf;
 pub mod yazi;
 
-use super::ConfigGenerator;
+use super::Generator;
 
-pub fn get_all() -> Vec<Box<dyn ConfigGenerator>> {
+pub fn get_all() -> Vec<Box<dyn Generator>> {
     vec![
         Box::new(bat::BatGenerator),
         Box::new(yazi::YaziGenerator),

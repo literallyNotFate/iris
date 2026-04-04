@@ -1,16 +1,12 @@
 use super::IrisPaths;
-use crate::{
-    models::State,
-    modules::{ConfigGenerator, all_generators},
-};
+use crate::{models::State, modules::GeneratorRegistry};
 use anyhow::{Context as _, Result};
 
 /// Application context with state and paths (config/cache/base)
 pub struct IrisContext {
-    pub generators: Vec<Box<dyn ConfigGenerator>>,
-
     pub paths: IrisPaths,
     pub state: State,
+    pub registry: GeneratorRegistry,
 }
 
 impl IrisContext {
@@ -26,28 +22,12 @@ impl IrisContext {
             State::default()
         };
 
-        let mut ctx = Self {
+        let ctx = Self {
             paths,
             state,
-            generators: Vec::new(),
+            registry: GeneratorRegistry::new(),
         };
-
-        ctx.init_generators();
         Ok(ctx)
-    }
-
-    /// Helper function to add all supported generators
-    fn init_generators(&mut self) {
-        let all: Vec<Box<dyn ConfigGenerator>> = all_generators();
-
-        self.generators = all
-            .into_iter()
-            .filter(|g| {
-                self.state
-                    .enabled_generators
-                    .contains(&g.name().to_string())
-            })
-            .collect();
     }
 
     /// Switch to specifc theme

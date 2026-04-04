@@ -1,70 +1,83 @@
 use crate::{
     core::IrisContext,
     models::Palette,
-    modules::ConfigGenerator,
+    modules::Generator,
     utils::{self, Status},
 };
 use anyhow::{Context, Result};
 use colored::Colorize;
-use std::fs;
+use std::{env, fs, path::PathBuf};
 
 /// Config generator for starship
 pub struct StarshipGenerator;
 
-impl ConfigGenerator for StarshipGenerator {
+impl Generator for StarshipGenerator {
     fn name(&self) -> &str {
         "starship"
     }
 
+    fn target_file_name(&self, _theme: &str) -> String {
+        "starship.toml".into()
+    }
+
+    fn env_config_directory(&self) -> Option<PathBuf> {
+        env::var("STARSHIP_CONFIG").ok().map(PathBuf::from)
+    }
+
     fn is_installed(&self) -> bool {
-        let home = dirs::home_dir().unwrap_or_default();
-        which::which("starship").is_ok() || home.join(".config/starship").exists()
+        which::which("starship").is_ok() || self.resolve_config_directory().exists()
     }
 
     fn apply(&self, p: &Palette, ctx: &IrisContext) -> Result<()> {
         let theme_name = &ctx.state.current_theme;
         let task = Status::step(&format!("Configuring {}...", self.name().cyan()), 2);
 
-        let starship_config = dirs::home_dir()
-            .context("Cannot get the home directory!")?
-            .join(".config/starship/starship.toml");
+        let config_path: PathBuf = env::var("STARSHIP_CONFIG")
+            .map(PathBuf::from)
+            .unwrap_or_else(|_| {
+                self.resolve_config_directory()
+                    .join(self.target_file_name(theme_name))
+            });
 
-        let palette_block = self.build_config(p, theme_name);
+        let palette_block: String = self.build_config(p, theme_name);
+        let palette_header: String = format!("[palettes.{}]", theme_name);
 
-        let existing = if starship_config.exists() {
-            fs::read_to_string(&starship_config)
-                .with_context(|| format!("Failed to read {:?}", starship_config))?
+        let existing = if config_path.exists() {
+            fs::read_to_string(&config_path)
+                .with_context(|| format!("Failed to read {:?}", config_path))?
         } else {
+            task.info("Creating Starship config directory...");
+            if let Some(parent) = config_path.parent() {
+                fs::create_dir_all(parent)?;
+            }
+
             format!("palette = \"{}\"\n", theme_name)
         };
 
-        let palette_header = format!("[palettes.{}]", theme_name);
-        let updated = if existing.contains(&palette_header) {
-            replace_palette_block(&existing, &palette_header, &palette_block)
-        } else {
-            let with_palette_key = set_palette_key(&existing, theme_name);
-            format!("{}\n{}", with_palette_key.trim_end(), palette_block)
-        };
+        let mut updated = set_palette_key(&existing, theme_name);
+        updated = replace_palette_block(&updated, &palette_header, &palette_block);
+
+        fs::write(&config_path, updated)
+            .with_context(|| format!("Failed to write {:?}", config_path))?;
 
         task.info(&format!(
             "Palette {} written to starship config.",
             utils::capitalize(theme_name).yellow()
         ));
 
-        fs::write(&starship_config, updated)
-            .with_context(|| format!("Failed to write {:?}", starship_config))?;
-
-        task.done(Some(&format!("{} sync complete.", self.name().cyan())));
+        task.done(Some(&format!("{} is ready!", self.name().cyan().bold())));
         Ok(())
     }
 
     fn setup_hint(&self) -> Option<String> {
-        let config = dirs::home_dir()?.join(".config/starship/starship.toml");
+        let config: PathBuf = env::var("STARSHIP_CONFIG")
+            .map(PathBuf::from)
+            .unwrap_or_else(|_| self.resolve_config_directory().join("starship.toml"));
 
         if !config.exists() {
             return Some(format!(
-                "No {} found. Create it and add:\n     {}",
-                "~/.config/starship/starship.toml".cyan(),
+                "Starship config not found. Create {} and add:\n      {}",
+                config.display().to_string().cyan(),
                 "palette = \"<theme_name>\"".yellow()
             ));
         }
@@ -72,8 +85,8 @@ impl ConfigGenerator for StarshipGenerator {
         let content = fs::read_to_string(&config).unwrap_or_default();
         if !content.contains("palette =") {
             return Some(format!(
-                "Theme won't load until you add to {}:\n     {}",
-                "starship.toml".cyan(),
+                "Theme won't load until you add to {}:\n      {}",
+                config.display().to_string().cyan(),
                 "palette = \"<theme_name>\"".yellow()
             ));
         }

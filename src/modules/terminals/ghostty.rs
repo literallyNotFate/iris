@@ -1,7 +1,7 @@
 use crate::{
     core::IrisContext,
     models::Palette,
-    modules::ConfigGenerator,
+    modules::Generator,
     utils::{self, Status},
 };
 use anyhow::{Context, Result};
@@ -11,78 +11,78 @@ use std::{fs, path::PathBuf};
 /// Config generator for ghostty terminal
 pub struct GhosttyGenerator;
 
-impl ConfigGenerator for GhosttyGenerator {
+impl Generator for GhosttyGenerator {
     fn name(&self) -> &str {
         "ghostty"
+    }
+
+    fn target_file_name(&self, _theme: &str) -> String {
+        "current_theme.conf".into()
     }
 
     fn apply(&self, p: &Palette, ctx: &IrisContext) -> Result<()> {
         let task = Status::step(&format!("Configuring {}...", self.name().cyan()), 2);
 
-        let ghostty_dir: PathBuf = dirs::home_dir()
-            .context("Cannot get the home directory!")?
-            .join(".config/ghostty");
-        let cache_file: PathBuf = ctx.paths.cache.join("ghostty.conf");
-        let link_path: PathBuf = ghostty_dir.join("current_theme.conf");
+        let ghostty_dir: PathBuf = self.resolve_config_directory();
+        let theme_file_name: String = self.target_file_name(&ctx.state.current_theme);
+        let cache_file: PathBuf = ctx.paths.cache.join("ghostty").join(&theme_file_name);
+        let link_path: PathBuf = ghostty_dir.join(&theme_file_name);
 
         let config_content: String =
             self.build_config(p, &utils::capitalize(&ctx.state.current_theme));
 
-        fs::create_dir_all(&ctx.paths.cache).context("Failed to create cache directory")?;
+        if let Some(parent) = cache_file.parent() {
+            fs::create_dir_all(parent)
+                .with_context(|| format!("Failed to create cache directory for {}", self.name()))?;
+        }
+
         fs::write(&cache_file, config_content)
             .with_context(|| format!("Failed to write ghostty cache to {:?}", cache_file))?;
 
-        task.info(&format!(
-            "Theme {} generated in cache.",
-            utils::capitalize(&ctx.state.current_theme).yellow()
-        ));
-
         if !ghostty_dir.exists() {
-            Status::warn("Ghostty config directory not found. Creating it...", 3);
-            std::fs::create_dir_all(&ghostty_dir).ok();
+            task.info("Creating Ghostty config directory...");
+            fs::create_dir_all(&ghostty_dir)?;
         }
 
         if link_path.exists() || link_path.is_symlink() {
-            std::fs::remove_file(&link_path).ok();
+            fs::remove_file(&link_path)?;
         }
 
         #[cfg(unix)]
         {
             use std::os::unix::fs::symlink;
             task.info("Linking cache to Ghostty config...");
-            symlink(&cache_file, &link_path).with_context(|| {
-                format!(
-                    "Failed to create symlink {:?} -> {:?}",
-                    link_path, cache_file
-                )
-            })?;
+            symlink(&cache_file, &link_path)
+                .with_context(|| format!("Failed to link {:?} -> {:?}", link_path, cache_file))?;
         }
 
-        task.done(Some(&format!("{} sync complete.", self.name().cyan())));
+        task.done(Some(&format!("{} is ready!", self.name().cyan().bold())));
         Ok(())
     }
 
     fn setup_hint(&self) -> Option<String> {
-        let ghostty_config: PathBuf = dirs::home_dir()?.join(".config/ghostty/config");
+        let ghostty_dir: PathBuf = self.resolve_config_directory();
+        let config_path: PathBuf = ghostty_dir.join("config");
+        let import_line: String = format!("config-file = {}", self.target_file_name(""));
 
-        if ghostty_config.exists() {
-            let content = fs::read_to_string(&ghostty_config).unwrap_or_default();
-            if content.contains("current_theme.conf") {
-                return None;
-            }
-
+        if !config_path.exists() {
             return Some(format!(
-                "Theme won't load until you add to {}:\n     {}",
-                "~/.config/ghostty/config".cyan(),
-                "config-file = ~/.config/ghostty/current_theme.conf".yellow()
+                "No config found. Create {} and add:\n      {}",
+                config_path.display().to_string().cyan(),
+                import_line.yellow()
             ));
         }
 
-        Some(format!(
-            "No {} found. Create it and add:\n     {}",
-            "~/.config/ghostty/config".cyan(),
-            "config-file = ~/.config/ghostty/current_theme.conf".yellow()
-        ))
+        let content: String = fs::read_to_string(&config_path).unwrap_or_default();
+        if !content.contains(&import_line) {
+            return Some(format!(
+                "Theme won't load until you add to {}:\n      {}",
+                config_path.display().to_string().cyan(),
+                import_line.yellow()
+            ));
+        }
+
+        None
     }
 }
 

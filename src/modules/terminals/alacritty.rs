@@ -1,7 +1,7 @@
 use crate::{
     core::IrisContext,
     models::Palette,
-    modules::ConfigGenerator,
+    modules::Generator,
     utils::{self, Status},
 };
 use anyhow::{Context, Result};
@@ -11,80 +11,73 @@ use std::{fs, path::PathBuf};
 /// Config generator for Alacritty terminal
 pub struct AlacrittyGenerator;
 
-impl ConfigGenerator for AlacrittyGenerator {
+impl Generator for AlacrittyGenerator {
     fn name(&self) -> &str {
         "alacritty"
+    }
+
+    fn target_file_name(&self, _theme: &str) -> String {
+        "current_theme.toml".into()
     }
 
     fn apply(&self, p: &Palette, ctx: &IrisContext) -> Result<()> {
         let task = Status::step(&format!("Configuring {}...", self.name().cyan()), 2);
 
-        let alacritty_dir = dirs::home_dir()
-            .context("Cannot get the home directory!")?
-            .join(".config/alacritty");
-
-        let cache_file: PathBuf = ctx.paths.cache.join("alacritty_theme.toml");
-        let link_path: PathBuf = alacritty_dir.join("current_theme.toml");
+        let alacritty_dir: PathBuf = self.resolve_config_directory();
+        let theme_file_name: String = self.target_file_name("");
+        let cache_file: PathBuf = ctx.paths.cache.join("alacritty").join(&theme_file_name);
+        let link_path: PathBuf = alacritty_dir.join(&theme_file_name);
 
         let config_content: String =
             self.build_config(p, &utils::capitalize(&ctx.state.current_theme));
-
-        fs::create_dir_all(&ctx.paths.cache).context("Failed to create cache directory")?;
-        fs::write(&cache_file, config_content)
-            .with_context(|| format!("Failed to write alacritty cache to {:?}", cache_file))?;
-
-        task.info(&format!(
-            "Theme {} generated in cache.",
-            utils::capitalize(&ctx.state.current_theme).yellow()
-        ));
+        fs::create_dir_all(cache_file.parent().unwrap())?;
+        fs::write(&cache_file, config_content)?;
 
         if !alacritty_dir.exists() {
-            Status::warn("Alacritty config directory not found. Creating it...", 3);
-            std::fs::create_dir_all(&alacritty_dir).ok();
+            task.info("Creating Alacritty config directory...");
+            fs::create_dir_all(&alacritty_dir)?;
         }
 
         if link_path.exists() || link_path.is_symlink() {
-            std::fs::remove_file(&link_path).ok();
+            fs::remove_file(&link_path)?;
         }
 
         #[cfg(unix)]
         {
             use std::os::unix::fs::symlink;
             task.info("Linking cache to Alacritty config...");
-            symlink(&cache_file, &link_path).with_context(|| {
-                format!(
-                    "Failed to create symlink {:?} -> {:?}",
-                    link_path, cache_file
-                )
-            })?;
+            symlink(&cache_file, &link_path)
+                .with_context(|| format!("Failed to link {:?} -> {:?}", link_path, cache_file))?;
         }
 
-        task.done(Some(&format!("{} sync complete.", self.name().cyan())));
+        task.done(Some(&format!("{} is ready!", self.name().cyan())));
         Ok(())
     }
 
     fn setup_hint(&self) -> Option<String> {
-        let alacritty_dir: PathBuf = dirs::home_dir()?.join(".config/alacritty");
+        let alacritty_dir: PathBuf = self.resolve_config_directory();
         let main_config: PathBuf = alacritty_dir.join("alacritty.toml");
+        let theme_path: PathBuf = alacritty_dir.join(self.target_file_name(""));
+        let import_line: String = format!("import = [\"{}\"]", theme_path.display());
 
-        if main_config.exists() {
-            let content: String = fs::read_to_string(&main_config).unwrap_or_default();
-            if content.contains("current_theme.toml") {
-                return None;
-            }
-
-            Some(format!(
-                "Theme won't load until you add to {}:\n     {}",
-                "alacritty.toml".cyan(),
-                "import = [\"~/.config/alacritty/current_theme.toml\"]".yellow()
-            ))
-        } else {
-            Some(format!(
-                "No {} found. Create it and add:\n     {}",
-                "alacritty.toml".cyan(),
-                "import = [\"~/.config/alacritty/current_theme.toml\"]".yellow()
-            ))
+        if !main_config.exists() {
+            return Some(format!(
+                "No config found. Create {} and add:\n      {}",
+                main_config.display().to_string().cyan(),
+                import_line.yellow()
+            ));
         }
+
+        let content = fs::read_to_string(&main_config).unwrap_or_default();
+        if !content.contains("current_theme.toml") {
+            return Some(format!(
+                "Add this line to your {}:\n      {}",
+                main_config.display().to_string().cyan(),
+                import_line.yellow()
+            ));
+        }
+
+        None
     }
 }
 

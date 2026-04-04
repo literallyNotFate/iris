@@ -1,7 +1,7 @@
 use crate::{
     core::IrisContext,
     models::Palette,
-    modules::ConfigGenerator,
+    modules::Generator,
     utils::{self, Status},
 };
 use anyhow::{Context, Result};
@@ -11,74 +11,61 @@ use std::{fs, path::PathBuf, process::Command};
 /// Config generator for bat
 pub struct BatGenerator;
 
-impl ConfigGenerator for BatGenerator {
+impl Generator for BatGenerator {
     fn name(&self) -> &str {
         "bat"
     }
 
-    fn apply(&self, p: &Palette, ctx: &IrisContext) -> Result<()> {
-        let theme_name: &String = &ctx.state.current_theme;
-        let display_name: String = utils::capitalize(theme_name);
+    fn target_file_name(&self, theme: &str) -> String {
+        format!("{}.tmTheme", theme)
+    }
 
-        let rules: String = self.build_config(p);
-        let content: String = format!(
-            r#"<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple Computer//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-    <key>name</key><string>{name}</string>
-    <key>settings</key>
-    <array>
-{rules}
-    </array>
-</dict>
-</plist>"#,
-            name = display_name,
-            rules = rules
-        );
-
-        let iris_bat_dir: PathBuf = ctx.paths.cache.join("bat_themes");
-        fs::create_dir_all(&iris_bat_dir)?;
-
-        let theme_file: PathBuf = iris_bat_dir.join(format!("{}.tmTheme", theme_name));
-        fs::write(&theme_file, &content).context("Failed to write theme file")?;
-
-        let config_task = Status::step(&format!("Configuring {}...", self.name().cyan()), 2);
-        config_task.info("Fetching bat configuration directory...");
-
-        let bat_config_dir: PathBuf = Command::new("bat")
+    fn resolve_config_directory(&self) -> PathBuf {
+        Command::new("bat")
             .arg("--config-dir")
             .output()
-            .map(|o| PathBuf::from(String::from_utf8_lossy(&o.stdout).trim()))
-            .context("Failed to get bat config dir")?;
+            .map(|o| PathBuf::from(String::from_utf8_lossy(&o.stdout).trim()).join("themes"))
+            .unwrap_or_else(|_| {
+                dirs::home_dir()
+                    .map(|p| p.join(".config").join("bat").join("themes"))
+                    .unwrap_or_else(|| PathBuf::from(".config/bat/themes"))
+            })
+    }
 
-        config_task.info(&format!("Config found at: {}", bat_config_dir.display()));
+    fn apply(&self, p: &Palette, ctx: &IrisContext) -> Result<()> {
+        let theme_name = &ctx.state.current_theme;
+        let display_name = utils::capitalize(theme_name);
+        let theme_file_name = self.target_file_name(theme_name);
+        let config_task = Status::step(&format!("Configuring {}...", self.name().cyan()), 2);
 
-        let bat_themes_dir: PathBuf = bat_config_dir.join("themes");
-        fs::create_dir_all(&bat_themes_dir)?;
+        config_task.info("Fetching bat configuration directory...");
+        let themes_dir = self.resolve_config_directory();
+        config_task.info(&format!("Config found at: {}", themes_dir.display()));
 
-        let link_path: PathBuf = bat_themes_dir.join(format!("{}.tmTheme", theme_name));
+        let cache_theme_path: PathBuf = ctx.paths.cache.join("bat_themes").join(&theme_file_name);
+        let link_path: PathBuf = themes_dir.join(&theme_file_name);
+
+        let content = self.build_plist_content(p, &display_name);
+        fs::create_dir_all(cache_theme_path.parent().unwrap())?;
+        fs::write(&cache_theme_path, content).context("Failed to write theme to cache")?;
+
+        if !themes_dir.exists() {
+            config_task.info("Creating Bat config directory...");
+            fs::create_dir_all(&themes_dir)?;
+        }
+
+        if link_path.exists() || link_path.is_symlink() {
+            fs::remove_file(&link_path)?;
+        }
 
         #[cfg(unix)]
         {
             use std::os::unix::fs::symlink;
-            if link_path.exists() || link_path.symlink_metadata().is_ok() {
-                fs::remove_file(&link_path)?;
-            }
             config_task.info("Linking theme to bat/themes...");
-
-            symlink(&theme_file, &link_path).with_context(|| {
-                format!(
-                    "Failed to create symlink {:?} -> {:?}",
-                    link_path, theme_file
-                )
+            symlink(&cache_theme_path, &link_path).with_context(|| {
+                format!("Failed to link {:?} -> {:?}", link_path, cache_theme_path)
             })?;
         }
-
-        config_task.done(Some(&format!(
-            "Generated {} theme and created symlink.",
-            self.name().cyan()
-        )));
 
         let bat_config: String = format!(
             "--theme=\"{name}\"\n--style=\"numbers,changes\"\n--color=\"always\"\n",
@@ -87,14 +74,14 @@ impl ConfigGenerator for BatGenerator {
         let config_file: PathBuf = ctx.paths.cache.join("bat.conf");
         fs::write(config_file, bat_config).context("Failed to write bat.conf")?;
 
-        let cache_task = Status::step("Rebuilding cache...", 2);
+        config_task.info("Rebuilding bat cache...");
         let output = Command::new("bat").arg("cache").arg("--build").output()?;
 
         if output.status.success() {
-            cache_task.done(Some(&format!("{} cache updated.", self.name().cyan())));
+            config_task.done(Some(&format!("{} is ready!", self.name().cyan().bold())));
         } else {
             let err = String::from_utf8_lossy(&output.stderr);
-            cache_task.fail(&err);
+            config_task.fail(&err);
             anyhow::bail!("Bat cache build failed");
         }
 
@@ -117,8 +104,28 @@ impl ConfigGenerator for BatGenerator {
 }
 
 impl BatGenerator {
+    /// Generate plist xml config for bat
+    pub fn build_plist_content(&self, p: &Palette, name: &str) -> String {
+        let rules: String = self.build_config(p);
+        format!(
+            r#"<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple Computer//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>name</key><string>{name}</string>
+    <key>settings</key>
+    <array>
+{rules}
+    </array>
+</dict>
+</plist>"#,
+            name = name,
+            rules = rules,
+        )
+    }
+
     /// Generate .tmTheme for bat
-    pub fn build_config(&self, p: &Palette) -> String {
+    fn build_config(&self, p: &Palette) -> String {
         let mut s = String::new();
         let c = |hex: &str| format!("#{}", hex.trim_start_matches('#'));
         let xml_safe = |t: &str| {

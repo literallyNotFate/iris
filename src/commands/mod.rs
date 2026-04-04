@@ -39,7 +39,7 @@ pub(crate) fn apply_theme(theme: &str, ctx: &mut IrisContext) -> Result<()> {
     let palette =
         Palette::fetch(theme).with_context(|| format!("Failed to fetch colors for '{}'", theme))?;
 
-    crate::modules::apply_all(&palette, ctx)?;
+    ctx.registry.apply_all(&palette, ctx)?;
     switch_task.done(Some(&format!(
         "{} applied to all active apps",
         utils::capitalize(theme)

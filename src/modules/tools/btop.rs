@@ -1,7 +1,7 @@
 use crate::{
     core::IrisContext,
     models::Palette,
-    modules::ConfigGenerator,
+    modules::Generator,
     utils::{self, Status},
 };
 use anyhow::{Context, Result};
@@ -11,9 +11,19 @@ use std::{fs, path::PathBuf};
 /// Config generator for btop utility
 pub struct BtopGenerator;
 
-impl ConfigGenerator for BtopGenerator {
+impl Generator for BtopGenerator {
     fn name(&self) -> &str {
         "btop"
+    }
+
+    fn target_file_name(&self, theme: &str) -> String {
+        format!("{}.theme", theme)
+    }
+
+    fn resolve_config_directory(&self) -> PathBuf {
+        dirs::home_dir()
+            .map(|p| p.join(".config").join("btop").join("themes"))
+            .unwrap_or_else(|| PathBuf::from(".config/btop/themes"))
     }
 
     fn apply(&self, p: &Palette, ctx: &IrisContext) -> Result<()> {
@@ -21,25 +31,14 @@ impl ConfigGenerator for BtopGenerator {
         let display_name: String = utils::capitalize(theme_name);
         let task = Status::step(&format!("Configuring {}...", self.name().cyan()), 2);
 
-        let btop_dir: PathBuf = dirs::home_dir()
-            .context("Cannot get the home directory!")?
-            .join(".config/btop");
-        let themes_dir: PathBuf = btop_dir.join("themes");
+        let themes_dir: PathBuf = self.resolve_config_directory();
+        let theme_file_name: String = self.target_file_name(theme_name);
 
-        if !themes_dir.exists() {
-            task.info("Creating btop themes directory...");
-            fs::create_dir_all(&themes_dir)?;
-        }
-
-        let cache_file: PathBuf = ctx
-            .paths
-            .cache
-            .join(format!("btop_themes/{}.theme", theme_name));
+        let cache_file = ctx.paths.cache.join("btop_themes").join(&theme_file_name);
         let btop_theme_link: PathBuf = themes_dir.join(format!("{}.theme", theme_name));
 
         fs::create_dir_all(cache_file.parent().unwrap())?;
         let content: String = self.build_config(p, &display_name);
-
         fs::write(&cache_file, content)
             .with_context(|| format!("Failed to write btop theme to {:?}", cache_file))?;
 
@@ -49,8 +48,10 @@ impl ConfigGenerator for BtopGenerator {
         ));
 
         if !themes_dir.exists() {
+            task.info("Creating Btop config directory...");
             fs::create_dir_all(&themes_dir)?;
         }
+
         if btop_theme_link.exists() || btop_theme_link.is_symlink() {
             fs::remove_file(&btop_theme_link)?;
         }
@@ -70,7 +71,9 @@ impl ConfigGenerator for BtopGenerator {
             })?;
         }
 
-        let conf_path: PathBuf = btop_dir.join("btop.conf");
+        let btop_root = themes_dir.parent().unwrap_or(&themes_dir);
+        let conf_path: PathBuf = btop_root.join("btop.conf");
+
         if conf_path.exists() {
             task.info(&format!(
                 "Setting color_theme = \"{}\" in btop.conf",
@@ -78,28 +81,29 @@ impl ConfigGenerator for BtopGenerator {
             ));
             self.update_btop_conf(&conf_path, theme_name)?;
         } else {
-            Status::warn("btop.conf not found. Theme generated but not activated.", 3);
+            Status::warn("btop.conf not found. Theme linked but not activated.", 3);
         }
 
-        task.done(Some(&format!("{} is ready to sync!", self.name().cyan())));
+        task.done(Some(&format!("{} is ready!", self.name().cyan().bold())));
         Ok(())
     }
 
     fn setup_hint(&self) -> Option<String> {
-        let btop_conf: PathBuf = dirs::home_dir()?.join(".config/btop/btop.conf");
+        let themes_dir: PathBuf = self.resolve_config_directory();
+        let btop_conf: PathBuf = themes_dir.parent()?.join("btop.conf");
 
         if !btop_conf.exists() {
             return Some(format!(
-                "No {} found. Create it and add:\n     {}",
+                "No {} found. Run btop once to generate it, or create it manually at {}.",
                 "btop.conf".cyan(),
-                "color_theme = \"<theme_name>\"".yellow()
+                btop_conf.display().to_string().dimmed()
             ));
         }
 
         let content: String = fs::read_to_string(&btop_conf).unwrap_or_default();
         if !content.contains("color_theme") {
             return Some(format!(
-                "Theme won't load until you add to {}:\n     {}",
+                "Iris generated the theme, but you need to enable it in {}:\n      {}",
                 "btop.conf".cyan(),
                 "color_theme = \"<theme_name>\"".yellow()
             ));

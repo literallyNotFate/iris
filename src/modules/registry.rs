@@ -1,0 +1,114 @@
+use crate::{
+    core::IrisContext,
+    models::{Palette, State},
+    modules::{Generator, shells, terminals, tools},
+    utils::Status,
+};
+use colored::Colorize;
+
+/// The list of all generators
+#[derive(Default)]
+pub struct GeneratorRegistry {
+    pub generators: Vec<Box<dyn Generator>>,
+}
+
+impl GeneratorRegistry {
+    /// Creates registy and appends all generators/modules
+    pub fn new() -> Self {
+        let mut generators: Vec<Box<dyn Generator>> = Vec::new();
+
+        generators.extend(terminals::get_all());
+        generators.extend(shells::get_all());
+        generators.extend(tools::get_all());
+
+        Self { generators }
+    }
+
+    /// Access to all generators
+    pub fn all(&self) -> &[Box<dyn Generator>] {
+        &self.generators
+    }
+
+    /// List of all supported generators names (for MultiSelect)
+    pub fn names(&self) -> Vec<String> {
+        self.generators
+            .iter()
+            .map(|g| g.name().to_string())
+            .collect()
+    }
+
+    /// Get generator by name
+    pub fn get(&self, name: &str) -> Option<&dyn Generator> {
+        self.generators
+            .iter()
+            .find(|g| g.name() == name)
+            .map(|b| b.as_ref())
+    }
+
+    /// Get list of all installed tools
+    pub fn installed(&self) -> Vec<&dyn Generator> {
+        self.generators
+            .iter()
+            .filter(|g| g.is_installed())
+            .map(|b| b.as_ref())
+            .collect()
+    }
+
+    /// Check whether this generator is installed in system
+    pub fn is_installed(&self, name: &str) -> bool {
+        self.generators
+            .iter()
+            .find(|g| g.name() == name)
+            .map(|g| g.is_installed())
+            .unwrap_or(false)
+    }
+
+    /// Checks whether this generator exists
+    pub fn exists(&self, name: &str) -> bool {
+        self.generators.iter().any(|g| g.name() == name)
+    }
+
+    /// Discover unenabled generators if they are installed
+    pub fn discover_unenabled(&self, state: &State) -> Vec<&dyn Generator> {
+        self.generators
+            .iter()
+            .filter(|g| g.is_installed() && !state.is_enabled(g.name()))
+            .map(|b| b.as_ref())
+            .collect()
+    }
+}
+
+impl GeneratorRegistry {
+    /// Apply themes to available programs (enabled generators)
+    pub fn apply_all(&self, palette: &Palette, ctx: &IrisContext) -> anyhow::Result<()> {
+        println!();
+        let enabled = &ctx.state.enabled_generators;
+        let to_apply: Vec<_> = self
+            .generators
+            .iter()
+            .filter(|g| enabled.contains(g.name()) && g.is_installed())
+            .collect();
+
+        let total_task = Status::step(
+            &format!(
+                "Applying palette to {} active targets...",
+                to_apply.len().to_string().green()
+            ),
+            0,
+        );
+
+        for generator in to_apply {
+            if let Err(e) = generator.apply(palette, ctx) {
+                total_task.fail(&format!("Failed at {}: {}", generator.name().cyan(), e));
+                return Err(e);
+            }
+
+            if let Some(hint) = generator.setup_hint() {
+                total_task.info(&format!("{} {}", "Hint:".yellow(), hint.dimmed()));
+            }
+        }
+
+        total_task.done(Some("All selected targets updated."));
+        Ok(())
+    }
+}

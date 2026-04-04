@@ -1,7 +1,7 @@
 use crate::{
     core::IrisContext,
     models::Palette,
-    modules::ConfigGenerator,
+    modules::Generator,
     utils::{self, Status},
 };
 use anyhow::{Context, Result};
@@ -11,24 +11,30 @@ use std::{fs, path::PathBuf};
 /// Config generator for yazi
 pub struct YaziGenerator;
 
-impl ConfigGenerator for YaziGenerator {
+impl Generator for YaziGenerator {
     fn name(&self) -> &str {
         "yazi"
+    }
+
+    fn target_file_name(&self, _theme: &str) -> String {
+        "theme.toml".into()
     }
 
     fn apply(&self, p: &Palette, ctx: &IrisContext) -> Result<()> {
         let theme_name: &String = &ctx.state.current_theme;
         let task = Status::step(&format!("Configuring {}...", self.name().cyan()), 2);
 
-        let yazi_dir: PathBuf = dirs::home_dir()
-            .context("Cannot get the home directory!")?
-            .join(".config/yazi");
+        let yazi_dir: PathBuf = self.resolve_config_directory();
+        if !yazi_dir.exists() {
+            task.info("Creating Yazi config directory...");
+            fs::create_dir_all(&yazi_dir)?;
+        }
 
         let cache_file: PathBuf = ctx
             .paths
             .cache
             .join(format!("yazi_themes/{}.toml", theme_name));
-        let theme_link: PathBuf = yazi_dir.join("theme.toml");
+        let theme_link: PathBuf = yazi_dir.join(self.target_file_name(theme_name));
 
         let content: String = self.build_config(p, theme_name);
 
@@ -39,9 +45,6 @@ impl ConfigGenerator for YaziGenerator {
             utils::capitalize(&ctx.state.current_theme).yellow()
         ));
 
-        if !yazi_dir.exists() {
-            fs::create_dir_all(&yazi_dir)?;
-        }
         if theme_link.exists() || theme_link.is_symlink() {
             fs::remove_file(&theme_link)?;
         }
@@ -58,17 +61,17 @@ impl ConfigGenerator for YaziGenerator {
             })?;
         }
 
-        task.done(Some(&format!("Theme applied to {}.", self.name().cyan())));
+        task.done(Some(&format!("{} is ready!", self.name().cyan().bold())));
         Ok(())
     }
 
     fn setup_hint(&self) -> Option<String> {
-        let yazi_dir: PathBuf = dirs::home_dir()?.join(".config/yazi");
+        let yazi_dir: PathBuf = self.resolve_config_directory();
 
         if !yazi_dir.exists() {
             return Some(format!(
                 "No {} found — make sure Yazi is installed and run it once to initialize config.",
-                "~/.config/yazi".cyan(),
+                yazi_dir.display().to_string().cyan(),
             ));
         }
 
@@ -79,10 +82,6 @@ impl ConfigGenerator for YaziGenerator {
 impl YaziGenerator {
     /// Build yazi theme
     fn build_config(&self, p: &Palette, name: &str) -> String {
-        let bat_theme_path = dirs::home_dir()
-            .map(|h| format!("{}/.config/bat/themes/{}.tmTheme", h.display(), name))
-            .unwrap_or_default();
-
         let red = &p.ansi[1];
         let green = &p.ansi[2];
         let orange = &p.ansi[3];
@@ -128,8 +127,6 @@ tab_width    = 1
 
 border_symbol = "│"
 border_style  = {{ fg = "{tan}" }}
-
-syntect_theme = "{bat_theme_path}"
 
 [status]
 separator_open  = ""
@@ -229,7 +226,6 @@ conds = [
             br_blue = br_blue,
             br_magenta = br_magenta,
             br_teal = br_teal,
-            bat_theme_path = bat_theme_path,
         )
     }
 }

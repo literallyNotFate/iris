@@ -1,7 +1,6 @@
 use crate::{
     core::IrisContext,
     models::Palette,
-    modules,
     utils::{CustomColor, hex_to_rgb},
 };
 use colored::*;
@@ -34,11 +33,7 @@ pub fn exec(ctx: &IrisContext) -> anyhow::Result<()> {
         );
     } else {
         for name in enabled {
-            let is_installed: bool = modules::generator(name)
-                .map(|g| g.is_installed())
-                .unwrap_or(false);
-
-            let status_icon = if is_installed {
+            let status_icon = if ctx.registry.is_installed(name) {
                 "󰄬".green()
             } else {
                 "󰀦".yellow()

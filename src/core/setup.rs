@@ -1,12 +1,11 @@
 use crate::{
     core::IrisContext,
-    models::{Palette, State},
+    models::Palette,
     utils::{Status, Task},
 };
 use anyhow::{Context as _, Result};
 use colored::Colorize;
 use std::{
-    collections::BTreeSet,
     fs::{self, OpenOptions},
     io::Write,
 };
@@ -15,7 +14,7 @@ use std::{
 pub struct IrisSetup;
 
 impl IrisSetup {
-    pub fn run(ctx: &IrisContext) -> Result<()> {
+    pub fn run(ctx: &mut IrisContext) -> Result<()> {
         println!(
             "\n {}  {}",
             "󰒓".purple().bold(),
@@ -50,7 +49,7 @@ impl IrisSetup {
         Ok(())
     }
 
-    fn setup_initial_state(ctx: &IrisContext, parent_task: &Task) -> Result<()> {
+    fn setup_initial_state(ctx: &mut IrisContext, parent_task: &Task) -> Result<()> {
         if ctx.paths.state_file.exists() {
             parent_task.info("Found existing state.json, loading current configuration.");
             return Ok(());
@@ -61,33 +60,25 @@ impl IrisSetup {
             .context("Neovim theme not detected. Please set a colorscheme in Neovim first.")?;
 
         parent_task.info("Scanning for compatible tools...");
-        let generators = crate::modules::all_generators();
+        let installed = ctx.registry.installed();
 
-        let enabled: Vec<String> = generators
-            .iter()
-            .filter_map(|g| {
-                if g.is_installed() {
-                    parent_task.info(&format!("Found {}", g.name().cyan()));
-                    Some(g.name().to_string())
-                } else {
-                    None
-                }
-            })
-            .collect();
-
-        if enabled.is_empty() {
+        if installed.is_empty() {
             parent_task.warn(
                 "No compatible tools found. You can enable them later via 'iris gen select'.",
             );
+        } else {
+            for generator in &installed {
+                parent_task.info(&format!("Found: {}", generator.name().green().bold()));
+                ctx.state.enable_generator(generator.name());
+            }
         }
 
-        let enabled_set: BTreeSet<String> = enabled.into_iter().collect();
-        let initial_state: State = State::new(current_theme, enabled_set);
-        initial_state.save_to(&ctx.paths.state_file)?;
+        ctx.state.set_theme(current_theme);
+        ctx.save()?;
 
         parent_task.info(&format!(
-            "State saved to {}",
-            ctx.paths.state_file.display()
+            "Configuration persisted to {}",
+            ctx.paths.state_file.display().to_string().dimmed()
         ));
         Ok(())
     }

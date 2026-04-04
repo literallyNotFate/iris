@@ -2,7 +2,7 @@ use crate::core::{IrisContext, IrisSetup};
 use colored::*;
 
 /// Handle application setup command
-pub fn exec(ctx: &IrisContext) -> anyhow::Result<()> {
+pub fn exec(ctx: &mut IrisContext) -> anyhow::Result<()> {
     IrisSetup::run(ctx)?;
 
     println!(
