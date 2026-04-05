@@ -1,8 +1,4 @@
-use crate::{
-    core::IrisContext,
-    models::Palette,
-    utils::{Status, Task},
-};
+use crate::{core::IrisContext, models::Palette, ui::Task};
 use anyhow::{Context as _, Result};
 use colored::Colorize;
 use std::{
@@ -15,60 +11,62 @@ pub struct IrisSetup;
 
 impl IrisSetup {
     pub fn run(ctx: &mut IrisContext) -> Result<()> {
-        println!(
-            "\n {}  {}",
-            "󰒓".purple().bold(),
-            "Iris Initialization".bold()
-        );
-        println!("{}", " ─────────────────────────────────────────".dimmed());
+        println!();
+        if !ctx.log.quiet {
+            println!(" {}  {}", "󰒓".purple().bold(), "Iris initialization".bold());
+            println!();
+        }
 
-        let task = Status::step(
-            &format!("{}  Preparing infrastructure", "󰉖".cyan().bold()),
-            0,
-        );
-        ctx.paths.ensure_dirs()?;
-        task.done(Some("File system is ready."));
+        {
+            let mut task = ctx.log.step(
+                &format!("{}  Preparing infrastructure", "󰉖".cyan().bold()),
+                1,
+            );
+            ctx.paths.ensure_dirs()?;
+            task.done(false);
+        }
 
-        let task = Status::step(
-            &format!("{}  Initializing application state", "󰏘".red().bold()),
-            0,
-        );
-        Self::setup_initial_state(ctx, &task)?;
-        task.done(Some("Application state initialized."));
+        {
+            let mut task = ctx.log.step(
+                &format!("{}  Initializing application state", "󰏘".red().bold()),
+                1,
+            );
+            Self::setup_initial_state(ctx, &task)?;
+            task.done(false);
+        }
 
-        let task = Status::step(
-            &format!("{}  Integrating with shell", "󰒍".green().bold()),
-            0,
-        );
-        Self::setup_zsh_hook(ctx, &task)?;
-        task.done(Some("Shell integration complete."));
-
-        println!("{}", " ─────────────────────────────────────────".dimmed());
-        println!("{}  {}", "󰄬".green().bold(), "Done!".green().bold(),);
+        {
+            let mut task = ctx.log.step(
+                &format!("{}  Integrating with shell (zsh)", "󰒍".green().bold()),
+                1,
+            );
+            Self::setup_zsh_hook(ctx, &task)?;
+            task.done(true);
+        }
 
         Ok(())
     }
 
-    fn setup_initial_state(ctx: &mut IrisContext, parent_task: &Task) -> Result<()> {
+    fn setup_initial_state(ctx: &mut IrisContext, task: &Task) -> Result<()> {
         if ctx.paths.state_file.exists() {
-            parent_task.info("Found existing state.json, loading current configuration.");
+            task.info("Found existing state.json, loading current configuration.");
             return Ok(());
         }
 
-        parent_task.info("Detecting active Neovim theme...");
-        let current_theme = Palette::current()
+        task.info("Detecting active Neovim theme...");
+        let current_theme = Palette::current(&ctx.log)
             .context("Neovim theme not detected. Please set a colorscheme in Neovim first.")?;
 
-        parent_task.info("Scanning for compatible tools...");
+        task.info("Scanning for compatible tools...");
         let installed = ctx.registry.installed();
 
         if installed.is_empty() {
-            parent_task.warn(
+            task.info(
                 "No compatible tools found. You can enable them later via 'iris gen select'.",
             );
         } else {
             for generator in &installed {
-                parent_task.info(&format!("Found: {}", generator.name().green().bold()));
+                task.info(&format!("Found: {}", generator.name().green().bold()));
                 ctx.state.enable_generator(generator.name());
             }
         }
@@ -76,19 +74,20 @@ impl IrisSetup {
         ctx.state.set_theme(current_theme);
         ctx.save()?;
 
-        parent_task.info(&format!(
+        task.info(&format!(
             "Configuration persisted to {}",
             ctx.paths.state_file.display().to_string().dimmed()
         ));
         Ok(())
     }
 
-    pub fn setup_zsh_hook(ctx: &IrisContext, parent_task: &Task) -> Result<()> {
+    pub fn setup_zsh_hook(ctx: &IrisContext, task: &Task) -> Result<()> {
         let home = dirs::home_dir().context("Home dir not found")?;
         let zshrc = home.join(".zshrc");
 
         if !zshrc.exists() {
-            Status::warn(".zshrc not found, skipping hook injection.", 1);
+            ctx.log
+                .warn(".zshrc not found, skipping hook injection.", 1);
             return Ok(());
         }
 
@@ -96,12 +95,12 @@ impl IrisSetup {
         let content: String = fs::read_to_string(&zshrc)?;
 
         if content.contains(hook_id) {
-            parent_task.info("Zsh hook already present in .zshrc.");
+            task.info("Zsh hook already present in .zshrc.");
             return Ok(());
         }
 
         let cache_file = ctx.paths.cache.join("fzf.sh");
-        parent_task.info("Injecting synchronization hook into .zshrc...");
+        task.info("Injecting synchronization hook into .zshrc...");
 
         let hook: String = format!(
             r#"
@@ -128,7 +127,7 @@ add-zsh-hook precmd _iris_fzf_sync
         let mut file = OpenOptions::new().append(true).open(&zshrc)?;
         writeln!(file, "{}", full_hook)?;
 
-        parent_task.info("Hook successfully appended.");
+        task.info("Hook successfully appended.");
         Ok(())
     }
 }

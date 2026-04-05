@@ -2,7 +2,7 @@ use crate::{
     core::IrisContext,
     models::Palette,
     modules::Generator,
-    utils::{self, Status},
+    utils::{self},
 };
 use anyhow::{Context, Result};
 use colored::Colorize;
@@ -21,8 +21,6 @@ impl Generator for GhosttyGenerator {
     }
 
     fn apply(&self, p: &Palette, ctx: &IrisContext) -> Result<()> {
-        let task = Status::step(&format!("Configuring {}...", self.name().cyan()), 2);
-
         let ghostty_dir: PathBuf = self.resolve_config_directory();
         let theme_file_name: String = self.target_file_name(&ctx.state.current_theme);
         let cache_file: PathBuf = ctx.paths.cache.join("ghostty").join(&theme_file_name);
@@ -40,7 +38,10 @@ impl Generator for GhosttyGenerator {
             .with_context(|| format!("Failed to write ghostty cache to {:?}", cache_file))?;
 
         if !ghostty_dir.exists() {
-            task.info("Creating Ghostty config directory...");
+            ctx.log.info(&format!(
+                "Creating {} config directory...",
+                "ghostty".bold()
+            ));
             fs::create_dir_all(&ghostty_dir)?;
         }
 
@@ -51,12 +52,12 @@ impl Generator for GhosttyGenerator {
         #[cfg(unix)]
         {
             use std::os::unix::fs::symlink;
-            task.info("Linking cache to Ghostty config...");
+            ctx.log
+                .info(&format!("Linking cache to {} config...", "ghostty".bold()));
             symlink(&cache_file, &link_path)
                 .with_context(|| format!("Failed to link {:?} -> {:?}", link_path, cache_file))?;
         }
 
-        task.done(Some(&format!("{} is ready!", self.name().cyan().bold())));
         Ok(())
     }
 

@@ -20,40 +20,35 @@ pub fn handle(command: Commands, ctx: &mut IrisContext) -> Result<()> {
     Ok(())
 }
 
-use crate::{
-    models::Palette,
-    utils::{self, Status},
-};
+use crate::models::Palette;
 use colored::Colorize;
 
 /// Helper function to apply theme
 pub(crate) fn apply_theme(theme: &str, ctx: &mut IrisContext) -> Result<()> {
-    println!(
-        "\n {} {}",
-        "󰚔".green().bold(),
-        format!("Applying {}...", theme.bold()).yellow()
-    );
-    println!("{}", " ─────────────────────────────────────────".dimmed());
+    if !ctx.log.quiet {
+        println!(
+            "\n {} {}",
+            "󰚔".green().bold(),
+            format!("Applying {}...", theme).bold()
+        );
+        println!();
+    }
 
-    let switch_task = Status::step("Applying palette to generators", 0);
-    let palette =
-        Palette::fetch(theme).with_context(|| format!("Failed to fetch colors for '{}'", theme))?;
+    let palette = {
+        let mut t = ctx.log.step(&format!("Fetching colors: {}", theme), 1);
+        let p = Palette::fetch(theme, &ctx.log)
+            .with_context(|| format!("Failed to fetch colors for '{}'", theme))?;
+        t.done(true);
+        p
+    };
 
     ctx.registry.apply_all(&palette, ctx)?;
-    switch_task.done(Some(&format!(
-        "{} applied to all active apps",
-        utils::capitalize(theme)
-    )));
 
-    let state_task = Status::step("Updating local state", 0);
-    ctx.update(theme)?;
-    state_task.done(Some("state.json updated"));
-
-    println!(
-        "\n {} {}",
-        "󰄬".green().bold(),
-        "All systems updated successfully!".bold()
-    );
+    {
+        let mut state_task = ctx.log.step("Updating local state...", 1);
+        ctx.update(theme)?;
+        state_task.done(true);
+    }
 
     Ok(())
 }

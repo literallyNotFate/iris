@@ -1,4 +1,4 @@
-use crate::{commands::apply_theme, core::IrisContext, models::Palette, utils::Status};
+use crate::{commands::apply_theme, core::IrisContext, models::Palette};
 use colored::Colorize;
 
 /// Handle application sync command
@@ -9,14 +9,20 @@ pub fn exec(ctx: &mut IrisContext) -> anyhow::Result<()> {
         "Synchronizing with Neovim...".bold()
     );
 
-    let theme: String = Palette::current()?;
+    let theme = {
+        let mut t = ctx.log.step("Detecting Neovim theme", 1);
+        let name = Palette::current(&ctx.log)?;
+        t.done(true);
+        name
+    };
+
+    println!();
     if theme.to_lowercase() == ctx.state.current_theme.to_lowercase() {
-        Status::success("Everything is already in sync", 0);
+        ctx.log.success("Everything is already in sync", 0);
         return Ok(());
     }
 
     apply_theme(&theme, ctx)?;
-
-    println!(" {} {}", "󰄬".green(), "All apps are now in sync".dimmed());
+    ctx.log.success("All apps are now in sync!", 0);
     Ok(())
 }

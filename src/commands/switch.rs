@@ -2,7 +2,7 @@ use crate::{
     commands::apply_theme,
     core::IrisContext,
     models::Palette,
-    utils::{self, Status},
+    utils::{self},
 };
 use colored::Colorize;
 
@@ -13,20 +13,23 @@ pub fn exec(name: String, ctx: &mut IrisContext) -> anyhow::Result<()> {
         "󰚔".yellow().bold(),
         "Manual theme switch".bold()
     );
+    println!();
 
-    if !Palette::exists(&name) {
-        println!();
-        Status::error(
+    if !Palette::exists(&name, &ctx.log) {
+        ctx.log.error(
             &format!(
                 "Theme '{}' not found in Neovim.",
                 utils::capitalize(&name).red().bold()
             ),
             0,
         );
-        println!(
-            "  {}  Run `:colorscheme <Tab>` in Neovim to see all available themes.",
-            "󰋗 Tip:".blue()
-        );
+
+        if ctx.log.quiet {
+            println!(
+                "  {}  Run `:colorscheme <Tab>` in Neovim to see all available themes.",
+                "󰋗 Tip:".blue()
+            );
+        }
         return Ok(());
     }
 

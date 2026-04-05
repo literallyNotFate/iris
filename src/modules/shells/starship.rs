@@ -2,7 +2,7 @@ use crate::{
     core::IrisContext,
     models::Palette,
     modules::Generator,
-    utils::{self, Status},
+    utils::{self},
 };
 use anyhow::{Context, Result};
 use colored::Colorize;
@@ -30,8 +30,6 @@ impl Generator for StarshipGenerator {
 
     fn apply(&self, p: &Palette, ctx: &IrisContext) -> Result<()> {
         let theme_name = &ctx.state.current_theme;
-        let task = Status::step(&format!("Configuring {}...", self.name().cyan()), 2);
-
         let config_path: PathBuf = env::var("STARSHIP_CONFIG")
             .map(PathBuf::from)
             .unwrap_or_else(|_| {
@@ -46,7 +44,10 @@ impl Generator for StarshipGenerator {
             fs::read_to_string(&config_path)
                 .with_context(|| format!("Failed to read {:?}", config_path))?
         } else {
-            task.info("Creating Starship config directory...");
+            ctx.log.info(&format!(
+                "Creating {} config directory...",
+                "starship".bold()
+            ));
             if let Some(parent) = config_path.parent() {
                 fs::create_dir_all(parent)?;
             }
@@ -60,12 +61,11 @@ impl Generator for StarshipGenerator {
         fs::write(&config_path, updated)
             .with_context(|| format!("Failed to write {:?}", config_path))?;
 
-        task.info(&format!(
+        ctx.log.info(&format!(
             "Palette {} written to starship config.",
             utils::capitalize(theme_name).yellow()
         ));
 
-        task.done(Some(&format!("{} is ready!", self.name().cyan().bold())));
         Ok(())
     }
 

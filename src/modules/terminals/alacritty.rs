@@ -2,7 +2,7 @@ use crate::{
     core::IrisContext,
     models::Palette,
     modules::Generator,
-    utils::{self, Status},
+    utils::{self},
 };
 use anyhow::{Context, Result};
 use colored::Colorize;
@@ -21,8 +21,6 @@ impl Generator for AlacrittyGenerator {
     }
 
     fn apply(&self, p: &Palette, ctx: &IrisContext) -> Result<()> {
-        let task = Status::step(&format!("Configuring {}...", self.name().cyan()), 2);
-
         let alacritty_dir: PathBuf = self.resolve_config_directory();
         let theme_file_name: String = self.target_file_name("");
         let cache_file: PathBuf = ctx.paths.cache.join("alacritty").join(&theme_file_name);
@@ -34,7 +32,10 @@ impl Generator for AlacrittyGenerator {
         fs::write(&cache_file, config_content)?;
 
         if !alacritty_dir.exists() {
-            task.info("Creating Alacritty config directory...");
+            ctx.log.info(&format!(
+                "Creating {} config directory...",
+                "alacritty".bold()
+            ));
             fs::create_dir_all(&alacritty_dir)?;
         }
 
@@ -45,12 +46,14 @@ impl Generator for AlacrittyGenerator {
         #[cfg(unix)]
         {
             use std::os::unix::fs::symlink;
-            task.info("Linking cache to Alacritty config...");
+            ctx.log.info(&format!(
+                "Linking cache to {} config...",
+                "alacritty".bold()
+            ));
             symlink(&cache_file, &link_path)
                 .with_context(|| format!("Failed to link {:?} -> {:?}", link_path, cache_file))?;
         }
 
-        task.done(Some(&format!("{} is ready!", self.name().cyan())));
         Ok(())
     }
 

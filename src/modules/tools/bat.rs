@@ -2,7 +2,7 @@ use crate::{
     core::IrisContext,
     models::Palette,
     modules::Generator,
-    utils::{self, Status},
+    utils::{self},
 };
 use anyhow::{Context, Result};
 use colored::Colorize;
@@ -36,11 +36,11 @@ impl Generator for BatGenerator {
         let theme_name = &ctx.state.current_theme;
         let display_name = utils::capitalize(theme_name);
         let theme_file_name = self.target_file_name(theme_name);
-        let config_task = Status::step(&format!("Configuring {}...", self.name().cyan()), 2);
 
-        config_task.info("Fetching bat configuration directory...");
+        ctx.log.info("Fetching bat configuration directory...");
         let themes_dir = self.resolve_config_directory();
-        config_task.info(&format!("Config found at: {}", themes_dir.display()));
+        ctx.log
+            .info(&format!("Config found at: {}", themes_dir.display()));
 
         let cache_theme_path: PathBuf = ctx.paths.cache.join("bat_themes").join(&theme_file_name);
         let link_path: PathBuf = themes_dir.join(&theme_file_name);
@@ -50,7 +50,8 @@ impl Generator for BatGenerator {
         fs::write(&cache_theme_path, content).context("Failed to write theme to cache")?;
 
         if !themes_dir.exists() {
-            config_task.info("Creating Bat config directory...");
+            ctx.log
+                .info(&format!("Creating {} config directory...", "bat".bold()));
             fs::create_dir_all(&themes_dir)?;
         }
 
@@ -61,7 +62,7 @@ impl Generator for BatGenerator {
         #[cfg(unix)]
         {
             use std::os::unix::fs::symlink;
-            config_task.info("Linking theme to bat/themes...");
+            ctx.log.info("Linking theme to bat/themes...");
             symlink(&cache_theme_path, &link_path).with_context(|| {
                 format!("Failed to link {:?} -> {:?}", link_path, cache_theme_path)
             })?;
@@ -74,14 +75,13 @@ impl Generator for BatGenerator {
         let config_file: PathBuf = ctx.paths.cache.join("bat.conf");
         fs::write(config_file, bat_config).context("Failed to write bat.conf")?;
 
-        config_task.info("Rebuilding bat cache...");
+        ctx.log.info("Rebuilding bat cache...");
         let output = Command::new("bat").arg("cache").arg("--build").output()?;
 
-        if output.status.success() {
-            config_task.done(Some(&format!("{} is ready!", self.name().cyan().bold())));
-        } else {
+        if !output.status.success() {
             let err = String::from_utf8_lossy(&output.stderr);
-            config_task.fail(&err);
+            ctx.log
+                .error(&format!("Bat cache build failed with: {}", err.trim()), 2);
             anyhow::bail!("Bat cache build failed");
         }
 

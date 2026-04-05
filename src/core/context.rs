@@ -1,5 +1,5 @@
 use super::IrisPaths;
-use crate::{models::State, modules::GeneratorRegistry};
+use crate::{models::State, modules::GeneratorRegistry, ui::Logger};
 use anyhow::{Context as _, Result};
 
 /// Application context with state and paths (config/cache/base)
@@ -7,11 +7,13 @@ pub struct IrisContext {
     pub paths: IrisPaths,
     pub state: State,
     pub registry: GeneratorRegistry,
+
+    pub log: Logger,
 }
 
 impl IrisContext {
     /// New context w/loading UIState from file
-    pub fn new() -> Result<Self> {
+    pub fn new(log: Logger) -> Result<Self> {
         let paths = IrisPaths::new()?;
 
         let state = if paths.state_file.exists() {
@@ -26,6 +28,7 @@ impl IrisContext {
             paths,
             state,
             registry: GeneratorRegistry::new(),
+            log,
         };
         Ok(ctx)
     }

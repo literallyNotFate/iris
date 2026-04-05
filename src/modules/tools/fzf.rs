@@ -2,7 +2,7 @@ use crate::{
     core::IrisContext,
     models::Palette,
     modules::Generator,
-    utils::{self, Status},
+    utils::{self},
 };
 use anyhow::{Context, Result};
 use colored::Colorize;
@@ -26,7 +26,6 @@ impl Generator for FzfGenerator {
     }
 
     fn apply(&self, p: &Palette, ctx: &IrisContext) -> Result<()> {
-        let task = Status::step(&format!("Configuring {}...", self.name().cyan()), 2);
         let theme_name: &String = &ctx.state.current_theme;
 
         let cache_file: PathBuf = ctx.paths.cache.join(self.target_file_name(theme_name));
@@ -39,15 +38,13 @@ export FZF_DEFAULT_OPTS="--color='{colors}' --layout=reverse --height=40% --bord
             colors = fzf_colors
         );
 
-        task.info(&format!("Generating script in: {}", cache_file.display()));
+        ctx.log
+            .info(&format!("Generating script in: {}", cache_file.display()));
 
         fs::write(&cache_file, content)
             .with_context(|| format!("Failed to write FZF config to {:?}", cache_file))?;
 
-        #[cfg(unix)]
-        task.info("Colors exported to shell script.");
-
-        task.done(Some(&format!("{} is ready!", self.name().cyan().bold())));
+        ctx.log.info("Colors exported to shell script.");
         Ok(())
     }
 

@@ -7,25 +7,65 @@ use colored::*;
 
 /// Handle application status command
 pub fn exec(ctx: &IrisContext) -> anyhow::Result<()> {
-    println!(
-        "\n {}  {}",
-        "󰄬".purple().bold(),
-        "Iris System Status".bold()
-    );
-    println!("{}", " ─────────────────────────────────────────".dimmed());
-
     let current = &ctx.state.current_theme;
+    let enabled = &ctx.state.enabled_generators;
 
-    println!("  {}  Active theme:  {}", "󰏘".blue(), current.bold().blue());
+    if ctx.log.quiet {
+        let nvim_theme = Palette::current(&ctx.log).unwrap_or_else(|_| "Unknown".to_string());
+        let is_sync = nvim_theme.to_lowercase() == current.to_lowercase();
+
+        let gens = if enabled.is_empty() {
+            "none".dimmed().to_string()
+        } else {
+            enabled
+                .iter()
+                .map(|name| {
+                    if ctx.registry.is_installed(name) {
+                        name.normal()
+                    } else {
+                        name.strikethrough().dimmed()
+                    }
+                })
+                .map(|s| s.to_string())
+                .collect::<Vec<_>>()
+                .join(", ")
+        };
+
+        let sync_status = if is_sync {
+            "󰄬".green()
+        } else {
+            "󰀦".yellow()
+        };
+
+        println!(
+            "\n{} Theme: {} | Gens: {}",
+            sync_status,
+            current.cyan().bold(),
+            gens
+        );
+
+        if !is_sync {
+            ctx.log
+                .warn(&format!("Out of sync with Neovim ({})", nvim_theme), 2);
+        }
+
+        return Ok(());
+    }
+
+    println!("\n {}  {}", "󰗼".cyan().bold(), "Iris system status".bold());
+    println!(
+        "\n  {}  Active theme:  {}",
+        "󰏘".red(),
+        current.bold().blue()
+    );
     println!(
         "  {}  Config path:   {}",
         "󰉖".white(),
         ctx.paths.config.display().to_string().bright_black()
     );
 
-    println!("\n  {}  {}", "󰒓".yellow(), "Enabled Generators:".bold());
+    println!("\n  {}  {}", "󰒓".yellow(), "Enabled generators:".bold());
 
-    let enabled = &ctx.state.enabled_generators;
     if enabled.is_empty() {
         println!(
             "    {}",
@@ -38,39 +78,33 @@ pub fn exec(ctx: &IrisContext) -> anyhow::Result<()> {
             } else {
                 "󰀦".yellow()
             };
-
             print!("    {} {}  ", status_icon, name.dimmed());
         }
         println!();
     }
 
-    if let Ok(nvim_theme) = Palette::current() {
+    if let Ok(nvim_theme) = Palette::current(&ctx.log) {
         println!();
         if nvim_theme.to_lowercase() != current.to_lowercase() {
+            ctx.log.warn("Out of sync with Neovim", 2);
             println!(
-                "  {} {}",
-                "󰀦".yellow().bold(),
-                "Out of sync with Neovim".yellow().bold()
-            );
-            println!(
-                "    {} {} {}",
+                "    {} {} {}  {} {}",
                 "Neovim:".dimmed(),
                 nvim_theme.bright_yellow(),
-                "󰄬".dimmed()
+                "󰄬".dimmed(),
+                "Iris:".dimmed(),
+                current.dimmed()
             );
             println!(
-                "    {} {} {}",
-                "Iris:  ".dimmed(),
-                current.dimmed(),
-                "󰚔 run 'iris sync'".cyan().italic()
+                "    {}",
+                "󰚔  Run 'iris sync' to update all configs".cyan().italic()
             );
         } else {
-            println!("  {} {}", "󰄬".green(), "Synchronized with Neovim".green());
+            println!("  {} {}", "󰄬".green(), "Sync successful".green());
         }
     }
 
-    if let Ok(palette) = Palette::fetch(current) {
-        println!();
+    if let Ok(palette) = Palette::fetch(current, &ctx.log.as_quiet()) {
         display_palette(&palette, current);
     }
 

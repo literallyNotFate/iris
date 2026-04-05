@@ -2,7 +2,7 @@ use crate::{
     core::IrisContext,
     models::Palette,
     modules::Generator,
-    utils::{self, Status},
+    utils::{self},
 };
 use anyhow::{Context, Result};
 use colored::Colorize;
@@ -29,7 +29,6 @@ impl Generator for BtopGenerator {
     fn apply(&self, p: &Palette, ctx: &IrisContext) -> Result<()> {
         let theme_name: &String = &ctx.state.current_theme;
         let display_name: String = utils::capitalize(theme_name);
-        let task = Status::step(&format!("Configuring {}...", self.name().cyan()), 2);
 
         let themes_dir: PathBuf = self.resolve_config_directory();
         let theme_file_name: String = self.target_file_name(theme_name);
@@ -42,13 +41,14 @@ impl Generator for BtopGenerator {
         fs::write(&cache_file, content)
             .with_context(|| format!("Failed to write btop theme to {:?}", cache_file))?;
 
-        task.info(&format!(
+        ctx.log.info(&format!(
             "Theme {} generated in cache.",
             display_name.yellow()
         ));
 
         if !themes_dir.exists() {
-            task.info("Creating Btop config directory...");
+            ctx.log
+                .info(&format!("Creating {} config directory...", "btop".bold()));
             fs::create_dir_all(&themes_dir)?;
         }
 
@@ -59,7 +59,7 @@ impl Generator for BtopGenerator {
         #[cfg(unix)]
         {
             use std::os::unix::fs::symlink;
-            task.info(&format!(
+            ctx.log.info(&format!(
                 "Creating link in btop/themes/ for {}",
                 display_name.yellow()
             ));
@@ -75,16 +75,16 @@ impl Generator for BtopGenerator {
         let conf_path: PathBuf = btop_root.join("btop.conf");
 
         if conf_path.exists() {
-            task.info(&format!(
+            ctx.log.info(&format!(
                 "Setting color_theme = \"{}\" in btop.conf",
                 theme_name.bold()
             ));
             self.update_btop_conf(&conf_path, theme_name)?;
         } else {
-            Status::warn("btop.conf not found. Theme linked but not activated.", 3);
+            ctx.log
+                .warn("btop.conf not found. Theme linked but not activated.", 3);
         }
 
-        task.done(Some(&format!("{} is ready!", self.name().cyan().bold())));
         Ok(())
     }
 

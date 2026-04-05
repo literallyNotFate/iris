@@ -2,7 +2,6 @@ use crate::{
     core::IrisContext,
     models::{Palette, State},
     modules::{Generator, shells, terminals, tools},
-    utils::Status,
 };
 use colored::Colorize;
 
@@ -81,7 +80,10 @@ impl GeneratorRegistry {
 impl GeneratorRegistry {
     /// Apply themes to available programs (enabled generators)
     pub fn apply_all(&self, palette: &Palette, ctx: &IrisContext) -> anyhow::Result<()> {
-        println!();
+        if !ctx.log.quiet {
+            println!("\n {} {}", "󰚗".magenta(), "Updating targets...".bold());
+        }
+
         let enabled = &ctx.state.enabled_generators;
         let to_apply: Vec<_> = self
             .generators
@@ -89,26 +91,28 @@ impl GeneratorRegistry {
             .filter(|g| enabled.contains(g.name()) && g.is_installed())
             .collect();
 
-        let total_task = Status::step(
-            &format!(
-                "Applying palette to {} active targets...",
-                to_apply.len().to_string().green()
-            ),
-            0,
-        );
+        let total = to_apply.len();
+        let start_all = std::time::Instant::now();
 
-        for generator in to_apply {
+        for (i, generator) in to_apply.iter().enumerate() {
+            let is_last = i == total - 1;
+            let mut task = ctx.log.step(generator.name(), 2);
+
             if let Err(e) = generator.apply(palette, ctx) {
-                total_task.fail(&format!("Failed at {}: {}", generator.name().cyan(), e));
+                ctx.log
+                    .error(&format!("Failed {}: {}", generator.name(), e), 1);
                 return Err(e);
             }
 
-            if let Some(hint) = generator.setup_hint() {
-                total_task.info(&format!("{} {}", "Hint:".yellow(), hint.dimmed()));
-            }
+            task.done(is_last);
         }
 
-        total_task.done(Some("All selected targets updated."));
+        println!(
+            "\n {} All systems updated! {}\n",
+            "󰄬".green().bold(),
+            format!("[{:.2?}]", start_all.elapsed()).dimmed()
+        );
+
         Ok(())
     }
 }

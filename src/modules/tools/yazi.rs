@@ -1,9 +1,4 @@
-use crate::{
-    core::IrisContext,
-    models::Palette,
-    modules::Generator,
-    utils::{self, Status},
-};
+use crate::{core::IrisContext, models::Palette, modules::Generator, utils};
 use anyhow::{Context, Result};
 use colored::Colorize;
 use std::{fs, path::PathBuf};
@@ -22,11 +17,11 @@ impl Generator for YaziGenerator {
 
     fn apply(&self, p: &Palette, ctx: &IrisContext) -> Result<()> {
         let theme_name: &String = &ctx.state.current_theme;
-        let task = Status::step(&format!("Configuring {}...", self.name().cyan()), 2);
 
         let yazi_dir: PathBuf = self.resolve_config_directory();
         if !yazi_dir.exists() {
-            task.info("Creating Yazi config directory...");
+            ctx.log
+                .info(&format!("Creating {} config directory...", "yazi".bold()));
             fs::create_dir_all(&yazi_dir)?;
         }
 
@@ -40,7 +35,7 @@ impl Generator for YaziGenerator {
 
         fs::create_dir_all(cache_file.parent().unwrap())?;
         fs::write(&cache_file, content)?;
-        task.info(&format!(
+        ctx.log.info(&format!(
             "Theme {} generated in cache.",
             utils::capitalize(&ctx.state.current_theme).yellow()
         ));
@@ -52,7 +47,10 @@ impl Generator for YaziGenerator {
         #[cfg(unix)]
         {
             use std::os::unix::fs::symlink;
-            task.info("Linking theme.toml to Yazi config...");
+            ctx.log.info(&format!(
+                "Linking theme.toml to {} config...",
+                "yazi".bold()
+            ));
             symlink(&cache_file, &theme_link).with_context(|| {
                 format!(
                     "Failed to create symlink {:?} -> {:?}",
@@ -61,7 +59,6 @@ impl Generator for YaziGenerator {
             })?;
         }
 
-        task.done(Some(&format!("{} is ready!", self.name().cyan().bold())));
         Ok(())
     }
 

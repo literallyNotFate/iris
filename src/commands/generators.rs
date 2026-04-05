@@ -1,5 +1,5 @@
-use crate::{cli::GenAction, core::IrisContext, utils::Status};
-use colored::Colorize;
+use crate::{cli::GenAction, core::IrisContext};
+use colored::{Color, Colorize};
 use dialoguer::{
     MultiSelect,
     console::{Style, style},
@@ -17,11 +17,12 @@ pub fn exec(action: GenAction, ctx: &mut IrisContext) -> anyhow::Result<()> {
 
             for generator in all_generators {
                 let name = generator.name();
-                items.push(if generator.is_installed() {
+                let display_name = if generator.is_installed() {
                     name.to_string()
                 } else {
                     format!("{} {}", name, "(not found)".red().dimmed())
-                });
+                };
+                items.push(display_name);
                 defaults.push(ctx.state.is_enabled(name));
             }
 
@@ -30,19 +31,22 @@ pub fn exec(action: GenAction, ctx: &mut IrisContext) -> anyhow::Result<()> {
                 "󰒓".green().bold(),
                 "Generator Management".bold()
             );
-            println!("{}", " ─────────────────────────────────────────".dimmed());
             println!();
 
-            let theme = ColorfulTheme {
-                checked_item_prefix: style("󰄬".to_string()).for_stderr().green().bold(),
-                unchecked_item_prefix: style("󰄱".to_string()).for_stderr().dim(),
+            let theme: ColorfulTheme = ColorfulTheme {
+                active_item_prefix: style("  ❯ ".to_string()).for_stderr().cyan().bold(),
+                checked_item_prefix: style("  󰄬 ".to_string()).for_stderr().green().bold(),
+                unchecked_item_prefix: style("  󰄱 ".to_string()).for_stderr().dim(),
                 active_item_style: Style::new().cyan().bold(),
+                prompt_prefix: style("  ? ".to_string()).for_stderr().yellow(),
+                prompt_suffix: style("".to_string()),
+                inactive_item_prefix: style("    ".to_string()).for_stderr(),
                 ..ColorfulTheme::default()
             };
 
             let chosen = MultiSelect::with_theme(&theme)
                 .with_prompt(format!(
-                    "Toggle modules ({}:toggle / {}:confirm)",
+                    "Toggle modules ({}:toggle / {}:confirm)\n",
                     "space".yellow(),
                     "enter".cyan()
                 ))
@@ -58,9 +62,11 @@ pub fn exec(action: GenAction, ctx: &mut IrisContext) -> anyhow::Result<()> {
 
             ctx.state.replace_enabled(selected_names.clone());
 
-            let task = Status::step("Saving settings...", 0);
-            ctx.save()?;
-            task.done(Some("state.json updated"));
+            {
+                let mut task = ctx.log.step("Saving settings", 1);
+                ctx.save()?;
+                task.done(true);
+            }
 
             if !selected_names.is_empty() {
                 let list = selected_names
@@ -68,7 +74,7 @@ pub fn exec(action: GenAction, ctx: &mut IrisContext) -> anyhow::Result<()> {
                     .map(|n| n.cyan().to_string())
                     .collect::<Vec<_>>()
                     .join(", ");
-                println!("\n {} {} {}", "󰄬".green(), "Active:".bold(), list);
+                println!(" {} {} {}", "󱐋".green().bold(), "Active:".bold(), list);
             }
         }
 
@@ -76,7 +82,7 @@ pub fn exec(action: GenAction, ctx: &mut IrisContext) -> anyhow::Result<()> {
             println!();
 
             if !ctx.registry.exists(&name) {
-                Status::error(
+                ctx.log.error(
                     &format!(
                         "Unknown generator: '{}'. Use 'iris gen list' to see available.",
                         name.bold()
@@ -87,18 +93,19 @@ pub fn exec(action: GenAction, ctx: &mut IrisContext) -> anyhow::Result<()> {
             }
 
             if !ctx.registry.is_installed(&name) {
-                Status::warn(
+                ctx.log.warn(
                     "Generator exists in Iris, but the app is not installed in your OS",
                     0,
                 );
             }
 
             if ctx.state.enable_generator(&name) {
-                let task = Status::step(&format!("Enabling: {}", name.cyan()), 0);
+                let mut task = ctx.log.step(&format!("Enabling: {}", name.cyan()), 0);
                 ctx.save()?;
-                task.done(Some("Enabled"));
+                task.done(true);
             } else {
-                Status::warn(&format!("'{}' is already active", name.bold()), 0);
+                ctx.log
+                    .warn(&format!("'{}' is already active", name.bold()), 0);
             }
         }
 
@@ -106,7 +113,7 @@ pub fn exec(action: GenAction, ctx: &mut IrisContext) -> anyhow::Result<()> {
             println!();
 
             if !ctx.registry.exists(&name) {
-                Status::error(
+                ctx.log.error(
                     &format!(
                         "Unknown generator: '{}'. Use 'iris gen list' to see available.",
                         name.bold()
@@ -117,37 +124,119 @@ pub fn exec(action: GenAction, ctx: &mut IrisContext) -> anyhow::Result<()> {
             }
 
             if ctx.state.disable_generator(&name) {
-                let task = Status::step(&format!("Disabling: {}", name.cyan()), 0);
+                let mut task = ctx.log.step(&format!("Disabling: {}", name.cyan()), 0);
                 ctx.save()?;
-                task.done(Some("Disabled"));
+                task.done(true);
             } else {
-                Status::warn(&format!("'{}' is already disabled", name.bold()), 0);
+                ctx.log
+                    .warn(&format!("'{}' is already disabled", name.bold()), 0);
             }
         }
 
         GenAction::List => {
-            println!(
-                "\n {}  {}",
-                "󰈙".yellow().bold(),
-                "Available generators:".bold()
-            );
-            println!("{}", " ──────────────────────────────".dimmed());
-
-            for generator in ctx.registry.all() {
-                let (icon, status) = match (
-                    ctx.state.is_enabled(generator.name()),
-                    generator.is_installed(),
-                ) {
-                    (true, true) => ("󰄬".green(), "active".green()),
-                    (false, true) => ("󰈈".dimmed(), "disabled".dimmed()),
-                    (true, false) => ("󰀦".yellow(), "broken (not installed)".yellow()),
-                    (false, false) => ("󰂭".red(), "missing".red()),
-                };
-
-                println!("  {} {:<12} [{}]", icon, generator.name().bold(), status);
-            }
+            let all = ctx.registry.all();
+            let total = all.len();
+            let enabled_count = all
+                .iter()
+                .filter(|g| ctx.state.is_enabled(g.name()))
+                .count();
 
             println!();
+            if !ctx.log.quiet {
+                println!(
+                    " {}  {}",
+                    "󰒓".yellow().bold(),
+                    "Registry of Generators".bold()
+                );
+
+                println!(
+                    "\n    {:<17}  {:<13}  {}",
+                    "NAME".dimmed(),
+                    "TYPE".dimmed(),
+                    "STATUS".dimmed()
+                );
+                println!();
+            }
+
+            for generator in ctx.registry.all() {
+                let is_enabled = ctx.state.is_enabled(generator.name());
+                let is_installed = generator.is_installed();
+
+                let icon = match (is_enabled, is_installed) {
+                    (true, true) => "󰄬 ".green(),
+                    (true, false) => "󰀦 ".yellow(),
+                    (false, true) => "󰈈 ".dimmed(),
+                    (false, false) => "󰂭 ".red(),
+                };
+
+                let name_styled = if is_enabled && is_installed {
+                    generator.name().cyan().bold()
+                } else if is_enabled && !is_installed {
+                    generator.name().yellow().strikethrough()
+                } else {
+                    generator.name().normal()
+                };
+
+                let (tag_icon, tag_text, tag_color) = match generator.name() {
+                    "ghostty" | "alacritty" => ("󰞷", "term", Color::Blue),
+                    "bat" | "fzf" | "yazi" => ("󰆍", "cli", Color::Magenta),
+                    "nvim" => ("", "edit", Color::Green),
+                    "starship" => ("󱆃", "prompt", Color::Cyan),
+                    "btop" => ("󰢮", "sys", Color::Yellow),
+                    _ => ("󰏗", "app", Color::White),
+                };
+
+                let tag_styled = format!("{} {}", tag_icon, tag_text).color(tag_color);
+
+                if ctx.log.quiet {
+                    let q_status = if is_enabled { "+" } else { "-" };
+                    println!("{} {:<12} ({})", q_status, generator.name(), tag_text);
+                } else {
+                    let status_label = match (is_enabled, is_installed) {
+                        (true, true) => "active".green().italic(),
+                        (false, true) => "ready".dimmed(),
+                        (true, false) => "broken".yellow(),
+                        (false, false) => "missing".red(),
+                    };
+
+                    println!(
+                        "  {} {:<16} │ {:<12} │ {}",
+                        icon, name_styled, tag_styled, status_label
+                    );
+                }
+            }
+
+            if !ctx.log.quiet {
+                println!(
+                    "{}",
+                    " ──────────────────────────────────────────────────────────".dimmed()
+                );
+            }
+
+            if ctx.log.quiet {
+                println!("\nTotal: {} (Enabled: {})", total, enabled_count);
+            } else {
+                println!(
+                    " {} {} {} {} {} {}",
+                    "󰛵".blue(),
+                    "Found:".dimmed(),
+                    total.to_string().bold().cyan(),
+                    "generators,".dimmed(),
+                    enabled_count.to_string().bold().green(),
+                    "enabled".dimmed()
+                );
+
+                if enabled_count == 0 {
+                    println!(
+                        " {} {}",
+                        "󰚔".yellow(),
+                        "Tip: use 'iris gen enable <name>' to start syncing configs"
+                            .italic()
+                            .dimmed()
+                    );
+                }
+                println!();
+            }
         }
 
         GenAction::Auto => {
@@ -156,41 +245,57 @@ pub fn exec(action: GenAction, ctx: &mut IrisContext) -> anyhow::Result<()> {
                 "󰩊".blue().bold(),
                 "Autodiscovering generators...".bold()
             );
-            println!("{}", " ─────────────────────────────────────────".dimmed());
+            println!();
 
             let mut added = 0;
-            let mut active = 0;
+            let installed = ctx.registry.installed();
 
-            for generator in ctx.registry.installed() {
+            for generator in installed {
                 let name = generator.name();
-
                 if ctx.state.is_enabled(name) {
-                    active += 1;
-                    Status::warn(&format!("{} is already active", name), 0);
+                    if !ctx.log.quiet {
+                        ctx.log
+                            .info(&format!("{} is already active", name.dimmed()));
+                    }
                 } else {
-                    let task = Status::step(&format!("Found: {}", name.green()), 0);
-                    ctx.state.enable_generator(name);
-                    added += 1;
-                    task.done(Some(&format!("Generator '{}' enabled", name.cyan().bold())));
+                    {
+                        let mut task = ctx
+                            .log
+                            .step(&format!("Detected: {}", name.cyan().bold()), 1);
+                        ctx.state.enable_generator(name);
+                        added += 1;
+                        task.done(true);
+                    }
                 }
             }
 
-            println!();
+            if !ctx.log.quiet {
+                println!();
+            }
 
             if added > 0 {
-                let task = Status::step("Finalizing changes", 0);
-                ctx.save()?;
-                task.done(Some(&format!(
-                    "Added {} new generators to configuration",
-                    added.to_string().yellow().bold()
-                )));
-            } else if active > 0 {
-                Status::warn(
-                    "Everything installed is already enabled. No changes needed.",
+                {
+                    let mut task = ctx.log.step("Saving configuration", 1);
+                    ctx.save()?;
+                    task.done(true);
+                }
+
+                println!();
+                ctx.log.success(
+                    &format!(
+                        "Auto-discovery complete! Added {} new generators",
+                        added.to_string().green().bold()
+                    ),
                     0,
                 );
             } else {
-                Status::error("No compatible apps found on this system.", 0);
+                let msg = if !ctx.log.quiet {
+                    "System is up to date: no new applications found."
+                } else {
+                    "All discovered apps are already active."
+                };
+
+                println!(" {} {}", "ℹ".blue().bold(), msg.dimmed());
             }
         }
     }

@@ -1,4 +1,4 @@
-use crate::utils::Status;
+use crate::ui::Logger;
 use anyhow::{Context, Result};
 use colored::Colorize;
 use serde::{Deserialize, Serialize};
@@ -30,7 +30,8 @@ pub struct Palette {
 
 impl Palette {
     /// Get currently installed theme name
-    pub fn current() -> Result<String> {
+    /// Uses logger for warnings and errors output
+    pub fn current(log: &Logger) -> Result<String> {
         let home = dirs::home_dir().context("Home dir not found")?;
         let path = home.join(".cache/iris/current_theme");
 
@@ -40,7 +41,7 @@ impl Palette {
 
             let trimmed: &str = name.trim();
             if trimmed.is_empty() {
-                Status::warn("Theme cache file is empty. Please set a theme first.", 1);
+                log.warn("Theme cache file is empty. Please set a theme first.", 1);
                 anyhow::bail!("Theme cache is empty");
             }
 
@@ -48,7 +49,7 @@ impl Palette {
             return Ok(capitalized);
         }
 
-        Status::error("No active theme found in cache.", 1);
+        log.error("No active theme found in cache.", 1);
         anyhow::bail!(
             "No active theme detected.\n\
              {} Make sure to switch theme in Neovim (e.g, :colorscheme <theme>) \n\
@@ -58,16 +59,9 @@ impl Palette {
     }
 
     /// Fetch palette from nvim using lua script
-    pub fn fetch(theme: &str) -> Result<Self> {
-        let sync_task = Status::step(
-            &format!(
-                "Fetching colors from Neovim using theme: {}",
-                theme.bold().green()
-            ),
-            1,
-        );
+    pub fn fetch(theme: &str, log: &Logger) -> Result<Self> {
+        log.info("Loading Neovim runtime and lazy.nvim plugins...");
 
-        sync_task.info("Loading Neovim runtime and lazy.nvim plugins...");
         let lua_script = r##"
                 local function g(name, attr)
                     local hl = vim.api.nvim_get_hl(0, { name = name, link = true })
@@ -107,7 +101,7 @@ impl Palette {
                 io.write(vim.fn.json_encode(res))
             "##;
 
-        let nvim_task = Status::step("Executing Lua bridge in headless mode...", 2);
+        log.info("Executing Lua bridge in headless mode...");
 
         let output = Command::new("nvim")
             .args([
@@ -127,13 +121,11 @@ impl Palette {
 
         if !output.status.success() {
             let error_msg = String::from_utf8_lossy(&output.stderr);
-            nvim_task.info("Check if the theme is installed in your Neovim config.");
-            nvim_task.fail("Neovim bridge failed");
-            sync_task.fail("Synchronization failed");
+            log.error(&format!("Neovim error: {}", error_msg.trim()), 2);
             anyhow::bail!("Neovim error: {}", error_msg.red());
         }
 
-        nvim_task.info("Parsing palette data...");
+        log.info("Parsing palette data...");
         let stdout = String::from_utf8_lossy(&output.stdout);
 
         let json_start = stdout.find('{').context("Nvim did not return JSON")?;
@@ -142,23 +134,19 @@ impl Palette {
         let palette: Palette = serde_json::from_str(&stdout[json_start..json_end])
             .context("Failed to parse palette JSON")?;
 
-        nvim_task.done(Some("Lua bridge executed successfully."));
-        sync_task.done(Some("Palette successfully synchronized with Neovim."));
         Ok(palette)
     }
 
     /// Checks whether this theme exists in nvim colorscheme
-    pub fn exists(theme: &str) -> bool {
+    pub fn exists(theme: &str, log: &Logger) -> bool {
         if which::which("nvim").is_err() {
-            Status::warn("Neovim binary not found in PATH. Cannot verify theme.", 1);
+            log.warn("Neovim not found. Skipping theme verification.", 0);
             return false;
         }
 
-        println!(
-            "\n{} {} Checking theme availability: {}",
-            Status::get_indent(0),
-            "•".dimmed(),
-            theme.yellow().bold()
+        let mut check_task = log.step(
+            &format!("Checking theme availability: {}", theme.yellow().bold()),
+            1,
         );
 
         let init_plugins = "lua vim.opt.rtp:append(vim.fn.stdpath('data') .. '/lazy/*')";
@@ -179,9 +167,17 @@ impl Palette {
             ])
             .output();
 
-        match output {
+        let success = match output {
             Ok(o) => o.status.success(),
             Err(_) => false,
+        };
+
+        if success {
+            check_task.done(true);
+        } else {
+            log.error(&format!("Theme {} not found in Neovim", theme.red()), 2);
         }
+
+        success
     }
 }
