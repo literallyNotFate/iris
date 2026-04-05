@@ -1,9 +1,10 @@
 use crate::{
     core::IrisContext,
     models::{Palette, State},
-    modules::{Generator, shells, terminals, tools},
+    modules::{Generator, GeneratorType, prompts, system, terminals, tools},
 };
 use colored::Colorize;
+use std::collections::BTreeSet;
 
 /// The list of all generators
 #[derive(Default)]
@@ -17,8 +18,9 @@ impl GeneratorRegistry {
         let mut generators: Vec<Box<dyn Generator>> = Vec::new();
 
         generators.extend(terminals::get_all());
-        generators.extend(shells::get_all());
+        generators.extend(prompts::get_all());
         generators.extend(tools::get_all());
+        generators.extend(system::get_all());
 
         Self { generators }
     }
@@ -26,6 +28,18 @@ impl GeneratorRegistry {
     /// Access to all generators
     pub fn all(&self) -> &[Box<dyn Generator>] {
         &self.generators
+    }
+
+    /// Access to all generators sorted by type and then by name
+    pub fn all_sorted(&self) -> Vec<&Box<dyn Generator>> {
+        let mut gens: Vec<_> = self.generators.iter().collect();
+        gens.sort_by(|a, b| {
+            a.generator_type()
+                .cmp(&b.generator_type())
+                .then(a.name().cmp(b.name()))
+        });
+
+        gens
     }
 
     /// List of all supported generators names (for MultiSelect)
@@ -36,12 +50,25 @@ impl GeneratorRegistry {
             .collect()
     }
 
+    /// List of all unique type that are enabled in registry
+    pub fn types(&self) -> BTreeSet<GeneratorType> {
+        self.generators.iter().map(|g| g.generator_type()).collect()
+    }
+
     /// Get generator by name
     pub fn get(&self, name: &str) -> Option<&dyn Generator> {
         self.generators
             .iter()
             .find(|g| g.name() == name)
             .map(|b| b.as_ref())
+    }
+
+    /// Get generators by type
+    pub fn by_type(&self, g_type: GeneratorType) -> Vec<&Box<dyn Generator>> {
+        self.generators
+            .iter()
+            .filter(|g| g.generator_type() == g_type)
+            .collect()
     }
 
     /// Get list of all installed tools

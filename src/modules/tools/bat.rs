@@ -1,7 +1,7 @@
 use crate::{
     core::IrisContext,
     models::Palette,
-    modules::Generator,
+    modules::{Generator, GeneratorType},
     utils::{self},
 };
 use anyhow::{Context, Result};
@@ -14,6 +14,10 @@ pub struct BatGenerator;
 impl Generator for BatGenerator {
     fn name(&self) -> &str {
         "bat"
+    }
+
+    fn generator_type(&self) -> GeneratorType {
+        GeneratorType::Tool
     }
 
     fn target_file_name(&self, theme: &str) -> String {

@@ -1,5 +1,8 @@
-use crate::{cli::GenAction, core::IrisContext};
-use colored::{Color, Colorize};
+use crate::{
+    cli::{GenAction, StatusFilter},
+    core::IrisContext,
+};
+use colored::Colorize;
 use dialoguer::{
     MultiSelect,
     console::{Style, style},
@@ -11,17 +14,25 @@ use std::collections::BTreeSet;
 pub fn exec(action: GenAction, ctx: &mut IrisContext) -> anyhow::Result<()> {
     match action {
         GenAction::Select => {
-            let all_generators = &ctx.registry.generators;
+            let all_generators = &ctx.registry.all_sorted();
             let mut items = Vec::new();
             let mut defaults = Vec::new();
 
             for generator in all_generators {
                 let name = generator.name();
+                let g_type = generator.generator_type();
+
                 let display_name = if generator.is_installed() {
-                    name.to_string()
+                    format!(
+                        "{:<14} {} ({})",
+                        name,
+                        g_type.icon().color(g_type.color()),
+                        g_type.label()
+                    )
                 } else {
-                    format!("{} {}", name, "(not found)".red().dimmed())
+                    format!("{} {:<14} (not found)", "󰂭".bright_red(), name)
                 };
+
                 items.push(display_name);
                 defaults.push(ctx.state.is_enabled(name));
             }
@@ -133,10 +144,32 @@ pub fn exec(action: GenAction, ctx: &mut IrisContext) -> anyhow::Result<()> {
             }
         }
 
-        GenAction::List => {
-            let all = ctx.registry.all();
-            let total = all.len();
-            let enabled_count = all
+        GenAction::List {
+            generator_type,
+            status,
+        } => {
+            let all_generators = ctx.registry.all_sorted();
+
+            let filtered: Vec<_> = all_generators
+                .into_iter()
+                .filter(|g| {
+                    let type_match = generator_type.map_or(true, |t| g.generator_type() == t);
+
+                    let is_enabled = ctx.state.is_enabled(g.name());
+                    let is_installed = g.is_installed();
+                    let status_match = status.map_or(true, |s| match s {
+                        StatusFilter::Active => is_enabled && is_installed,
+                        StatusFilter::Ready => !is_enabled && is_installed,
+                        StatusFilter::Broken => is_enabled && !is_installed,
+                        StatusFilter::Missing => !is_enabled && !is_installed,
+                    });
+
+                    type_match && status_match
+                })
+                .collect();
+
+            let total = filtered.len();
+            let enabled_count = filtered
                 .iter()
                 .filter(|g| ctx.state.is_enabled(g.name()))
                 .count();
@@ -144,13 +177,18 @@ pub fn exec(action: GenAction, ctx: &mut IrisContext) -> anyhow::Result<()> {
             println!();
             if !ctx.log.quiet {
                 println!(
-                    " {}  {}",
+                    " {}  {} {}",
                     "󰒓".yellow().bold(),
-                    "Registry of Generators".bold()
+                    "Registry of Generators".bold(),
+                    if generator_type.is_some() || status.is_some() {
+                        "(filtered)".dimmed().italic()
+                    } else {
+                        "".into()
+                    }
                 );
 
                 println!(
-                    "\n    {:<17}  {:<13}  {}",
+                    "\n    {:<20}  {:<13}  {}",
                     "NAME".dimmed(),
                     "TYPE".dimmed(),
                     "STATUS".dimmed()
@@ -158,9 +196,10 @@ pub fn exec(action: GenAction, ctx: &mut IrisContext) -> anyhow::Result<()> {
                 println!();
             }
 
-            for generator in ctx.registry.all() {
+            for generator in &filtered {
                 let is_enabled = ctx.state.is_enabled(generator.name());
                 let is_installed = generator.is_installed();
+                let gen_type = generator.generator_type();
 
                 let icon = match (is_enabled, is_installed) {
                     (true, true) => "󰄬 ".green(),
@@ -177,20 +216,14 @@ pub fn exec(action: GenAction, ctx: &mut IrisContext) -> anyhow::Result<()> {
                     generator.name().normal()
                 };
 
-                let (tag_icon, tag_text, tag_color) = match generator.name() {
-                    "ghostty" | "alacritty" => ("󰞷", "term", Color::Blue),
-                    "bat" | "fzf" | "yazi" => ("󰆍", "cli", Color::Magenta),
-                    "nvim" => ("", "edit", Color::Green),
-                    "starship" => ("󱆃", "prompt", Color::Cyan),
-                    "btop" => ("󰢮", "sys", Color::Yellow),
-                    _ => ("󰏗", "app", Color::White),
-                };
-
-                let tag_styled = format!("{} {}", tag_icon, tag_text).color(tag_color);
-
                 if ctx.log.quiet {
-                    let q_status = if is_enabled { "+" } else { "-" };
-                    println!("{} {:<12} ({})", q_status, generator.name(), tag_text);
+                    let q_status = if is_enabled { "+".bold() } else { "-".dimmed() };
+                    println!(
+                        "{} {:<14} ({})",
+                        q_status,
+                        generator.name(),
+                        gen_type.label()
+                    );
                 } else {
                     let status_label = match (is_enabled, is_installed) {
                         (true, true) => "active".green().italic(),
@@ -199,9 +232,12 @@ pub fn exec(action: GenAction, ctx: &mut IrisContext) -> anyhow::Result<()> {
                         (false, false) => "missing".red(),
                     };
 
+                    let type_icon = gen_type.icon().color(gen_type.color());
+                    let type_label = gen_type.label().color(gen_type.color());
+
                     println!(
-                        "  {} {:<16} │ {:<12} │ {}",
-                        icon, name_styled, tag_styled, status_label
+                        "  {} {:<17} │ {} {:<9} │ {}",
+                        icon, name_styled, type_icon, type_label, status_label
                     );
                 }
             }
@@ -214,28 +250,35 @@ pub fn exec(action: GenAction, ctx: &mut IrisContext) -> anyhow::Result<()> {
             }
 
             if ctx.log.quiet {
-                println!("\nTotal: {} (Enabled: {})", total, enabled_count);
+                if total > 0 {
+                    println!("\nTotal: {} (Enabled: {})", total, enabled_count);
+                } else {
+                    println!("No generators found.");
+                }
             } else {
                 println!(
                     " {} {} {} {} {} {}",
                     "󰛵".blue(),
-                    "Found:".dimmed(),
+                    "Showing:".dimmed(),
                     total.to_string().bold().cyan(),
                     "generators,".dimmed(),
                     enabled_count.to_string().bold().green(),
                     "enabled".dimmed()
                 );
 
-                if enabled_count == 0 {
+                if total == 0 {
+                    println!(
+                        " {} {}",
+                        "⚠".yellow(),
+                        "No generators match your filter criteria".italic().dimmed()
+                    );
+                } else if enabled_count == 0 && status.is_none() {
                     println!(
                         " {} {}",
                         "󰚔".yellow(),
-                        "Tip: use 'iris gen enable <name>' to start syncing configs"
-                            .italic()
-                            .dimmed()
+                        "Tip: use 'iris gen enable <name>' to start syncing configs".dimmed()
                     );
                 }
-                println!();
             }
         }
 

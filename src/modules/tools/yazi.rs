@@ -1,4 +1,9 @@
-use crate::{core::IrisContext, models::Palette, modules::Generator, utils};
+use crate::{
+    core::IrisContext,
+    models::Palette,
+    modules::{Generator, GeneratorType},
+    utils,
+};
 use anyhow::{Context, Result};
 use colored::Colorize;
 use std::{fs, path::PathBuf};
@@ -9,6 +14,10 @@ pub struct YaziGenerator;
 impl Generator for YaziGenerator {
     fn name(&self) -> &str {
         "yazi"
+    }
+
+    fn generator_type(&self) -> GeneratorType {
+        GeneratorType::Tool
     }
 
     fn target_file_name(&self, _theme: &str) -> String {

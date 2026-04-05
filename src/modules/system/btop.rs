@@ -1,7 +1,7 @@
 use crate::{
     core::IrisContext,
     models::Palette,
-    modules::Generator,
+    modules::{Generator, GeneratorType},
     utils::{self},
 };
 use anyhow::{Context, Result};
@@ -14,6 +14,10 @@ pub struct BtopGenerator;
 impl Generator for BtopGenerator {
     fn name(&self) -> &str {
         "btop"
+    }
+
+    fn generator_type(&self) -> GeneratorType {
+        GeneratorType::System
     }
 
     fn target_file_name(&self, theme: &str) -> String {

@@ -1,4 +1,5 @@
-use clap::{Parser, Subcommand};
+use crate::modules::GeneratorType;
+use clap::{Parser, Subcommand, ValueEnum};
 
 #[derive(Parser)]
 #[command(name = "iris")]
@@ -36,6 +37,18 @@ pub enum Commands {
     },
 }
 
+#[derive(ValueEnum, Clone, Copy, PartialEq, Eq)]
+pub enum StatusFilter {
+    /// Enabled and installed
+    Active,
+    /// Installed but disabled
+    Ready,
+    /// Enabled but program not found in system
+    Broken,
+    /// Disabled and not found
+    Missing,
+}
+
 #[derive(Subcommand)]
 pub enum GenAction {
     /// Automatically enable all installed generators
@@ -47,5 +60,13 @@ pub enum GenAction {
     /// Interactive selection
     Select,
     /// List of all available generators and their status
-    List,
+    List {
+        /// Filter by type (terminal, tool, etc.)
+        #[arg(short = 't', long = "type")]
+        generator_type: Option<GeneratorType>,
+
+        /// Filter by state (active, ready, broken, missing)
+        #[arg(short = 's', long = "status")]
+        status: Option<StatusFilter>,
+    },
 }
