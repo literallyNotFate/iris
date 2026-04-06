@@ -1,3 +1,4 @@
+pub mod multiplexer;
 pub mod prompts;
 pub mod registry;
 pub mod system;

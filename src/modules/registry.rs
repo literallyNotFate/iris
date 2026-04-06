@@ -1,7 +1,7 @@
 use crate::{
     core::IrisContext,
     models::{Palette, State},
-    modules::{Generator, GeneratorType, prompts, system, terminals, tools},
+    modules::{Generator, GeneratorType, multiplexer, prompts, system, terminals, tools},
 };
 use colored::Colorize;
 use std::collections::BTreeSet;
@@ -21,6 +21,7 @@ impl GeneratorRegistry {
         generators.extend(prompts::get_all());
         generators.extend(tools::get_all());
         generators.extend(system::get_all());
+        generators.extend(multiplexer::get_all());
 
         Self { generators }
     }
