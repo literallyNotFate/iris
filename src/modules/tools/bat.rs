@@ -37,9 +37,7 @@ impl Generator for BatGenerator {
     }
 
     fn apply(&self, p: &Palette, ctx: &IrisContext) -> Result<()> {
-        let theme_name = &ctx.state.current_theme;
-        let display_name = utils::capitalize(theme_name);
-        let theme_file_name = self.target_file_name(theme_name);
+        let theme_file_name: String = self.target_file_name(&p.name);
 
         ctx.log.info("Fetching bat configuration directory...");
         let themes_dir = self.resolve_config_directory();
@@ -49,8 +47,12 @@ impl Generator for BatGenerator {
         let cache_theme_path: PathBuf = ctx.paths.cache.join("bat_themes").join(&theme_file_name);
         let link_path: PathBuf = themes_dir.join(&theme_file_name);
 
-        let content = self.build_plist_content(p, &display_name);
-        fs::create_dir_all(cache_theme_path.parent().unwrap())?;
+        let content: String = self.build_plist_content(p);
+        if let Some(parent) = cache_theme_path.parent() {
+            fs::create_dir_all(parent)
+                .with_context(|| format!("Failed to create cache directory for {}", self.name()))?;
+        }
+
         fs::write(&cache_theme_path, content).context("Failed to write theme to cache")?;
 
         if !themes_dir.exists() {
@@ -74,7 +76,7 @@ impl Generator for BatGenerator {
 
         let bat_config: String = format!(
             "--theme=\"{name}\"\n--style=\"numbers,changes\"\n--color=\"always\"\n",
-            name = display_name
+            name = utils::capitalize(&p.name)
         );
         let config_file: PathBuf = ctx.paths.cache.join("bat.conf");
         fs::write(config_file, bat_config).context("Failed to write bat.conf")?;
@@ -109,7 +111,7 @@ impl Generator for BatGenerator {
 
 impl BatGenerator {
     /// Generate plist xml config for bat
-    pub fn build_plist_content(&self, p: &Palette, name: &str) -> String {
+    pub fn build_plist_content(&self, p: &Palette) -> String {
         let rules: String = self.build_config(p);
         format!(
             r#"<?xml version="1.0" encoding="UTF-8"?>
@@ -123,7 +125,7 @@ impl BatGenerator {
     </array>
 </dict>
 </plist>"#,
-            name = name,
+            name = utils::capitalize(&p.name),
             rules = rules,
         )
     }

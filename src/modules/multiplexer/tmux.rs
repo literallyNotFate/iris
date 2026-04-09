@@ -31,17 +31,20 @@ impl Generator for TmuxGenerator {
     }
 
     fn apply(&self, p: &Palette, ctx: &IrisContext) -> Result<()> {
-        let theme_name: &String = &ctx.state.current_theme;
-        let display_name: String = utils::capitalize(theme_name);
+        let display_name: String = utils::capitalize(&p.name);
 
         let themes_dir: PathBuf = self.resolve_config_directory();
-        let theme_file_name: String = self.target_file_name(theme_name);
+        let theme_file_name: String = self.target_file_name(&p.name);
 
         let cache_file = ctx.paths.cache.join("tmux_themes").join(&theme_file_name);
         let theme_link: PathBuf = themes_dir.join(&theme_file_name);
 
-        fs::create_dir_all(cache_file.parent().unwrap())?;
-        let content: String = self.build_config(p, &display_name);
+        let content: String = self.build_config(p);
+        if let Some(parent) = cache_file.parent() {
+            fs::create_dir_all(parent)
+                .with_context(|| format!("Failed to create cache directory for {}", self.name()))?;
+        }
+
         fs::write(&cache_file, content)
             .with_context(|| format!("Failed to write tmux theme to {:?}", cache_file))?;
 
@@ -84,7 +87,7 @@ impl Generator for TmuxGenerator {
                 "tmux.conf".bold(),
                 display_name.yellow()
             ));
-            self.update_tmux_conf(&conf_path, theme_name)?;
+            self.update_tmux_conf(&conf_path, &p.name)?;
         } else {
             ctx.log
                 .warn("tmux.conf not found. Theme linked but not sourced.", 3);
@@ -106,7 +109,7 @@ impl Generator for TmuxGenerator {
         }
 
         let content: String = fs::read_to_string(&tmux_conf).unwrap_or_default();
-        let themes_dir_str = themes_dir.display().to_string();
+        let themes_dir_str: String = themes_dir.display().to_string();
 
         if !content.contains(&themes_dir_str) {
             return Some(format!(
@@ -122,7 +125,7 @@ impl Generator for TmuxGenerator {
 
 impl TmuxGenerator {
     /// Build the tmux theme conf file content
-    fn build_config(&self, p: &Palette, name: &str) -> String {
+    fn build_config(&self, p: &Palette) -> String {
         let session_expr = " #S";
         let path_expr = " #{=/-32/...:#{s|$USER|~|:#{b:pane_current_path}}}";
 
@@ -173,6 +176,7 @@ set -g pane-active-border-style fg="{yellow}",bold
 set-option -g message-style bg="{line_hl}",fg="{fg}"
 set-option -g message-command-style bg="{line_hl}",fg="{fg}"
 "##,
+            name = utils::capitalize(&p.name),
             bg = p.bg,
             fg = p.fg,
             keyword = p.keyword,

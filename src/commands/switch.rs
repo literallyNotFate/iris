@@ -16,6 +16,7 @@ pub fn exec(name: String, ctx: &mut IrisContext) -> anyhow::Result<()> {
     println!();
 
     if !Palette::exists(&name, &ctx.log) {
+        println!();
         ctx.log.error(
             &format!(
                 "Theme '{}' not found in Neovim.",
@@ -24,9 +25,9 @@ pub fn exec(name: String, ctx: &mut IrisContext) -> anyhow::Result<()> {
             0,
         );
 
-        if ctx.log.quiet {
+        if !ctx.log.quiet {
             println!(
-                "  {}  Run `:colorscheme <Tab>` in Neovim to see all available themes.",
+                "{} Run `:colorscheme <Tab>` in Neovim to see all available themes.",
                 "󰋗 Tip:".blue()
             );
         }

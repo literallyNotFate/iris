@@ -33,16 +33,15 @@ impl Generator for StarshipGenerator {
     }
 
     fn apply(&self, p: &Palette, ctx: &IrisContext) -> Result<()> {
-        let theme_name = &ctx.state.current_theme;
         let config_path: PathBuf = env::var("STARSHIP_CONFIG")
             .map(PathBuf::from)
             .unwrap_or_else(|_| {
                 self.resolve_config_directory()
-                    .join(self.target_file_name(theme_name))
+                    .join(self.target_file_name(&p.name))
             });
 
-        let palette_block: String = self.build_config(p, theme_name);
-        let palette_header: String = format!("[palettes.{}]", theme_name);
+        let palette_block: String = self.build_config(p);
+        let palette_header: String = format!("[palettes.{}]", &p.name);
 
         let existing = if config_path.exists() {
             fs::read_to_string(&config_path)
@@ -56,10 +55,10 @@ impl Generator for StarshipGenerator {
                 fs::create_dir_all(parent)?;
             }
 
-            format!("palette = \"{}\"\n", theme_name)
+            format!("palette = \"{}\"\n", &p.name)
         };
 
-        let mut updated = set_palette_key(&existing, theme_name);
+        let mut updated: String = set_palette_key(&existing, &p.name);
         updated = replace_palette_block(&updated, &palette_header, &palette_block);
 
         fs::write(&config_path, updated)
@@ -67,7 +66,7 @@ impl Generator for StarshipGenerator {
 
         ctx.log.info(&format!(
             "Palette {} written to starship config.",
-            utils::capitalize(theme_name).yellow()
+            utils::capitalize(&p.name).yellow()
         ));
 
         Ok(())
@@ -101,7 +100,7 @@ impl Generator for StarshipGenerator {
 
 impl StarshipGenerator {
     /// Build starship theme palette
-    pub fn build_config(&self, p: &Palette, name: &str) -> String {
+    pub fn build_config(&self, p: &Palette) -> String {
         let a = &p.ansi;
         format!(
             r#"
@@ -122,7 +121,7 @@ peach    = "{peach}"
 foam     = "{foam}"
 gold     = "{gold}"
 "#,
-            name = name,
+            name = p.name,
             bg = p.bg,
             mantle = a[0],
             fg = p.fg,

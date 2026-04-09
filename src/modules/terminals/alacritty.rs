@@ -30,10 +30,14 @@ impl Generator for AlacrittyGenerator {
         let cache_file: PathBuf = ctx.paths.cache.join("alacritty").join(&theme_file_name);
         let link_path: PathBuf = alacritty_dir.join(&theme_file_name);
 
-        let config_content: String =
-            self.build_config(p, &utils::capitalize(&ctx.state.current_theme));
-        fs::create_dir_all(cache_file.parent().unwrap())?;
-        fs::write(&cache_file, config_content)?;
+        let config_content: String = self.build_config(p);
+        if let Some(parent) = cache_file.parent() {
+            fs::create_dir_all(parent)
+                .with_context(|| format!("Failed to create cache directory for {}", self.name()))?;
+        }
+
+        fs::write(&cache_file, config_content)
+            .with_context(|| format!("Failed to write alacritty cache to {:?}", cache_file))?;
 
         if !alacritty_dir.exists() {
             ctx.log.info(&format!(
@@ -90,7 +94,7 @@ impl Generator for AlacrittyGenerator {
 
 impl AlacrittyGenerator {
     /// Build TOML theme for Alacritty
-    pub fn build_config(&self, p: &Palette, name: &str) -> String {
+    pub fn build_config(&self, p: &Palette) -> String {
         let a = &p.ansi;
 
         format!(
@@ -128,7 +132,7 @@ magenta = "{c13}"
 cyan    = "{c14}"
 white   = "{c15}"
 "#,
-            name = name,
+            name = utils::capitalize(&p.name),
             bg = p.bg,
             fg = p.fg,
             white = p.white,

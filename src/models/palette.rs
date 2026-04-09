@@ -7,6 +7,9 @@ use std::process::Command;
 /// Theme palette that is being retreived from nvim
 #[derive(Debug, Deserialize, Serialize)]
 pub struct Palette {
+    #[serde(default)]
+    pub name: String,
+
     pub bg: String,
     pub fg: String,
     pub caret: String,
@@ -152,8 +155,9 @@ impl Palette {
         let json_start = stdout.find('{').context("Nvim did not return JSON")?;
         let json_end = stdout.rfind('}').context("JSON is malformed")? + 1;
 
-        let palette: Palette = serde_json::from_str(&stdout[json_start..json_end])
+        let mut palette: Palette = serde_json::from_str(&stdout[json_start..json_end])
             .context("Failed to parse palette JSON")?;
+        palette.name = theme.to_string();
 
         Ok(palette)
     }

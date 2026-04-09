@@ -25,7 +25,7 @@ impl Generator for YaziGenerator {
     }
 
     fn apply(&self, p: &Palette, ctx: &IrisContext) -> Result<()> {
-        let theme_name: &String = &ctx.state.current_theme;
+        let theme_name: &String = &p.name;
 
         let yazi_dir: PathBuf = self.resolve_config_directory();
         if !yazi_dir.exists() {
@@ -40,13 +40,13 @@ impl Generator for YaziGenerator {
             .join(format!("yazi_themes/{}.toml", theme_name));
         let theme_link: PathBuf = yazi_dir.join(self.target_file_name(theme_name));
 
-        let content: String = self.build_config(p, theme_name);
+        let content: String = self.build_config(p);
 
         fs::create_dir_all(cache_file.parent().unwrap())?;
         fs::write(&cache_file, content)?;
         ctx.log.info(&format!(
             "Theme {} generated in cache.",
-            utils::capitalize(&ctx.state.current_theme).yellow()
+            utils::capitalize(theme_name).yellow()
         ));
 
         if theme_link.exists() || theme_link.is_symlink() {
@@ -87,7 +87,7 @@ impl Generator for YaziGenerator {
 
 impl YaziGenerator {
     /// Build yazi theme
-    fn build_config(&self, p: &Palette, name: &str) -> String {
+    fn build_config(&self, p: &Palette) -> String {
         let red = &p.ansi[1];
         let green = &p.ansi[2];
         let orange = &p.ansi[3];
@@ -212,7 +212,7 @@ conds = [
   {{ if = "!dir",          text = "",  fg = "{fg}" }},
 ]
 "#,
-            name = name,
+            name = utils::capitalize(&p.name),
             bg = p.bg,
             fg = p.fg,
             white = p.white,
