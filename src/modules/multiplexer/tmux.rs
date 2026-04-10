@@ -231,3 +231,155 @@ set-option -g message-command-style bg="{line_hl}",fg="{fg}"
         Ok(())
     }
 }
+
+/// Unit-tests for tmux generator
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_utils::create_test_context;
+    use tempdir::TempDir;
+
+    #[test]
+    fn should_return_tmux_metadata() {
+        let generator = TmuxGenerator;
+        assert_eq!(generator.name(), "tmux");
+        assert_eq!(generator.generator_type(), GeneratorType::Multiplexer);
+        assert_eq!(generator.target_file_name("dracula"), "dracula.conf");
+    }
+
+    #[test]
+    fn should_build_correct_tmux_config() {
+        let generator = TmuxGenerator;
+        let p = Palette::mock();
+        let config = generator.build_config(&p);
+
+        assert!(config.contains("set -g status on"));
+        assert!(config.contains(&format!("set -g status-style bg=\"{}\"", p.bg)));
+        assert!(config.contains("set -wg automatic-rename on"));
+        assert!(config.contains(&p.ansi[3]));
+    }
+
+    #[test]
+    fn should_handle_update_tmux_conf_logic() {
+        let generator = TmuxGenerator;
+        let temp_dir: TempDir = TempDir::new("tmux_test").unwrap();
+        let conf_path = temp_dir.path().join("tmux.conf");
+
+        fs::write(
+            &conf_path,
+            "set -g prefix C-a\nsource-file \"old.conf\" # iris-theme\n",
+        )
+        .unwrap();
+        generator.update_tmux_conf(&conf_path, "new-theme").unwrap();
+        let content = fs::read_to_string(&conf_path).unwrap();
+        assert!(content.contains("new-theme.conf\" # iris-theme"));
+        assert!(!content.contains("old.conf"));
+
+        fs::write(
+            &conf_path,
+            "set -g base-index 1\nrun '~/.tmux/plugins/tpm/tpm'",
+        )
+        .unwrap();
+        generator.update_tmux_conf(&conf_path, "theme-x").unwrap();
+        let content = fs::read_to_string(&conf_path).unwrap();
+        let lines: Vec<&str> = content.lines().collect();
+        assert_eq!(
+            lines[1],
+            "source-file \"~/.config/tmux/themes/theme-x.conf\" # iris-theme"
+        );
+    }
+
+    #[test]
+    fn should_generate_setup_hint_for_tmux() {
+        let generator = TmuxGenerator;
+        let temp_dir = TempDir::new("tmux_test").expect("Failed to create temp dir");
+        let temp_path = temp_dir.path().to_path_buf();
+
+        temp_env::with_vars(
+            vec![
+                ("XDG_CONFIG_HOME", Some(&temp_path)),
+                ("HOME", Some(&temp_path)),
+            ],
+            || {
+                let themes_dir = generator.resolve_config_directory();
+                let hint = generator.setup_hint();
+
+                assert!(hint.is_some());
+                let hint_text = hint.unwrap();
+
+                assert!(hint_text.contains("No"));
+                assert!(hint_text.contains("tmux.conf"));
+                assert!(hint_text.contains("found"));
+
+                let btop_root = themes_dir.parent().expect("Should have parent");
+                let tmux_conf = btop_root.join("tmux.conf");
+                fs::create_dir_all(btop_root).unwrap();
+                fs::write(&tmux_conf, "set -g status on").unwrap();
+
+                let hint_no_source = generator.setup_hint().unwrap();
+                assert!(hint_no_source.contains("source-file"));
+
+                let themes_path_str = themes_dir.display().to_string();
+                fs::write(
+                    &tmux_conf,
+                    format!("source-file {}/test.conf", themes_path_str),
+                )
+                .unwrap();
+
+                assert!(generator.setup_hint().is_none());
+            },
+        );
+    }
+
+    #[test]
+    fn should_apply_theme_and_patch_tmux_conf() {
+        if which::which("tmux").is_err() {
+            return;
+        }
+
+        let (tmp_dir, ctx) = create_test_context();
+        let generator = TmuxGenerator;
+        let p = Palette::mock();
+
+        temp_env::with_vars(
+            vec![
+                ("XDG_CONFIG_HOME", Some(tmp_dir.path())),
+                ("HOME", Some(tmp_dir.path())),
+            ],
+            || {
+                let tmux_dir = generator
+                    .resolve_config_directory()
+                    .parent()
+                    .unwrap()
+                    .to_path_buf();
+                let tmux_conf = tmux_dir.join("tmux.conf");
+
+                fs::create_dir_all(&tmux_dir).unwrap();
+                fs::write(
+                    &tmux_conf,
+                    "set -g mouse on\n\nrun '~/.tmux/plugins/tpm/tpm'",
+                )
+                .unwrap();
+
+                let result = generator.apply(&p, &ctx);
+                assert!(result.is_ok());
+
+                let cache_file = ctx.paths.cache.join("tmux_themes").join("test-theme.conf");
+                assert!(cache_file.exists());
+
+                let updated_content = fs::read_to_string(&tmux_conf).unwrap();
+                assert!(updated_content.contains(
+                    "source-file \"~/.config/tmux/themes/test-theme.conf\" # iris-theme"
+                ));
+
+                let lines: Vec<&str> = updated_content.lines().collect();
+                let theme_idx = lines
+                    .iter()
+                    .position(|l| l.contains("# iris-theme"))
+                    .unwrap();
+                let tpm_idx = lines.iter().position(|l| l.contains("tpm")).unwrap();
+                assert!(theme_idx < tpm_idx, "Theme should be sourced before TPM");
+            },
+        );
+    }
+}

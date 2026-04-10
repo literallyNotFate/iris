@@ -235,3 +235,91 @@ conds = [
         )
     }
 }
+
+/// Unit-tests for yazi generator
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_utils::create_test_context;
+    use temp_env;
+    use tempdir::TempDir;
+
+    #[test]
+    fn should_return_yazi_metadata() {
+        let generator = YaziGenerator;
+        assert_eq!(generator.name(), "yazi");
+        assert_eq!(generator.generator_type(), GeneratorType::Tool);
+        assert_eq!(generator.target_file_name("any"), "theme.toml");
+    }
+
+    #[test]
+    fn should_handle_yazi_build_config_interpolation() {
+        let generator = YaziGenerator;
+        let p = Palette::mock();
+        let config = generator.build_config(&p);
+
+        assert!(config.contains("Theme: Test-theme"));
+        assert!(config.contains("#1a1b26"));
+        assert!(config.contains("#f7768e"));
+    }
+
+    #[test]
+    fn should_generate_setup_hint_for_yazi() {
+        let generator = YaziGenerator;
+        let temp_dir: TempDir = TempDir::new("yazi_hint").unwrap();
+        let fake_config_root = temp_dir.path().join("config");
+        fs::create_dir_all(&fake_config_root).unwrap();
+
+        temp_env::with_vars(
+            vec![
+                ("XDG_CONFIG_HOME", Some(&fake_config_root)),
+                ("HOME", Some(&temp_dir.into_path())),
+            ],
+            || {
+                let resolved = generator.resolve_config_directory();
+                println!("DEBUG: resolved path: {:?}", resolved);
+
+                let hint = generator.setup_hint();
+                assert!(
+                    hint.is_some(),
+                    "Hint should be Some for path: {:?}",
+                    resolved
+                );
+
+                fs::create_dir_all(&resolved).unwrap();
+                assert!(generator.setup_hint().is_none());
+            },
+        );
+    }
+
+    #[test]
+    fn should_apply_theme_for_yazi() {
+        if which::which("yazi").is_err() {
+            return;
+        }
+
+        let (tmp_dir, ctx) = create_test_context();
+        let generator = YaziGenerator;
+        let p = Palette::mock();
+
+        temp_env::with_vars(
+            vec![
+                ("XDG_CONFIG_HOME", Some(tmp_dir.path())),
+                ("HOME", Some(tmp_dir.path())),
+            ],
+            || {
+                let result = generator.apply(&p, &ctx);
+                assert!(result.is_ok());
+
+                let expected_yazi_dir = generator.resolve_config_directory();
+                let yazi_theme_link = expected_yazi_dir.join("theme.toml");
+
+                assert!(
+                    yazi_theme_link.exists(),
+                    "Symlink missing at {:?}. Check if resolve_config_directory is consistent!",
+                    yazi_theme_link
+                );
+            },
+        );
+    }
+}

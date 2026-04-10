@@ -156,3 +156,101 @@ white   = "{c15}"
         )
     }
 }
+
+/// Unit-tests for alacritty
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_utils::create_test_context;
+    use tempdir::TempDir;
+
+    #[test]
+    fn should_return_alacritty_metadata() {
+        let generator = AlacrittyGenerator;
+        assert_eq!(generator.name(), "alacritty");
+        assert_eq!(generator.generator_type(), GeneratorType::Terminal);
+        assert_eq!(generator.target_file_name("nord"), "current_theme.toml");
+    }
+
+    #[test]
+    fn should_build_correct_alacritty_toml() {
+        let generator = AlacrittyGenerator;
+        let p = Palette::mock();
+        let config = generator.build_config(&p);
+
+        assert!(config.contains(&format!("background = \"{}\"", p.bg)));
+        assert!(config.contains(&format!("foreground = \"{}\"", p.fg)));
+        assert!(config.contains("[colors.normal]"));
+        assert!(config.contains("[colors.bright]"));
+        assert!(config.contains(&format!("black   = \"{}\"", p.ansi[0])));
+        assert!(config.contains(&format!("white   = \"{}\"", p.ansi[15])));
+    }
+
+    #[test]
+    fn should_generate_setup_hint_for_alacritty() {
+        let generator = AlacrittyGenerator;
+        let temp_dir: TempDir = TempDir::new("alacritty_test").unwrap();
+
+        temp_env::with_vars(
+            vec![
+                ("XDG_CONFIG_HOME", Some(temp_dir.path())),
+                ("HOME", Some(temp_dir.path())),
+            ],
+            || {
+                let alacritty_dir = generator.resolve_config_directory();
+                let main_config = alacritty_dir.join("alacritty.toml");
+
+                let hint_no_config = generator.setup_hint();
+                assert!(hint_no_config.is_some());
+                assert!(hint_no_config.unwrap().contains("No config found"));
+
+                fs::create_dir_all(&alacritty_dir).unwrap();
+                fs::write(&main_config, "[window]\nopacity = 0.9").unwrap();
+                let hint_no_import = generator.setup_hint();
+                assert!(hint_no_import.is_some());
+                assert!(hint_no_import.unwrap().contains("import = ["));
+
+                fs::write(&main_config, "import = [\"current_theme.toml\"]").unwrap();
+                assert!(generator.setup_hint().is_none());
+            },
+        );
+    }
+
+    #[test]
+    fn should_apply_theme_for_alacritty() {
+        if which::which("alacritty").is_err() {
+            return;
+        }
+
+        let (tmp_dir, ctx) = create_test_context();
+        let generator = AlacrittyGenerator;
+        let p = Palette::mock();
+
+        temp_env::with_vars(
+            vec![
+                ("XDG_CONFIG_HOME", Some(tmp_dir.path())),
+                ("HOME", Some(tmp_dir.path())),
+            ],
+            || {
+                let result = generator.apply(&p, &ctx);
+                assert!(result.is_ok());
+
+                let cache_file = ctx.paths.cache.join("alacritty").join("current_theme.toml");
+                assert!(cache_file.exists(), "Theme missing in Iris cache");
+
+                let alacritty_dir = generator.resolve_config_directory();
+                let link_path = alacritty_dir.join("current_theme.toml");
+                assert!(
+                    link_path.exists(),
+                    "Symlink missing in Alacritty config dir"
+                );
+
+                #[cfg(unix)]
+                {
+                    let meta = fs::symlink_metadata(&link_path).expect("Failed to get metadata");
+                    assert!(meta.file_type().is_symlink(), "Target is not a symlink");
+                }
+            },
+        );
+    }
+}

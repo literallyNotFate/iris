@@ -230,3 +230,127 @@ theme[temp_low]="{green}"
         Ok(())
     }
 }
+
+/// Unit-tests for btop generator
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_utils::create_test_context;
+    use tempdir::TempDir;
+
+    #[test]
+    fn should_return_btop_metadata() {
+        let generator = BtopGenerator;
+        assert_eq!(generator.name(), "btop");
+        assert_eq!(generator.generator_type(), GeneratorType::System);
+        assert_eq!(generator.target_file_name("iris-dark"), "iris-dark.theme");
+    }
+
+    #[test]
+    fn should_build_correct_btop_config() {
+        let generator = BtopGenerator;
+        let p = Palette::mock();
+        let config = generator.build_config(&p);
+
+        assert!(config.contains("theme[main_bg]"));
+        assert!(config.contains("theme[cpu_start]"));
+        assert!(config.contains("theme[mem_mid]"));
+        assert!(config.contains(&p.bg));
+        assert!(config.contains(&p.ansi[2]));
+    }
+
+    #[test]
+    fn should_generate_setup_hint_for_btop() {
+        let generator = BtopGenerator;
+        let temp_dir: TempDir = TempDir::new("btop_test").unwrap();
+
+        temp_env::with_vars(
+            vec![
+                ("XDG_CONFIG_HOME", Some(temp_dir.path())),
+                ("HOME", Some(temp_dir.path())),
+            ],
+            || {
+                let btop_dir = generator
+                    .resolve_config_directory()
+                    .parent()
+                    .unwrap()
+                    .to_path_buf();
+                let btop_conf = btop_dir.join("btop.conf");
+
+                let hint_no_conf = generator.setup_hint();
+                assert!(hint_no_conf.unwrap().contains("btop.conf"));
+
+                fs::create_dir_all(&btop_dir).unwrap();
+                fs::write(&btop_conf, "some_setting = true").unwrap();
+                let hint_no_key = generator.setup_hint();
+                assert!(hint_no_key.unwrap().contains("color_theme ="));
+
+                fs::write(&btop_conf, "color_theme = \"default\"").unwrap();
+                assert!(generator.setup_hint().is_none());
+            },
+        );
+    }
+
+    #[test]
+    fn should_update_existing_line_or_append() {
+        let generator = BtopGenerator;
+        let temp_dir: TempDir = TempDir::new("btop_test").unwrap();
+        let conf_path = temp_dir.path().join("btop.conf");
+
+        fs::write(
+            &conf_path,
+            "theme_background = True\ncolor_theme = \"default\"\n",
+        )
+        .unwrap();
+        generator.update_btop_conf(&conf_path, "new-theme").unwrap();
+        let content = fs::read_to_string(&conf_path).unwrap();
+        assert!(content.contains("color_theme = \"new-theme\""));
+        assert!(!content.contains("color_theme = \"default\""));
+
+        fs::write(&conf_path, "theme_background = True\n").unwrap();
+        generator
+            .update_btop_conf(&conf_path, "only-theme")
+            .unwrap();
+        let content = fs::read_to_string(&conf_path).unwrap();
+        assert!(content.contains("color_theme = \"only-theme\""));
+    }
+
+    #[test]
+    fn should_apply_theme_and_update_conf() {
+        let (tmp_dir, ctx) = create_test_context();
+        let generator = BtopGenerator;
+        let p = Palette::mock();
+
+        temp_env::with_vars(
+            vec![
+                ("XDG_CONFIG_HOME", Some(tmp_dir.path())),
+                ("HOME", Some(tmp_dir.path())),
+            ],
+            || {
+                let btop_dir = generator
+                    .resolve_config_directory()
+                    .parent()
+                    .unwrap()
+                    .to_path_buf();
+                let btop_conf = btop_dir.join("btop.conf");
+
+                fs::create_dir_all(&btop_dir).unwrap();
+                fs::write(
+                    &btop_conf,
+                    "graph_symbol = \"braille\"\ncolor_theme = \"old-theme\"\n",
+                )
+                .unwrap();
+
+                let result = generator.apply(&p, &ctx);
+                assert!(result.is_ok());
+
+                let cache_file = ctx.paths.cache.join("btop_themes").join("test-theme.theme");
+                assert!(cache_file.exists());
+
+                let updated_content = fs::read_to_string(&btop_conf).unwrap();
+                assert!(updated_content.contains(&format!("color_theme = \"{}\"", p.name)));
+                assert!(updated_content.contains("graph_symbol = \"braille\""));
+            },
+        );
+    }
+}

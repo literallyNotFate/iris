@@ -1055,3 +1055,97 @@ impl BatGenerator {
         s
     }
 }
+
+/// Unit-tests for bat generator
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_utils::create_test_context;
+    use temp_env;
+    use tempdir::TempDir;
+
+    #[test]
+    fn should_return_bat_metadata() {
+        let generator = BatGenerator;
+        assert_eq!(generator.name(), "bat");
+        assert_eq!(generator.generator_type(), GeneratorType::Tool);
+        assert_eq!(generator.target_file_name("nord"), "nord.tmTheme");
+    }
+
+    #[test]
+    fn should_build_plist_config_for_bat() {
+        let generator = BatGenerator;
+        let p = Palette::mock();
+        let xml = generator.build_plist_content(&p);
+
+        assert!(xml.contains("<?xml version=\"1.0\""));
+        assert!(xml.contains("<plist version=\"1.0\">"));
+        assert!(xml.contains(&utils::capitalize(&p.name)));
+        assert!(xml.contains("<key>background</key>"));
+        assert!(xml.contains(&p.bg));
+    }
+
+    #[test]
+    fn should_resolve_config_directory_fallback_for_bat() {
+        let generator = BatGenerator;
+        let temp_dir: TempDir = TempDir::new("bat_test").unwrap();
+
+        temp_env::with_var("HOME", Some(temp_dir.path()), || {
+            let path = generator.resolve_config_directory();
+            assert!(path.to_string_lossy().contains(".config/bat/themes"));
+        });
+    }
+
+    #[test]
+    fn should_generate_setup_hint_for_bat() {
+        let generator = BatGenerator;
+        let temp_dir: TempDir = TempDir::new("bat_test").unwrap();
+        let fake_iris_cache = temp_dir.path().join(".cache/iris/bat.conf");
+
+        temp_env::with_vars(
+            vec![("HOME", Some(temp_dir.path())), ("BAT_CONFIG_PATH", None)],
+            || {
+                let hint = generator.setup_hint();
+                assert!(hint.is_some());
+                assert!(hint.unwrap().contains("BAT_CONFIG_PATH"));
+
+                temp_env::with_var("BAT_CONFIG_PATH", Some(&fake_iris_cache), || {
+                    let hint_after = generator.setup_hint();
+                    assert!(
+                        hint_after.is_none(),
+                        "Hint should disappear when env var matches"
+                    );
+                });
+            },
+        );
+    }
+
+    #[test]
+    fn should_apply_theme_for_bat() {
+        if which::which("bat").is_err() {
+            return;
+        }
+
+        let (tmp_dir, ctx) = create_test_context();
+        let generator = BatGenerator;
+        let p = Palette::mock();
+
+        temp_env::with_var("HOME", Some(tmp_dir.path()), || {
+            let result = generator.apply(&p, &ctx);
+            assert!(result.is_ok());
+
+            let cache_theme = ctx
+                .paths
+                .cache
+                .join("bat_themes")
+                .join("test-theme.tmTheme");
+            let bat_conf = ctx.paths.cache.join("bat.conf");
+
+            assert!(cache_theme.exists(), "Theme file should be in iris cache");
+            assert!(bat_conf.exists(), "bat.conf should be in iris cache");
+
+            let conf_content = fs::read_to_string(bat_conf).unwrap();
+            assert!(conf_content.contains("--theme=\"Test-theme\""));
+        });
+    }
+}

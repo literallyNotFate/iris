@@ -112,3 +112,124 @@ impl GhosttyGenerator {
         cfg
     }
 }
+
+/// Unit-tests for ghostty
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_utils::create_test_context;
+    use tempdir::TempDir;
+
+    #[test]
+    fn should_return_ghostty_metadata() {
+        let generator = GhosttyGenerator;
+        assert_eq!(generator.name(), "ghostty");
+        assert_eq!(generator.generator_type(), GeneratorType::Terminal);
+        assert_eq!(generator.target_file_name("any"), "current_theme.conf");
+    }
+
+    #[test]
+    fn should_build_correct_ghostty_config() {
+        let generator = GhosttyGenerator;
+        let p = Palette::mock();
+        let config = generator.build_config(&p);
+
+        assert!(config.contains(&format!("background = {}", p.bg)));
+        assert!(config.contains(&format!("foreground = {}", p.fg)));
+        assert!(config.contains("palette = 0="));
+        assert!(config.contains("palette = 15="));
+
+        let palette_lines = config
+            .lines()
+            .filter(|l| l.starts_with("palette ="))
+            .count();
+        assert_eq!(palette_lines, 16);
+    }
+
+    #[test]
+    fn should_generate_setup_hint_for_ghostty() {
+        let generator = GhosttyGenerator;
+        let temp_dir: TempDir = TempDir::new("ghostty_test").unwrap();
+
+        temp_env::with_vars(
+            vec![
+                ("XDG_CONFIG_HOME", Some(temp_dir.path())),
+                ("HOME", Some(temp_dir.path())),
+            ],
+            || {
+                let ghostty_dir = generator.resolve_config_directory();
+                let config_file = ghostty_dir.join("config");
+
+                let hint_no_dir = generator.setup_hint();
+                assert!(
+                    hint_no_dir.is_some(),
+                    "Should show hint if config directory is missing"
+                );
+
+                fs::create_dir_all(&ghostty_dir).unwrap();
+                fs::write(&config_file, "font-size = 14\n# empty config").unwrap();
+
+                let hint_no_import = generator.setup_hint();
+                assert!(
+                    hint_no_import.is_some(),
+                    "Should show hint if config exists but lacks import"
+                );
+                assert!(
+                    hint_no_import
+                        .unwrap()
+                        .contains("config-file = current_theme.conf"),
+                    "Hint message should contain the required import line"
+                );
+
+                fs::write(
+                    &config_file,
+                    "font-size = 14\nconfig-file = current_theme.conf",
+                )
+                .unwrap();
+                let hint_perfect = generator.setup_hint();
+                assert!(
+                    hint_perfect.is_none(),
+                    "Hint should be None when config is valid"
+                );
+            },
+        );
+    }
+
+    #[test]
+    fn should_apply_theme_for_ghostty() {
+        if which::which("ghostty").is_err() {
+            return;
+        }
+
+        let (tmp_dir, ctx) = create_test_context();
+        let generator = GhosttyGenerator;
+        let p = Palette::mock();
+
+        temp_env::with_vars(
+            vec![
+                ("XDG_CONFIG_HOME", Some(tmp_dir.path())),
+                ("HOME", Some(tmp_dir.path())),
+            ],
+            || {
+                let result = generator.apply(&p, &ctx);
+                assert!(result.is_ok());
+
+                let cache_file = ctx.paths.cache.join("ghostty").join("current_theme.conf");
+                assert!(cache_file.exists());
+
+                let ghostty_config_dir = generator.resolve_config_directory();
+                let link_path = ghostty_config_dir.join("current_theme.conf");
+                assert!(
+                    link_path.exists(),
+                    "Symlink should be created in ghostty dir"
+                );
+
+                #[cfg(unix)]
+                {
+                    let meta = fs::symlink_metadata(&link_path).unwrap();
+                    assert!(meta.file_type().is_symlink());
+                }
+            },
+        );
+    }
+}

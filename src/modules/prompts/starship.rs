@@ -176,3 +176,101 @@ fn set_palette_key(content: &str, name: &str) -> String {
         format!("{}\n{}", new_line, content)
     }
 }
+
+/// Unit-tests for starship generator
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_utils::create_test_context;
+    use tempdir::TempDir;
+
+    #[test]
+    fn should_return_starship_metadata() {
+        let generator = StarshipGenerator;
+        assert_eq!(generator.name(), "starship");
+        assert_eq!(generator.generator_type(), GeneratorType::Prompt);
+        assert_eq!(generator.target_file_name("any"), "starship.toml");
+    }
+
+    #[test]
+    fn should_build_correct_starship_palette() {
+        let generator = StarshipGenerator;
+        let p = Palette::mock();
+        let config = generator.build_config(&p);
+
+        assert!(config.contains(&format!("[palettes.{}]", p.name)));
+        assert!(config.contains(&format!("base     = \"{}\"", p.bg)));
+        assert!(config.contains(&format!("green    = \"{}\"", p.ansi[2])));
+    }
+
+    #[test]
+    fn should_handle_palette_key_set_for_starship() {
+        let content = "line1 = true\nline2 = false";
+        let updated = set_palette_key(content, "my-theme");
+        assert!(updated.starts_with("palette = \"my-theme\""));
+
+        let content_with_key = "palette = \"old\"\nother = 1";
+        let updated_key = set_palette_key(content_with_key, "new");
+        assert!(updated_key.contains("palette = \"new\""));
+        assert!(!updated_key.contains("palette = \"old\""));
+    }
+
+    #[test]
+    fn should_handle_replace_palette_block_for_starship() {
+        let header = "[palettes.test]";
+        let new_block = "[palettes.test]\ncolor = \"red\"\n";
+        let content = "[directory]\ntruncation_length = 3";
+        let result = replace_palette_block(content, header, new_block);
+        assert!(result.contains(new_block));
+
+        let complex_content = "[palettes.test]\nold = true\n\n[character]\nsymbol = \">\"";
+        let result_complex = replace_palette_block(complex_content, header, new_block);
+        assert!(result_complex.contains(new_block));
+        assert!(result_complex.contains("[character]"));
+        assert!(!result_complex.contains("old = true"));
+    }
+
+    #[test]
+    fn should_generate_setup_hint_for_starship() {
+        let generator = StarshipGenerator;
+        let temp_dir: TempDir = TempDir::new("starship_test").unwrap();
+        let config_path = temp_dir.path().join("starship.toml");
+
+        temp_env::with_var("STARSHIP_CONFIG", Some(&config_path), || {
+            let hint = generator.setup_hint();
+            assert!(hint.unwrap().contains("Starship config not found"));
+
+            fs::write(&config_path, "[character]\nsuccess_symbol = \">\"").unwrap();
+            let hint_no_key = generator.setup_hint();
+            assert!(hint_no_key.unwrap().contains("palette ="));
+
+            fs::write(&config_path, "palette = \"some-theme\"").unwrap();
+            assert!(generator.setup_hint().is_none());
+        });
+    }
+
+    #[test]
+    fn should_apply_theme_for_starship() {
+        if which::which("starship").is_err() {
+            return;
+        }
+
+        let (tmp_dir, ctx) = create_test_context();
+        let generator = StarshipGenerator;
+        let p = Palette::mock();
+        let config_path = tmp_dir.path().join("starship.toml");
+
+        temp_env::with_var("STARSHIP_CONFIG", Some(&config_path), || {
+            fs::write(&config_path, "[directory]\nstyle = \"blue\"\n").unwrap();
+
+            let result = generator.apply(&p, &ctx);
+            assert!(result.is_ok());
+
+            let final_content = fs::read_to_string(&config_path).unwrap();
+
+            assert!(final_content.contains(&format!("palette = \"{}\"", p.name)));
+            assert!(final_content.contains(&format!("[palettes.{}]", p.name)));
+            assert!(final_content.contains("[directory]"));
+        });
+    }
+}
