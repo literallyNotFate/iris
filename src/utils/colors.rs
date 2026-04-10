@@ -30,3 +30,22 @@ pub fn hex_to_rgb(hex: &str) -> (u8, u8, u8) {
     let b = u8::from_str_radix(&hex[4..6], 16).unwrap_or(0);
     (r, g, b)
 }
+
+/// Unit-tests for color utility functions
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn should_parse_hex_to_rgb() {
+        assert_eq!(hex_to_rgb("#ffffff"), (255, 255, 255));
+        assert_eq!(hex_to_rgb("000000"), (0, 0, 0));
+        assert_eq!(hex_to_rgb("#ff5500"), (255, 85, 0));
+    }
+
+    #[test]
+    fn should_handle_wrong_hex() {
+        assert_eq!(hex_to_rgb("short"), (128, 128, 128));
+        assert_eq!(hex_to_rgb("#zzzzzz"), (0, 0, 0));
+    }
+}
