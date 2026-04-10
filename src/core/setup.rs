@@ -131,3 +131,71 @@ add-zsh-hook precmd _iris_fzf_sync
         Ok(())
     }
 }
+
+/// Unit-tests for setup
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_utils::create_test_context;
+    use std::{fs, path::PathBuf};
+    use temp_env;
+
+    #[test]
+    fn should_handle_setup_zsh_hook_injection() {
+        let (tmp, ctx) = create_test_context();
+        let fake_home = tmp.path();
+        let zshrc_path: PathBuf = fake_home.join(".zshrc");
+
+        fs::write(&zshrc_path, "export PATH=$HOME/bin:$PATH\n").unwrap();
+
+        temp_env::with_var("HOME", Some(fake_home), || {
+            let task = ctx.log.step("Test Task", 1);
+
+            let result = IrisSetup::setup_zsh_hook(&ctx, &task);
+            assert!(result.is_ok());
+
+            let updated_content = fs::read_to_string(&zshrc_path).unwrap();
+
+            assert!(updated_content.contains("# --- Iris FZF Sync ---"));
+            assert!(updated_content.contains("_iris_fzf_sync"));
+
+            let result_second = IrisSetup::setup_zsh_hook(&ctx, &task);
+            assert!(result_second.is_ok());
+
+            let final_content = fs::read_to_string(&zshrc_path).unwrap();
+            let occurrences = final_content.matches("# --- Iris FZF Sync ---").count();
+            assert_eq!(occurrences, 1, "Hook should not be duplicated");
+        });
+    }
+
+    #[test]
+    fn should_skip_initial_setup_if_exists() {
+        let (_tmp, mut ctx) = create_test_context();
+
+        fs::write(
+            &ctx.paths.state_file,
+            r#"{"current_theme": "nord", "enabled_generators": []}"#,
+        )
+        .unwrap();
+
+        let task = ctx.log.step("Initial State Test", 1);
+        let result = IrisSetup::setup_initial_state(&mut ctx, &task);
+
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn should_handle_full_setup_logic() {
+        let (tmp, mut ctx) = create_test_context();
+        let fake_home = tmp.path();
+
+        fs::write(fake_home.join(".zshrc"), "").unwrap();
+
+        temp_env::with_var("HOME", Some(fake_home), || {
+            let _ = IrisSetup::run(&mut ctx);
+
+            assert!(ctx.paths.config.exists(), "Config dir should be created");
+            assert!(ctx.paths.cache.exists(), "Cache dir should be created");
+        });
+    }
+}

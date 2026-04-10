@@ -58,3 +58,50 @@ impl IrisContext {
         Ok(())
     }
 }
+
+/// Unit-tests for context
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_utils::create_test_context;
+    use std::fs;
+
+    #[test]
+    fn should_handle_context_update_theme_persistence() {
+        let (_tmp, mut ctx) = create_test_context();
+        let theme_name = "melange";
+
+        ctx.update(theme_name)
+            .expect("Should update theme without errors");
+
+        assert_eq!(ctx.state.current_theme, theme_name.to_string());
+
+        let state_content = fs::read_to_string(&ctx.paths.state_file).unwrap();
+        assert!(state_content.contains(theme_name));
+
+        let current_theme_content = fs::read_to_string(&ctx.paths.current_theme).unwrap();
+        assert_eq!(current_theme_content, theme_name);
+    }
+
+    #[test]
+    fn should_handle_context_save_state() {
+        let (_tmp, mut ctx) = create_test_context();
+        ctx.state.enable_generator("yazi");
+        ctx.save().expect("Should save state");
+
+        let content = fs::read_to_string(&ctx.paths.state_file).unwrap();
+        assert!(content.contains("yazi"));
+    }
+
+    #[test]
+    fn should_handle_loading_context_from_existing_file() {
+        let (_tmp, ctx_orig) = create_test_context();
+        let mut ctx = ctx_orig;
+        ctx.update("gruvbox").unwrap();
+
+        let state_json = fs::read_to_string(&ctx.paths.state_file).unwrap();
+        let loaded_state: State = serde_json::from_str(&state_json).unwrap();
+
+        assert_eq!(loaded_state.current_theme, "gruvbox".to_string());
+    }
+}
