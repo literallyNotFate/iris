@@ -23,24 +23,18 @@ impl GeneratorRegistry {
         generators.extend(system::get_all());
         generators.extend(multiplexer::get_all());
 
-        Self { generators }
-    }
-
-    /// Access to all generators
-    pub fn all(&self) -> &[Box<dyn Generator>] {
-        &self.generators
-    }
-
-    /// Access to all generators sorted by type and then by name
-    pub fn all_sorted(&self) -> Vec<&Box<dyn Generator>> {
-        let mut gens: Vec<_> = self.generators.iter().collect();
-        gens.sort_by(|a, b| {
+        generators.sort_by(|a, b| {
             a.generator_type()
                 .cmp(&b.generator_type())
                 .then(a.name().cmp(b.name()))
         });
 
-        gens
+        Self { generators }
+    }
+
+    /// Access to all generators
+    pub fn all(&self) -> Vec<&dyn Generator> {
+        self.generators.iter().map(|b| b.as_ref()).collect()
     }
 
     /// List of all supported generators names (for MultiSelect)
@@ -65,10 +59,11 @@ impl GeneratorRegistry {
     }
 
     /// Get generators by type
-    pub fn by_type(&self, g_type: GeneratorType) -> Vec<&Box<dyn Generator>> {
+    pub fn by_type(&self, g_type: GeneratorType) -> Vec<&dyn Generator> {
         self.generators
             .iter()
             .filter(|g| g.generator_type() == g_type)
+            .map(|b| b.as_ref())
             .collect()
     }
 
@@ -83,11 +78,7 @@ impl GeneratorRegistry {
 
     /// Check whether this generator is installed in system
     pub fn is_installed(&self, name: &str) -> bool {
-        self.generators
-            .iter()
-            .find(|g| g.name() == name)
-            .map(|g| g.is_installed())
-            .unwrap_or(false)
+        self.get(name).map(|g| g.is_installed()).unwrap_or(false)
     }
 
     /// Checks whether this generator exists
@@ -108,31 +99,34 @@ impl GeneratorRegistry {
 impl GeneratorRegistry {
     /// Apply themes to available programs (enabled generators)
     pub fn apply_all(&self, palette: &Palette, ctx: &IrisContext) -> anyhow::Result<()> {
+        let to_apply: Vec<&dyn Generator> = self
+            .generators
+            .iter()
+            .filter(|g| ctx.state.is_enabled(g.name()) && g.is_installed())
+            .map(|b| b.as_ref())
+            .collect();
+
+        if to_apply.is_empty() {
+            return Ok(());
+        }
+
         if !ctx.log.quiet {
             println!("\n {} {}", "󰚗".magenta(), "Updating targets...".bold());
         }
-
-        let enabled = &ctx.state.enabled_generators;
-        let to_apply: Vec<_> = self
-            .generators
-            .iter()
-            .filter(|g| enabled.contains(g.name()) && g.is_installed())
-            .collect();
 
         let total = to_apply.len();
         let start_all = std::time::Instant::now();
 
         for (i, generator) in to_apply.iter().enumerate() {
-            let is_last = i == total - 1;
             let mut task = ctx.log.step(generator.name(), 2);
 
-            if let Err(e) = generator.apply(palette, ctx) {
+            generator.apply(palette, ctx).map_err(|e| {
                 ctx.log
                     .error(&format!("Failed {}: {}", generator.name(), e), 1);
-                return Err(e);
-            }
+                e
+            })?;
 
-            task.done(is_last);
+            task.done(i == total - 1);
         }
 
         println!(
@@ -142,5 +136,131 @@ impl GeneratorRegistry {
         );
 
         Ok(())
+    }
+}
+
+/// Unit-tests for generator registry
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Mock generator and trait implementation
+    struct MockGenerator {
+        name: &'static str,
+        g_type: GeneratorType,
+        installed: bool,
+    }
+
+    impl Generator for MockGenerator {
+        fn name(&self) -> &str {
+            self.name
+        }
+
+        fn generator_type(&self) -> GeneratorType {
+            self.g_type
+        }
+
+        fn target_file_name(&self, theme: &str) -> String {
+            format!("{}.conf", theme)
+        }
+
+        fn is_installed(&self) -> bool {
+            self.installed
+        }
+
+        fn apply(&self, _: &Palette, _: &IrisContext) -> anyhow::Result<()> {
+            Ok(())
+        }
+    }
+
+    // Helper function to setup generator registry with mocks
+    fn setup_registry() -> GeneratorRegistry {
+        let mut reg = GeneratorRegistry::default();
+        reg.generators.push(Box::new(MockGenerator {
+            name: "alacritty",
+            g_type: GeneratorType::Terminal,
+            installed: true,
+        }));
+        reg.generators.push(Box::new(MockGenerator {
+            name: "zsh",
+            g_type: GeneratorType::Prompt,
+            installed: false,
+        }));
+        reg.generators.push(Box::new(MockGenerator {
+            name: "kitty",
+            g_type: GeneratorType::Terminal,
+            installed: true,
+        }));
+
+        reg.generators.sort_by(|a, b| {
+            a.generator_type()
+                .cmp(&b.generator_type())
+                .then(a.name().cmp(b.name()))
+        });
+        reg
+    }
+
+    #[test]
+    fn should_return_all_sorted_generators() {
+        let reg = setup_registry();
+        let all = reg.all();
+
+        assert_eq!(all[0].name(), "alacritty");
+        assert_eq!(all[1].name(), "kitty");
+        assert_eq!(all[2].name(), "zsh");
+    }
+
+    #[test]
+    fn should_handle_get_and_exists_for_registry() {
+        let reg = setup_registry();
+
+        assert!(reg.exists("alacritty"));
+        assert!(!reg.exists("windows_terminal"));
+
+        let gr = reg.get("kitty");
+        assert!(gr.is_some());
+        assert_eq!(gr.unwrap().name(), "kitty");
+    }
+
+    #[test]
+    fn should_handle_filtering_by_type_for_generators() {
+        let reg = setup_registry();
+        let terminals = reg.by_type(GeneratorType::Terminal);
+
+        assert_eq!(terminals.len(), 2);
+        assert_eq!(terminals[0].name(), "alacritty");
+        assert_eq!(terminals[1].name(), "kitty");
+    }
+
+    #[test]
+    fn should_apply_installed_filters_for_generators() {
+        let reg = setup_registry();
+        let installed = reg.installed();
+
+        assert_eq!(installed.len(), 2);
+        assert!(installed.iter().any(|g| g.name() == "alacritty"));
+        assert!(!installed.iter().any(|g| g.name() == "zsh"));
+    }
+
+    #[test]
+    fn should_discover_unenabled_generators() {
+        let reg = setup_registry();
+        let mut state = State::default();
+
+        state.enable_generator("alacritty");
+        let unenabled = reg.discover_unenabled(&state);
+
+        assert_eq!(unenabled.len(), 1);
+        assert_eq!(unenabled[0].name(), "kitty");
+    }
+
+    #[test]
+    fn should_test_generator_type_set() {
+        let reg = setup_registry();
+        let types = reg.types();
+
+        assert_eq!(types.len(), 2);
+        assert!(types.contains(&GeneratorType::Terminal));
+        assert!(types.contains(&GeneratorType::Prompt));
     }
 }

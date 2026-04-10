@@ -14,11 +14,11 @@ use std::collections::BTreeSet;
 pub fn exec(action: GenAction, ctx: &mut IrisContext) -> anyhow::Result<()> {
     match action {
         GenAction::Select => {
-            let all_generators = &ctx.registry.all_sorted();
+            let all_generators = ctx.registry.all();
             let mut items = Vec::new();
             let mut defaults = Vec::new();
 
-            for generator in all_generators {
+            for generator in &all_generators {
                 let name = generator.name();
                 let g_type = generator.generator_type();
 
@@ -148,7 +148,7 @@ pub fn exec(action: GenAction, ctx: &mut IrisContext) -> anyhow::Result<()> {
             generator_type,
             status,
         } => {
-            let all_generators = ctx.registry.all_sorted();
+            let all_generators = ctx.registry.all();
 
             let filtered: Vec<_> = all_generators
                 .into_iter()

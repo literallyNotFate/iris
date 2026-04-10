@@ -85,3 +85,67 @@ impl State {
         Self::load_from(path).unwrap_or_default()
     }
 }
+
+/// Unit-tests for application state
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use tempdir::TempDir;
+
+    #[test]
+    fn should_test_application_state_logic() {
+        let mut state = State::default();
+
+        state.enable_generator("alacritty");
+        state.enable_generator("wallust");
+        assert!(state.is_enabled("alacritty"));
+
+        state.enable_generator("alacritty");
+        assert_eq!(state.enabled_generators.len(), 2);
+
+        state.toggle_generator("alacritty");
+        assert!(!state.is_enabled("alacritty"));
+    }
+
+    #[test]
+    fn should_handle_state_save_and_load() {
+        let temp_dir: TempDir = TempDir::new("iris_state_test").unwrap();
+        let file_path: PathBuf = temp_dir.path().join("state.json");
+
+        let mut state = State::new("melange".into(), BTreeSet::new());
+        state.enable_generator("kitty");
+        state.save_to(&file_path).expect("Failed to save");
+
+        let content = fs::read_to_string(&file_path).unwrap();
+        assert!(content.contains("melange"));
+        assert!(content.contains("kitty"));
+
+        let loaded = State::load_from(&file_path).expect("Failed to load");
+        assert_eq!(loaded.current_theme, "melange");
+        assert!(loaded.is_enabled("kitty"));
+    }
+
+    #[test]
+    fn should_handle_load_or_default_logic() {
+        let temp_dir: TempDir = TempDir::new("iris_non_existent").unwrap();
+        let file_path: PathBuf = temp_dir.path().join("not_found.json");
+
+        let state = State::load_or_default(&file_path);
+        assert_eq!(state.current_theme, "");
+        assert!(state.enabled_generators.is_empty());
+
+        fs::write(&file_path, "invalid json").unwrap();
+        let state_err = State::load_or_default(&file_path);
+        assert_eq!(state_err.current_theme, "");
+    }
+
+    #[test]
+    fn should_handle_to_json_logic() {
+        let mut state = State::default();
+        state.set_theme("gruvbox");
+
+        let json = state.to_json().unwrap();
+        assert!(json.contains('\n'));
+    }
+}

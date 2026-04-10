@@ -2,7 +2,10 @@ use crate::ui::Logger;
 use anyhow::{Context, Result};
 use colored::Colorize;
 use serde::{Deserialize, Serialize};
-use std::process::Command;
+use std::{
+    path::PathBuf,
+    process::{Command, Output},
+};
 
 /// Theme palette that is being retreived from nvim
 #[derive(Debug, Deserialize, Serialize)]
@@ -35,113 +38,28 @@ impl Palette {
     /// Get currently installed theme name
     /// Uses logger for warnings and errors output
     pub fn current(log: &Logger) -> Result<String> {
-        let home = dirs::home_dir().context("Home dir not found")?;
-        let path = home.join(".cache/iris/current_theme");
+        let home: PathBuf = dirs::home_dir().context("Home dir not found")?;
+        let path: PathBuf = home.join(".cache/iris/current_theme");
 
-        if path.exists() {
-            let name: String = std::fs::read_to_string(&path)
-                .with_context(|| format!("Failed to read theme cache at {:?}", path))?;
-
-            let trimmed: &str = name.trim();
-            if trimmed.is_empty() {
-                log.warn("Theme cache file is empty. Please set a theme first.", 1);
-                anyhow::bail!("Theme cache is empty");
+        match Self::read_theme_from_path(&path) {
+            Ok(theme) => Ok(theme),
+            Err(_) => {
+                log.error("No active theme found in cache.", 1);
+                anyhow::bail!(
+                    "No active theme detected.\n {} Make sure to switch theme in Neovim or pass the name manually: `iris switch <name>`",
+                    "Tip:".yellow()
+                );
             }
-
-            let capitalized = trimmed[..1].to_uppercase() + &trimmed[1..];
-            return Ok(capitalized);
         }
-
-        log.error("No active theme found in cache.", 1);
-        anyhow::bail!(
-            "No active theme detected.\n\
-             {} Make sure to switch theme in Neovim (e.g, :colorscheme <theme>) \n\
-             or pass the name manually: `iris switch <name>`",
-            "Tip:".yellow()
-        );
     }
 
     /// Fetch palette from nvim using lua script
     pub fn fetch(theme: &str, log: &Logger) -> Result<Self> {
         log.info("Loading Neovim runtime and lazy.nvim plugins...");
-
-        let lua_script = r##"
-                local function g(name, attr)
-                    local max_depth = 10
-                    local current = name
-                    for _ = 1, max_depth do
-                        local hl = vim.api.nvim_get_hl(0, { name = current, link = false })
-                        local color = hl[attr or 'fg'] or hl.bg
-                        if color then
-                            return string.format('#%06x', color)
-                        end
-
-                        local linked = vim.api.nvim_get_hl(0, { name = current, link = true })
-                        if not linked.link then
-                            break
-                        end
-                        current = linked.link
-                    end
-                    return '#cccccc'
-                end
-
-                local function first(attr, names)
-                    for _, name in ipairs(names) do
-                        local c = g(name, attr)
-                        if c ~= '#cccccc' then return c end
-                    end
-                    return '#cccccc'
-                end
-
-                local ansi = {}
-                for i = 0, 15 do
-                    table.insert(ansi, vim.g['terminal_color_' .. i] or '#000000')
-                end
-
-                local res = {
-                    bg       = g('Normal', 'bg'),
-                    fg       = g('Normal', 'fg'),
-                    caret    = first('bg', {'Cursor', 'TermCursor'}),
-                    line_hl  = first('bg', {'CursorLine', 'CursorLineBg'}),
-                    sel      = first('bg', {'Visual', 'Selection'}),
-                    gutter_fg = first('fg', {'LineNr', 'SignColumn'}),
-                    comment  = first('fg', {'Comment', '@comment'}),
-                    variable = first('fg', {'@variable', 'Identifier'}),
-                    constant = first('fg', {'Constant', '@constant'}),
-                    number   = first('fg', {'Number', '@number', 'Constant'}),
-                    string   = first('fg', {'String', '@string'}),
-                    keyword  = first('fg', {'Keyword', '@keyword', 'Statement'}),
-                    operator = first('fg', {'Operator', '@operator'}),
-                    func     = first('fg', {'Function', '@function'}),
-                    type_name = first('fg', {'Type', '@type'}),
-                    tag      = first('fg', {'Tag', '@tag'}),
-                    attribute = first('fg', {'@attribute', '@property'}),
-                    added     = first('fg', {'DiffAdd', 'GitSignsAdd', '@diff.plus'}),
-                    deleted   = first('fg', {'DiffDelete', 'GitSignsDelete', '@diff.minus'}),
-                    changed   = first('fg', {'DiffChange', 'GitSignsChange', '@diff.delta'}),
-                    white    = vim.g.terminal_color_15 or '#ffffff',
-                    ansi     = ansi,
-                }
-                io.write(vim.fn.json_encode(res))
-            "##;
+        let args: Vec<String> = Self::build_fetch_args(theme);
 
         log.info("Executing Lua bridge in headless mode...");
-
-        let output = Command::new("nvim")
-            .args([
-                "--headless",
-                "-u",
-                "NONE",
-                "-c",
-                "lua vim.opt.rtp:append(vim.fn.stdpath('data') .. '/lazy/*')",
-                "-c",
-                &format!("colorscheme {}", theme.to_lowercase()),
-                "-c",
-                &format!("lua {}", lua_script),
-                "-c",
-                "qa!",
-            ])
-            .output()?;
+        let output: Output = Command::new("nvim").args(&args).output()?;
 
         if !output.status.success() {
             let error_msg = String::from_utf8_lossy(&output.stderr);
@@ -152,11 +70,7 @@ impl Palette {
         log.info("Parsing palette data...");
         let stdout = String::from_utf8_lossy(&output.stdout);
 
-        let json_start = stdout.find('{').context("Nvim did not return JSON")?;
-        let json_end = stdout.rfind('}').context("JSON is malformed")? + 1;
-
-        let mut palette: Palette = serde_json::from_str(&stdout[json_start..json_end])
-            .context("Failed to parse palette JSON")?;
+        let mut palette: Palette = Self::parse_nvim_json(&stdout)?;
         palette.name = theme.to_string();
 
         Ok(palette)
@@ -174,25 +88,10 @@ impl Palette {
             1,
         );
 
-        let init_plugins = "lua vim.opt.rtp:append(vim.fn.stdpath('data') .. '/lazy/*')";
-        let check_cmd = format!(
-            "try | colorscheme {} | qa! | catch | cquit 1 | endtry",
-            theme.to_lowercase()
-        );
+        let args: Vec<String> = Self::build_exists_args(theme);
+        let output = Command::new("nvim").args(&args).output();
 
-        let output = std::process::Command::new("nvim")
-            .args([
-                "--headless",
-                "-u",
-                "NONE",
-                "-c",
-                init_plugins,
-                "-c",
-                &check_cmd,
-            ])
-            .output();
-
-        let success = match output {
+        let success: bool = match output {
             Ok(o) => o.status.success(),
             Err(_) => false,
         };
@@ -204,5 +103,237 @@ impl Palette {
         }
 
         success
+    }
+
+    /// Helper function to read theme from given path (easy to test)
+    fn read_theme_from_path(path: &PathBuf) -> Result<String> {
+        let content = std::fs::read_to_string(path)
+            .with_context(|| format!("Failed to read theme cache at {:?}", path))?;
+
+        let trimmed = content.trim();
+        if trimmed.is_empty() {
+            anyhow::bail!("Theme cache is empty");
+        }
+
+        let mut chars = trimmed.chars();
+        Ok(match chars.next() {
+            None => String::new(),
+            Some(f) => f.to_uppercase().collect::<String>() + chars.as_str(),
+        })
+    }
+
+    /// Helper function to build command args for nvim (palette fetch command)
+    fn build_fetch_args(theme: &str) -> Vec<String> {
+        let lua_script: &str = Self::fetch_lua_script();
+        vec![
+            "--headless".to_string(),
+            "-u".to_string(),
+            "NONE".to_string(),
+            "-c".to_string(),
+            "lua vim.opt.rtp:append(vim.fn.stdpath('data') .. '/lazy/*')".to_string(),
+            "-c".to_string(),
+            format!("colorscheme {}", theme.to_lowercase()),
+            "-c".to_string(),
+            format!("lua {}", lua_script),
+            "-c".to_string(),
+            "qa!".to_string(),
+        ]
+    }
+
+    /// Helper function to build command args for nvim (exists palette command)
+    fn build_exists_args(theme: &str) -> Vec<String> {
+        let init_plugins: &str = "lua vim.opt.rtp:append(vim.fn.stdpath('data') .. '/lazy/*')";
+        let check_cmd: String = format!(
+            "try | colorscheme {} | qa! | catch | cquit 1 | endtry",
+            theme.to_lowercase()
+        );
+        vec![
+            "--headless".to_string(),
+            "-u".to_string(),
+            "NONE".to_string(),
+            "-c".to_string(),
+            init_plugins.to_string(),
+            "-c".to_string(),
+            check_cmd,
+        ]
+    }
+
+    /// Helper function to parse returned from nvim json file with palette info
+    fn parse_nvim_json(stdout: &str) -> Result<Self> {
+        let json_start: usize = stdout.find('{').context("Nvim did not return JSON")?;
+        let json_end: usize = stdout.rfind('}').context("JSON is malformed")? + 1;
+        serde_json::from_str(&stdout[json_start..json_end]).context("Failed to parse palette JSON")
+    }
+
+    /// Lua script to fetch palette from nvim
+    fn fetch_lua_script() -> &'static str {
+        r##"
+        local function g(name, attr)
+            local max_depth = 10
+            local current = name
+
+            for _ = 1, max_depth do
+                local hl = vim.api.nvim_get_hl(0, { name = current, link = false })
+                local color = hl[attr or 'fg'] or hl.bg
+
+                if color then
+                    return string.format('#%06x', color)
+                end
+
+                local linked = vim.api.nvim_get_hl(0, { name = current, link = true })
+                if not linked.link then
+                    break
+                end
+
+                current = linked.link
+            end
+
+            return '#cccccc'
+        end
+
+        local function first(attr, names)
+            for _, name in ipairs(names) do
+                local c = g(name, attr)
+                if c ~= '#cccccc' then
+                    return c
+                end
+            end
+            return '#cccccc'
+        end
+
+        local ansi = {}
+        for i = 0, 15 do
+            table.insert(ansi, vim.g['terminal_color_' .. i] or '#000000')
+        end
+
+        local res = {
+            bg         = g('Normal', 'bg'),
+            fg         = g('Normal', 'fg'),
+            caret      = first('bg', { 'Cursor', 'TermCursor' }),
+            line_hl    = first('bg', { 'CursorLine', 'CursorLineBg' }),
+            sel        = first('bg', { 'Visual', 'Selection' }),
+            gutter_fg  = first('fg', { 'LineNr', 'SignColumn' }),
+            comment    = first('fg', { 'Comment', '@comment' }),
+            variable   = first('fg', { '@variable', 'Identifier' }),
+            constant   = first('fg', { 'Constant', '@constant' }),
+            number     = first('fg', { 'Number', '@number', 'Constant' }),
+            string     = first('fg', { 'String', '@string' }),
+            keyword    = first('fg', { 'Keyword', '@keyword', 'Statement' }),
+            operator   = first('fg', { 'Operator', '@operator' }),
+            func       = first('fg', { 'Function', '@function' }),
+            type_name  = first('fg', { 'Type', '@type' }),
+            tag        = first('fg', { 'Tag', '@tag' }),
+            attribute  = first('fg', { '@attribute', '@property' }),
+            added      = first('fg', { 'DiffAdd', 'GitSignsAdd', '@diff.plus' }),
+            deleted    = first('fg', { 'DiffDelete', 'GitSignsDelete', '@diff.minus' }),
+            changed    = first('fg', { 'DiffChange', 'GitSignsChange', '@diff.delta' }),
+            white      = vim.g.terminal_color_15 or '#ffffff',
+            ansi       = ansi,
+        }
+
+        io.write(vim.fn.json_encode(res))
+        "##
+    }
+}
+
+/// Unit-tests for palette operation
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use tempdir::TempDir;
+
+    #[test]
+    fn should_parse_palette_json() {
+        let json = r##"{
+            "bg": "#1e1e2e",
+            "fg": "#cdd6f4",
+            "caret": "#f5e0dc",
+            "line_hl": "#313244",
+            "sel": "#45475a",
+            "gutter_fg": "#45475a",
+            "comment": "#6c7086",
+            "variable": "#f38ba8",
+            "constant": "#fab387",
+            "number": "#fab387",
+            "string": "#a6e3a1",
+            "keyword": "#cba6f7",
+            "operator": "#89dceb",
+            "func": "#89b4fa",
+            "type_name": "#f9e2af",
+            "tag": "#f38ba8",
+            "attribute": "#f9e2af",
+            "white": "#ffffff",
+            "ansi": ["#1e1e2e", "#f38ba8", "#a6e3a1", "#f9e2af", "#89b4fa", "#cba6f7", "#89dceb", "#bac2de", "#585b70", "#f38ba8", "#a6e3a1", "#f9e2af", "#89b4fa", "#cba6f7", "#89dceb", "#a6adc8"]
+            }"##;
+
+        let palette: Palette = serde_json::from_str(json).unwrap();
+        assert_eq!(palette.bg, "#1e1e2e");
+        assert_eq!(palette.ansi.len(), 16);
+    }
+
+    #[test]
+    fn should_read_theme_from_valid_path() {
+        let temp_dir: TempDir = TempDir::new("iris_cache").unwrap();
+        let cache_path: PathBuf = temp_dir.path().join("current_theme");
+
+        fs::write(&cache_path, "  melange  ").unwrap();
+
+        let result: String = Palette::read_theme_from_path(&cache_path).unwrap();
+        assert_eq!(result, "Melange");
+    }
+
+    #[test]
+    fn should_invoke_error_when_theme_file_is_empty() {
+        let temp_dir: TempDir = TempDir::new("iris_cache").unwrap();
+        let cache_path: PathBuf = temp_dir.path().join("empty_theme");
+
+        fs::write(&cache_path, "    ").unwrap();
+
+        let result = Palette::read_theme_from_path(&cache_path);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn should_parse_nvim_json_with_garbage() {
+        let raw_output = r##"
+            [NVIM] Warning: Semantic tokens not supported
+            {
+                "bg": "#121212", "fg": "#ffffff", "caret": "#ffffff",
+                "line_hl": "#000000", "sel": "#000000", "gutter_fg": "#000000",
+                "comment": "#000000", "variable": "#000000", "constant": "#000000",
+                "number": "#000000", "string": "#000000", "keyword": "#000000",
+                "operator": "#000000", "func": "#000000", "type_name": "#000000",
+                "tag": "#000000", "attribute": "#000000", "white": "#ffffff",
+                "ansi": []
+            }
+            [NVIM] Process exited
+        "##;
+
+        let result = Palette::parse_nvim_json(raw_output);
+
+        assert!(result.is_ok(), "Parse failed: {:?}", result.err());
+        assert_eq!(result.unwrap().bg, "#121212");
+    }
+
+    #[test]
+    fn should_test_build_fetch_args_case() {
+        let theme = "Tokyonight";
+        let args = Palette::build_fetch_args(theme);
+
+        let has_lowercase = args.iter().any(|a| a.contains("colorscheme tokyonight"));
+        assert!(
+            has_lowercase,
+            "Arguments should contain lowercase colorscheme command"
+        );
+    }
+
+    #[test]
+    fn should_test_build_exists_args_case() {
+        let args = Palette::build_exists_args("gruvbox");
+
+        assert!(args.contains(&"--headless".to_string()));
+        assert!(args.contains(&"NONE".to_string()));
+        assert!(args.iter().any(|a| a.contains("cquit 1")));
     }
 }

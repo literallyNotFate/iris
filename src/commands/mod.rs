@@ -45,7 +45,7 @@ pub(crate) fn apply_theme(theme: &str, ctx: &mut IrisContext) -> Result<()> {
     ctx.registry.apply_all(&palette, ctx)?;
 
     {
-        let mut state_task = ctx.log.step("Updating local state...", 1);
+        let mut state_task = ctx.log.step("Updating local state", 1);
         ctx.update(theme)?;
         state_task.done(true);
     }
