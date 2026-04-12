@@ -71,9 +71,16 @@ impl Logger {
 /// Build API (for testing)
 impl Logger {
     /// Build string for step message
+    // fn build_step_output(&self, message: &str, level: u8) -> String {
+    //     if self.quiet {
+    //         format!("   {} {}... \n", "❯".blue().bold(), message.white().bold())
+    //     } else {
+    //         format!("{} {}\n", self.get_prefix(level, true), message.white())
+    //     }
+    // }
     fn build_step_output(&self, message: &str, level: u8) -> String {
         if self.quiet {
-            format!("   {} {}... \n", "❯".blue().bold(), message.white().bold())
+            format!("   {} {}... ", "❯".blue().bold(), message.white().bold())
         } else {
             format!("{} {}\n", self.get_prefix(level, true), message.white())
         }

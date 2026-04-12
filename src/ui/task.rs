@@ -35,9 +35,13 @@ impl Task {
 
         if !self.quiet {
             print!("\r\x1B[K{}", self.build_done_output(is_last));
-            let _ = io::stdout().flush();
+        } else {
+            let duration: Duration = self.start_time.elapsed();
+            let duration_str: String = self.format_duration(duration);
+            println!("{}{}", "done".green(), duration_str);
         }
 
+        let _ = io::stdout().flush();
         self.finished = true;
     }
 
