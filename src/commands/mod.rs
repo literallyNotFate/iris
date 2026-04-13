@@ -6,6 +6,7 @@ pub mod setup;
 pub mod status;
 pub mod switch;
 pub mod sync;
+pub mod watch;
 
 /// Handles all commands
 pub fn handle(command: Commands, ctx: &mut IrisContext) -> Result<()> {
@@ -14,6 +15,7 @@ pub fn handle(command: Commands, ctx: &mut IrisContext) -> Result<()> {
         Commands::Switch { name } => switch::exec(name, ctx)?,
         Commands::Sync => sync::exec(ctx)?,
         Commands::Status => status::exec(ctx)?,
+        Commands::Watch { interval } => watch::exec(interval, ctx)?,
         Commands::Gen { action } => generators::exec(action, ctx)?,
     }
 

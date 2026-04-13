@@ -30,6 +30,13 @@ pub enum Commands {
     /// Show current status, active theme and enabled apps
     Status,
 
+    /// Watch for changes in palette/config and re-apply automatically
+    Watch {
+        /// Custom debounce interval in milliseconds
+        #[arg(short, long, default_value = "200")]
+        interval: u64,
+    },
+
     /// Manage generators through selection
     Gen {
         #[command(subcommand)]
