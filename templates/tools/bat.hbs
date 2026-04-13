@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple Computer//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>name</key>
+    <string>{{ theme_name }}</string>
+    <key>settings</key>
+    <array>
+        <dict>
+            <key>settings</key>
+            <dict>
+                <key>background</key><string>{{ bg }}</string>
+                <key>foreground</key><string>{{ fg }}</string>
+                <key>caret</key><string>{{ fg }}</string>
+                <key>lineHighlight</key><string>{{ line }}</string>
+                <key>selection</key><string>{{ sel }}</string>
+            </dict>
+        </dict>
+        {%- for rule in rules %}
+        <dict>
+            <key>name</key>
+            <string>{{ rule.name }}</string>
+            <key>scope</key>
+            <string>{{ rule.scope }}</string>
+            <key>settings</key>
+            <dict>
+                <key>foreground</key>
+                <string>{{ rule.foreground }}</string>
+                {%- if rule.style %}
+                <key>fontStyle</key>
+                <string>{{ rule.style }}</string>
+                {%- endif %}
+            </dict>
+        </dict>
+        {%- endfor %}
+    </array>
+</dict>
+</plist>

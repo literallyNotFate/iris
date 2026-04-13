@@ -23,36 +23,23 @@ pub enum GeneratorType {
 }
 
 impl GeneratorType {
-    /// Returns the icon based on generator type
+    fn data(&self) -> (&str, Color, &str) {
+        match self {
+            Self::Terminal => ("󰞷", Color::Blue, "terminals"),
+            Self::Tool => ("󰆍", Color::Magenta, "tools"),
+            Self::Prompt => ("󱆃", Color::Cyan, "prompts"),
+            Self::Multiplexer => ("󱂬", Color::Green, "multiplexer"),
+            Self::System => ("󰢮", Color::Yellow, "system"),
+        }
+    }
+
     pub fn icon(&self) -> &str {
-        match self {
-            Self::Terminal => "󰞷",
-            Self::Tool => "󰆍",
-            Self::Prompt => "󱆃",
-            Self::Multiplexer => "󱂬",
-            Self::System => "󰢮",
-        }
+        self.data().0
     }
-
-    /// Returns the color based on generator type
     pub fn color(&self) -> Color {
-        match self {
-            Self::Terminal => Color::Blue,
-            Self::Tool => Color::Magenta,
-            Self::Prompt => Color::Cyan,
-            Self::Multiplexer => Color::Green,
-            Self::System => Color::Yellow,
-        }
+        self.data().1
     }
-
-    /// Returns the label based on generator type
     pub fn label(&self) -> &str {
-        match self {
-            Self::Terminal => "term",
-            Self::Tool => "cli",
-            Self::Prompt => "prompt",
-            Self::Multiplexer => "mux",
-            Self::System => "sys",
-        }
+        self.data().2
     }
 }

@@ -188,7 +188,7 @@ pub fn exec(action: GenAction, ctx: &mut IrisContext) -> anyhow::Result<()> {
                 );
 
                 println!(
-                    "\n    {:<20}  {:<13}  {}",
+                    "\n    {:<20}  {:<14}  {}",
                     "NAME".dimmed(),
                     "TYPE".dimmed(),
                     "STATUS".dimmed()
@@ -236,7 +236,7 @@ pub fn exec(action: GenAction, ctx: &mut IrisContext) -> anyhow::Result<()> {
                     let type_label = gen_type.label().color(gen_type.color());
 
                     println!(
-                        "  {} {:<17} │ {} {:<9} │ {}",
+                        "  {} {:<17} │ {} {:<11} │ {}",
                         icon, name_styled, type_icon, type_label, status_label
                     );
                 }

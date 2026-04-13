@@ -40,7 +40,8 @@ impl Generator for StarshipGenerator {
                     .join(self.target_file_name(&p.name))
             });
 
-        let palette_block: String = self.build_config(p);
+        let render_ctx = self.build_render_context(p);
+        let palette_block: String = ctx.templater.render(&self.template_path(), &render_ctx)?;
         let palette_header: String = format!("[palettes.{}]", &p.name);
 
         let existing = if config_path.exists() {
@@ -65,11 +66,23 @@ impl Generator for StarshipGenerator {
             .with_context(|| format!("Failed to write {:?}", config_path))?;
 
         ctx.log.info(&format!(
-            "Palette {} written to starship config.",
+            "Palette {} injected into starship config.",
             utils::capitalize(&p.name).yellow()
         ));
 
         Ok(())
+    }
+
+    fn build_render_context(&self, p: &Palette) -> tera::Context {
+        let mut c = tera::Context::new();
+        c.insert("theme_name", &p.name);
+        c.insert("bg", &p.bg);
+        c.insert("fg", &p.fg);
+        c.insert("sel", &p.sel);
+        c.insert("line_hl", &p.line_hl);
+        c.insert("gutter_fg", &p.gutter_fg);
+        c.insert("ansi", &p.ansi);
+        c
     }
 
     fn setup_hint(&self) -> Option<String> {
@@ -98,49 +111,6 @@ impl Generator for StarshipGenerator {
     }
 }
 
-impl StarshipGenerator {
-    /// Build starship theme palette
-    pub fn build_config(&self, p: &Palette) -> String {
-        let a = &p.ansi;
-        format!(
-            r#"
-[palettes.{name}]
-base     = "{bg}"
-mantle   = "{mantle}"
-text     = "{fg}"
-subtext0 = "{subtext0}"
-surface  = "{surface}"
-overlay  = "{overlay}"
-red      = "{red}"
-green    = "{green}"
-yellow   = "{yellow}"
-blue     = "{blue}"
-mauve    = "{mauve}"
-teal     = "{teal}"
-peach    = "{peach}"
-foam     = "{foam}"
-gold     = "{gold}"
-"#,
-            name = p.name,
-            bg = p.bg,
-            mantle = a[0],
-            fg = p.fg,
-            subtext0 = p.gutter_fg,
-            surface = p.sel,
-            overlay = p.line_hl,
-            red = a[1],
-            green = a[2],
-            yellow = a[3],
-            blue = a[4],
-            mauve = a[5],
-            teal = a[6],
-            peach = a[9],
-            foam = a[14],
-            gold = a[11],
-        )
-    }
-}
-
 /// Replaces [palettes.<name>] block with new content
 fn replace_palette_block(content: &str, header: &str, new_block: &str) -> String {
     let start = match content.find(header) {
@@ -154,7 +124,12 @@ fn replace_palette_block(content: &str, header: &str, new_block: &str) -> String
         .map(|i| start + header.len() + i)
         .unwrap_or(content.len());
 
-    format!("{}{}{}", &content[..start], new_block, &content[end..])
+    format!(
+        "{}{}{}",
+        &content[..start],
+        new_block.trim(),
+        &content[end..]
+    )
 }
 
 /// Updates or inserts `palette = "<name>"` line
@@ -193,14 +168,24 @@ mod tests {
     }
 
     #[test]
-    fn should_build_correct_starship_palette() {
+    fn should_build_valid_render_context() {
         let generator = StarshipGenerator;
         let p = Palette::mock();
-        let config = generator.build_config(&p);
+        let ctx = generator.build_render_context(&p);
 
-        assert!(config.contains(&format!("[palettes.{}]", p.name)));
-        assert!(config.contains(&format!("base     = \"{}\"", p.bg)));
-        assert!(config.contains(&format!("green    = \"{}\"", p.ansi[2])));
+        assert_eq!(ctx.get("bg").expect("bg missing").as_str().unwrap(), p.bg);
+        assert_eq!(ctx.get("fg").expect("fg missing").as_str().unwrap(), p.fg);
+
+        let ansi = ctx
+            .get("ansi")
+            .expect("ansi array missing")
+            .as_array()
+            .expect("ansi should be an array");
+        assert!(ansi.len() >= 16);
+        assert!(ctx.contains_key("gutter_fg"));
+        assert!(ctx.contains_key("sel"));
+        assert!(ctx.contains_key("line_hl"));
+        assert!(ctx.contains_key("theme_name"));
     }
 
     #[test]

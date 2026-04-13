@@ -1,12 +1,14 @@
 use super::IrisPaths;
-use crate::{models::State, modules::GeneratorRegistry, ui::Logger};
+use crate::{core::Templater, models::State, modules::GeneratorRegistry, ui::Logger};
 use anyhow::{Context as _, Result};
+use std::{fs, path::PathBuf};
 
 /// Application context with state and paths (config/cache/base)
 pub struct IrisContext {
     pub paths: IrisPaths,
     pub state: State,
     pub registry: GeneratorRegistry,
+    pub templater: Templater,
 
     pub log: Logger,
 }
@@ -15,6 +17,7 @@ impl IrisContext {
     /// New context w/loading UIState from file
     pub fn new(log: Logger) -> Result<Self> {
         let paths = IrisPaths::new()?;
+        let user_templates: Option<PathBuf> = Some(paths.config.join("templates"));
 
         let state = if paths.state_file.exists() {
             let content = std::fs::read_to_string(&paths.state_file)
@@ -29,6 +32,7 @@ impl IrisContext {
             state,
             registry: GeneratorRegistry::new(),
             log,
+            templater: Templater::new(user_templates),
         };
         Ok(ctx)
     }
@@ -42,7 +46,7 @@ impl IrisContext {
         std::fs::write(&self.paths.state_file, json)
             .with_context(|| format!("Failed to save state to {:?}", self.paths.state_file))?;
 
-        std::fs::write(&self.paths.current_theme, name).with_context(|| {
+        fs::write(&self.paths.current_theme, name).with_context(|| {
             format!(
                 "Failed to update theme cache at {:?}",
                 self.paths.current_theme
@@ -64,7 +68,6 @@ impl IrisContext {
 mod tests {
     use super::*;
     use crate::test_utils::create_test_context;
-    use std::fs;
 
     #[test]
     fn should_handle_context_update_theme_persistence() {

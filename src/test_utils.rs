@@ -1,5 +1,5 @@
 use crate::{
-    core::{IrisContext, IrisPaths},
+    core::{IrisContext, IrisPaths, Templater},
     models::{Palette, State},
     modules::GeneratorRegistry,
     ui::Logger,
@@ -22,11 +22,15 @@ pub fn create_test_context() -> (TempDir, IrisContext) {
     fs::create_dir_all(&paths.config).unwrap();
     fs::create_dir_all(&paths.cache).unwrap();
 
+    let user_templates_path = paths.config.join("templates");
+    fs::create_dir_all(&user_templates_path).unwrap();
+
     let ctx = IrisContext {
         paths,
         state: State::default(),
         registry: GeneratorRegistry::default(),
         log: Logger::new(true),
+        templater: Templater::new(Some(user_templates_path)),
     };
 
     (temp_dir, ctx)

@@ -1,5 +1,6 @@
 pub mod bat;
 pub mod fzf;
+pub mod rules;
 pub mod yazi;
 
 use super::Generator;

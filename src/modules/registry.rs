@@ -171,6 +171,10 @@ mod tests {
         fn apply(&self, _: &Palette, _: &IrisContext) -> anyhow::Result<()> {
             Ok(())
         }
+
+        fn build_render_context(&self, _: &Palette) -> tera::Context {
+            tera::Context::new()
+        }
     }
 
     // Helper function to setup generator registry with mocks
