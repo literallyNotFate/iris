@@ -27,6 +27,12 @@ pub enum Commands {
     /// Sync all apps with current Neovim theme
     Sync,
 
+    /// Apply theme to a specific generator
+    Apply {
+        /// Name of the generator (tmux, starship, btop, etc.)
+        generator: String,
+    },
+
     /// Show current status, active theme and enabled apps
     Status,
 
