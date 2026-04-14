@@ -2,11 +2,53 @@ use crate::{commands::HealthStatus, core::IrisContext, models::Palette, utils};
 use colored::Colorize;
 
 /// Handle application health command
-pub fn exec(generator: String, ctx: &IrisContext) -> anyhow::Result<()> {
-    println!("\n {}  {}", "󰷉".yellow().bold(), "Standalone apply".bold());
+pub fn exec(generator: String, theme: Option<String>, ctx: &IrisContext) -> anyhow::Result<()> {
+    let theme_to_apply: String = theme
+        .clone()
+        .or_else(|| {
+            if ctx.state.current_theme.is_empty() {
+                None
+            } else {
+                Some(ctx.state.current_theme.clone())
+            }
+        })
+        .ok_or_else(|| anyhow::anyhow!("No theme specified and no global theme active."))?;
+
+    let is_different: bool = Some(&theme_to_apply) != Some(&ctx.state.current_theme);
+
+    println!(
+        "\n {}  {} {}",
+        "󰷉".yellow().bold(),
+        "Standalone apply:".bold(),
+        theme_to_apply.magenta()
+    );
     println!();
 
-    let palette: Palette = Palette::fetch(&ctx.state.current_theme, &ctx.log.as_quiet())?;
+    if is_different && theme.is_some() {
+        println!(
+            "   Temporary override: using {} instead of system {}\n",
+            theme_to_apply.yellow(),
+            ctx.state.current_theme.dimmed()
+        );
+    }
+
+    let palette: Palette = if is_different {
+        let mut t = ctx.log.step(
+            &format!(
+                "{} Fetching palette {}...",
+                "󰟶".cyan().bold(),
+                theme_to_apply.yellow().bold()
+            ),
+            1,
+        );
+        let p = Palette::fetch(&theme_to_apply, &ctx.log)?;
+
+        t.done(true);
+        p
+    } else {
+        Palette::fetch(&theme_to_apply, &ctx.log.as_quiet())?
+    };
+
     let target = ctx.registry.get(&generator);
 
     match target {
@@ -14,29 +56,45 @@ pub fn exec(generator: String, ctx: &IrisContext) -> anyhow::Result<()> {
             if !ctx.registry.is_installed(g.name()) {
                 ctx.log.warn(
                     &format!(
-                        "󱘲  Generator '{}' binary not found in PATH.",
+                        "Generator '{}' binary not found in PATH.",
                         g.name().bold().cyan()
                     ),
                     0,
                 );
             }
 
-            let mut t = ctx
-                .log
-                .step(&format!("󰚚  Checking health for {}...", g.name().cyan()), 1);
+            let mut t = ctx.log.step(
+                &format!(
+                    "{} Checking health for {}...",
+                    "󰚚 ".green().bold(),
+                    g.name().cyan()
+                ),
+                1,
+            );
             let status = g.health_check(ctx);
             if matches!(status, HealthStatus::Ok) {
                 t.done(true);
             } else {
                 t.done(false);
+
+                let mut t = ctx.log.step(
+                    &format!(
+                        "{} Repairing {} configuration...",
+                        "󰒓".green().bold(),
+                        g.name().cyan()
+                    ),
+                    2,
+                );
                 g.fix(&status, &palette, ctx)?;
+                t.done(true);
             }
 
             let mut t = ctx.log.step(
                 &format!(
-                    "󱓞  Applying {} to {}...",
-                    utils::capitalize(&ctx.state.current_theme).yellow().bold(),
-                    g.name().cyan()
+                    "{} Applying {} to {}...",
+                    "󱓞".magenta().bold(),
+                    utils::capitalize(&theme_to_apply).yellow().bold(),
+                    g.name().cyan().bold()
                 ),
                 1,
             );

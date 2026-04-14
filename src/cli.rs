@@ -31,6 +31,10 @@ pub enum Commands {
     Apply {
         /// Name of the generator (tmux, starship, btop, etc.)
         generator: String,
+
+        /// Optional: specific theme name
+        #[arg(short, long)]
+        theme: Option<String>,
     },
 
     /// Show current status, active theme and enabled apps
