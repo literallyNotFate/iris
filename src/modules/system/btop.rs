@@ -1,4 +1,5 @@
 use crate::{
+    commands::HealthStatus,
     core::IrisContext,
     models::Palette,
     modules::{Generator, GeneratorType},
@@ -24,6 +25,18 @@ impl Generator for BtopGenerator {
         format!("{}.theme", theme)
     }
 
+    fn cache_path(&self, ctx: &IrisContext, theme_name: &str) -> PathBuf {
+        ctx.paths
+            .cache
+            .join("btop_themes")
+            .join(self.target_file_name(theme_name))
+    }
+
+    fn link_path(&self, theme_name: &str) -> PathBuf {
+        self.resolve_config_directory()
+            .join(self.target_file_name(theme_name))
+    }
+
     fn resolve_config_directory(&self) -> PathBuf {
         dirs::home_dir()
             .map(|p| p.join(".config").join("btop").join("themes"))
@@ -31,36 +44,20 @@ impl Generator for BtopGenerator {
     }
 
     fn apply(&self, p: &Palette, ctx: &IrisContext) -> Result<()> {
-        let display_name: String = utils::capitalize(&p.name);
+        let theme_name: &String = &p.name;
         let themes_dir: PathBuf = self.resolve_config_directory();
-        let theme_file_name: String = self.target_file_name(&p.name);
-
-        let cache_file = ctx.paths.cache.join("btop_themes").join(&theme_file_name);
-        let btop_theme_link: PathBuf = themes_dir.join(format!("{}.theme", &p.name));
+        let cache_file: PathBuf = self.cache_path(ctx, theme_name);
+        let btop_theme_link: PathBuf = self.link_path(theme_name);
 
         let render_ctx = self.build_render_context(p);
-        let content: String = ctx.templater.render(&self.template_path(), &render_ctx)?;
+        let content = ctx.templater.render(&self.template_path(), &render_ctx)?;
 
-        if let Some(parent) = cache_file.parent() {
-            fs::create_dir_all(parent)
-                .with_context(|| format!("Failed to create cache directory for {}", self.name()))?;
-        }
-
-        ctx.log.info(&format!(
-            "Theme {} generated in cache.",
-            display_name.yellow()
-        ));
-
-        fs::write(&cache_file, content)
-            .with_context(|| format!("Failed to write btop theme to {:?}", cache_file))?;
-
+        fs::create_dir_all(cache_file.parent().unwrap())?;
         if !themes_dir.exists() {
-            ctx.log.info(&format!(
-                "Creating {} config directory...",
-                self.name().bold()
-            ));
             fs::create_dir_all(&themes_dir)?;
         }
+
+        fs::write(&cache_file, content)?;
 
         if btop_theme_link.exists() || btop_theme_link.is_symlink() {
             fs::remove_file(&btop_theme_link)?;
@@ -70,8 +67,9 @@ impl Generator for BtopGenerator {
         {
             use std::os::unix::fs::symlink;
             ctx.log.info(&format!(
-                "Creating link in btop/themes/ for {}",
-                display_name.yellow()
+                "Linking {} theme to {}...",
+                self.name().bold(),
+                utils::pretty_path(&cache_file).cyan()
             ));
             symlink(&cache_file, &btop_theme_link).with_context(|| {
                 format!(
@@ -89,7 +87,7 @@ impl Generator for BtopGenerator {
                 "Setting color_theme = \"{}\" in btop.conf",
                 p.name.bold()
             ));
-            self.update_btop_conf(&conf_path, &p.name)?;
+            self.update_btop_conf(&conf_path, theme_name)?;
         } else {
             ctx.log
                 .warn("btop.conf not found. Theme linked but not activated.", 3);
@@ -122,28 +120,44 @@ impl Generator for BtopGenerator {
         c
     }
 
-    fn setup_hint(&self) -> Option<String> {
+    fn health_check(&self, ctx: &IrisContext) -> HealthStatus {
+        if !self.is_installed() {
+            return HealthStatus::Warning("btop binary not found".into());
+        }
+
         let themes_dir: PathBuf = self.resolve_config_directory();
-        let btop_conf: PathBuf = themes_dir.parent()?.join("btop.conf");
+        let conf_path: PathBuf = themes_dir.parent().unwrap_or(&themes_dir).join("btop.conf");
 
-        if !btop_conf.exists() {
-            return Some(format!(
-                "No {} found. Run btop once to generate it, or create it manually at {}.",
-                "btop.conf".cyan(),
-                btop_conf.display().to_string().dimmed()
-            ));
+        if !conf_path.exists() {
+            return HealthStatus::Error {
+                message: "btop.conf missing".into(),
+                fix_hint: Some("Run btop once to generate default config".into()),
+            };
         }
 
-        let content: String = fs::read_to_string(&btop_conf).unwrap_or_default();
-        if !content.contains("color_theme") {
-            return Some(format!(
-                "Iris generated the theme, but you need to enable it in {}:\n      {}",
-                "btop.conf".cyan(),
-                "color_theme = \"<theme_name>\"".yellow()
-            ));
+        let theme: &String = &ctx.state.current_theme;
+
+        if !theme.is_empty() {
+            let content: String = fs::read_to_string(&conf_path).unwrap_or_default();
+            let expected_line = format!("color_theme = \"{}\"", theme);
+
+            if !content.contains(&expected_line) {
+                return HealthStatus::Warning(format!(
+                    "btop.conf is not using the current theme '{}'",
+                    theme
+                ));
+            }
+
+            let link = self.link_path(theme);
+            if !link.exists() {
+                return HealthStatus::Error {
+                    message: format!("Theme file {}.theme missing in btop themes folder", theme),
+                    fix_hint: Some("Run `iris sync` to restore the theme link".into()),
+                };
+            }
         }
 
-        None
+        HealthStatus::Ok
     }
 }
 
@@ -216,38 +230,6 @@ mod tests {
     }
 
     #[test]
-    fn should_generate_setup_hint_for_btop() {
-        let generator = BtopGenerator;
-        let temp_dir: TempDir = TempDir::new("btop_test").unwrap();
-
-        temp_env::with_vars(
-            vec![
-                ("XDG_CONFIG_HOME", Some(temp_dir.path())),
-                ("HOME", Some(temp_dir.path())),
-            ],
-            || {
-                let btop_dir = generator
-                    .resolve_config_directory()
-                    .parent()
-                    .unwrap()
-                    .to_path_buf();
-                let btop_conf = btop_dir.join("btop.conf");
-
-                let hint_no_conf = generator.setup_hint();
-                assert!(hint_no_conf.unwrap().contains("btop.conf"));
-
-                fs::create_dir_all(&btop_dir).unwrap();
-                fs::write(&btop_conf, "some_setting = true").unwrap();
-                let hint_no_key = generator.setup_hint();
-                assert!(hint_no_key.unwrap().contains("color_theme ="));
-
-                fs::write(&btop_conf, "color_theme = \"default\"").unwrap();
-                assert!(generator.setup_hint().is_none());
-            },
-        );
-    }
-
-    #[test]
     fn should_update_existing_line_or_append() {
         let generator = BtopGenerator;
         let temp_dir: TempDir = TempDir::new("btop_test").unwrap();
@@ -269,6 +251,96 @@ mod tests {
             .unwrap();
         let content = fs::read_to_string(&conf_path).unwrap();
         assert!(content.contains("color_theme = \"only-theme\""));
+    }
+
+    #[test]
+    fn btop_health_ok() {
+        let (tmp_dir, mut ctx) = create_test_context();
+        let generator = BtopGenerator;
+        let p = Palette::mock();
+        let root = tmp_dir.path();
+
+        temp_env::with_vars(
+            vec![
+                ("HOME", Some(root.to_str().unwrap())),
+                (
+                    "XDG_CONFIG_HOME",
+                    Some(root.join(".config").to_str().unwrap()),
+                ),
+            ],
+            || {
+                ctx.state.current_theme = p.name.clone();
+                generator.apply(&p, &ctx).unwrap();
+
+                let btop_dir = generator
+                    .resolve_config_directory()
+                    .parent()
+                    .unwrap()
+                    .to_path_buf();
+                fs::create_dir_all(&btop_dir).unwrap();
+                let conf_path = btop_dir.join("btop.conf");
+
+                let expected_line = format!("color_theme = \"{}\"", p.name);
+                fs::write(
+                    &conf_path,
+                    format!("graph_symbol = \"braille\"\n{}", expected_line),
+                )
+                .unwrap();
+
+                let status = generator.health_check(&ctx);
+                assert!(
+                    matches!(status, HealthStatus::Ok),
+                    "Expected Ok, got {:?}",
+                    status
+                );
+            },
+        );
+    }
+
+    #[test]
+    fn btop_health_error_missing_conf() {
+        let (tmp_dir, ctx) = create_test_context();
+        let generator = BtopGenerator;
+        let root = tmp_dir.path();
+
+        temp_env::with_vars(vec![("HOME", Some(root.to_str().unwrap()))], || {
+            let status = generator.health_check(&ctx);
+            match status {
+                HealthStatus::Error { ref message, .. } => {
+                    assert!(message.contains("btop.conf missing"));
+                }
+                _ => panic!("Expected Error for missing btop.conf, got {:?}", status),
+            }
+        });
+    }
+
+    #[test]
+    fn btop_health_warning_wrong_theme_in_conf() {
+        let (tmp_dir, mut ctx) = create_test_context();
+        let generator = BtopGenerator;
+        let p = Palette::mock();
+        let root = tmp_dir.path();
+
+        temp_env::with_vars(vec![("HOME", Some(root.to_str().unwrap()))], || {
+            ctx.state.current_theme = p.name.clone();
+            generator.apply(&p, &ctx).unwrap();
+
+            let btop_dir = generator
+                .resolve_config_directory()
+                .parent()
+                .unwrap()
+                .to_path_buf();
+            fs::create_dir_all(&btop_dir).unwrap();
+            fs::write(btop_dir.join("btop.conf"), "color_theme = \"default\"").unwrap();
+
+            let status = generator.health_check(&ctx);
+            match status {
+                HealthStatus::Warning(msg) => {
+                    assert!(msg.contains("not using the current theme"));
+                }
+                _ => panic!("Expected Warning for wrong theme line, got {:?}", status),
+            }
+        });
     }
 
     #[test]

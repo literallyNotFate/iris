@@ -1,7 +1,7 @@
 use crate::{
     core::IrisContext,
     models::Palette,
-    utils::{CustomColor, hex_to_rgb},
+    utils::{self, CustomColor, hex_to_rgb},
 };
 use colored::*;
 
@@ -61,7 +61,7 @@ pub fn exec(ctx: &IrisContext) -> anyhow::Result<()> {
     println!(
         "  {}  Config path:   {}",
         "󰉖".white(),
-        ctx.paths.config.display().to_string().bright_black()
+        utils::pretty_path(&ctx.paths.config).bright_black()
     );
 
     println!("\n  {}  {}", "󰒓".yellow(), "Enabled generators:".bold());

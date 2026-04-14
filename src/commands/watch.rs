@@ -1,4 +1,4 @@
-use crate::core::IrisContext;
+use crate::{core::IrisContext, utils};
 use anyhow::{Context, Result};
 use colored::Colorize;
 use notify_debouncer_mini::{new_debouncer, notify::*};
@@ -31,7 +31,7 @@ pub fn exec(interval_ms: u64, ctx: &mut IrisContext) -> Result<()> {
         io::stdout().flush().unwrap();
     };
 
-    print_header(&cache_path.display().to_string());
+    print_header(&utils::pretty_path(&cache_path));
 
     let (exit_tx, exit_rx) = channel();
     ctrlc::set_handler(move || {
@@ -45,7 +45,7 @@ pub fn exec(interval_ms: u64, ctx: &mut IrisContext) -> Result<()> {
             break;
         }
 
-        if let Ok(result) = rx.recv_timeout(Duration::from_millis(200)) {
+        if let Ok(result) = rx.recv_timeout(Duration::from_millis(500)) {
             match result {
                 Ok(_) => {
                     let content = fs::read_to_string(&cache_path).unwrap_or_default();

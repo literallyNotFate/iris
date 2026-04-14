@@ -1,10 +1,9 @@
 use crate::{
+    commands::HealthStatus,
     core::IrisContext,
     models::Palette,
     modules::{Generator, GeneratorType},
-    utils::{self},
 };
-use anyhow::{Context, Result};
 use colored::Colorize;
 use std::{env, fs, path::PathBuf};
 
@@ -24,6 +23,15 @@ impl Generator for StarshipGenerator {
         "starship.toml".into()
     }
 
+    fn link_path(&self, _theme_name: &str) -> PathBuf {
+        std::env::var("STARSHIP_CONFIG")
+            .map(PathBuf::from)
+            .unwrap_or_else(|_| {
+                self.resolve_config_directory()
+                    .join(self.target_file_name(""))
+            })
+    }
+
     fn env_config_directory(&self) -> Option<PathBuf> {
         env::var("STARSHIP_CONFIG").ok().map(PathBuf::from)
     }
@@ -32,42 +40,52 @@ impl Generator for StarshipGenerator {
         which::which("starship").is_ok() || self.resolve_config_directory().exists()
     }
 
-    fn apply(&self, p: &Palette, ctx: &IrisContext) -> Result<()> {
-        let config_path: PathBuf = env::var("STARSHIP_CONFIG")
-            .map(PathBuf::from)
-            .unwrap_or_else(|_| {
-                self.resolve_config_directory()
-                    .join(self.target_file_name(&p.name))
-            });
+    fn apply(&self, p: &Palette, ctx: &IrisContext) -> anyhow::Result<()> {
+        let config_path: PathBuf = self.link_path(&p.name);
 
         let render_ctx = self.build_render_context(p);
-        let palette_block: String = ctx.templater.render(&self.template_path(), &render_ctx)?;
-        let palette_header: String = format!("[palettes.{}]", &p.name);
+        let new_palette_block = ctx.templater.render(&self.template_path(), &render_ctx)?;
 
-        let existing = if config_path.exists() {
-            fs::read_to_string(&config_path)
-                .with_context(|| format!("Failed to read {:?}", config_path))?
+        let content = if config_path.exists() {
+            fs::read_to_string(&config_path)?
         } else {
-            ctx.log.info(&format!(
-                "Creating {} config directory...",
-                "starship".bold()
-            ));
-            if let Some(parent) = config_path.parent() {
-                fs::create_dir_all(parent)?;
-            }
-
-            format!("palette = \"{}\"\n", &p.name)
+            String::new()
         };
 
-        let mut updated: String = set_palette_key(&existing, &p.name);
-        updated = replace_palette_block(&updated, &palette_header, &palette_block);
+        let mut clean_lines: Vec<String> = Vec::new();
+        let mut skip_block = false;
 
-        fs::write(&config_path, updated)
-            .with_context(|| format!("Failed to write {:?}", config_path))?;
+        for line in content.lines() {
+            let trimmed = line.trim();
+            if trimmed.starts_with("palette =") {
+                continue;
+            }
+
+            if trimmed.starts_with("[palettes.") {
+                skip_block = true;
+                continue;
+            }
+
+            if skip_block && trimmed.starts_with('[') && !trimmed.starts_with("[palettes.") {
+                skip_block = false;
+            }
+
+            if !skip_block {
+                clean_lines.push(line.to_string());
+            }
+        }
+
+        let mut final_content = clean_lines.join("\n").trim().to_string();
+        final_content = format!("palette = \"{}\"\n\n{}", p.name, final_content);
+
+        final_content.push_str("\n\n");
+        final_content.push_str(&new_palette_block);
+
+        fs::write(&config_path, final_content)?;
 
         ctx.log.info(&format!(
-            "Palette {} injected into starship config.",
-            utils::capitalize(&p.name).yellow()
+            "Starship config cleaned and updated with palette {}",
+            p.name.yellow()
         ));
 
         Ok(())
@@ -85,70 +103,43 @@ impl Generator for StarshipGenerator {
         c
     }
 
-    fn setup_hint(&self) -> Option<String> {
-        let config: PathBuf = env::var("STARSHIP_CONFIG")
-            .map(PathBuf::from)
-            .unwrap_or_else(|_| self.resolve_config_directory().join("starship.toml"));
-
-        if !config.exists() {
-            return Some(format!(
-                "Starship config not found. Create {} and add:\n      {}",
-                config.display().to_string().cyan(),
-                "palette = \"<theme_name>\"".yellow()
-            ));
+    fn health_check(&self, ctx: &IrisContext) -> HealthStatus {
+        if !self.is_installed() {
+            return HealthStatus::Warning("starship binary not found".into());
         }
 
-        let content = fs::read_to_string(&config).unwrap_or_default();
-        if !content.contains("palette =") {
-            return Some(format!(
-                "Theme won't load until you add to {}:\n      {}",
-                config.display().to_string().cyan(),
-                "palette = \"<theme_name>\"".yellow()
-            ));
+        let config_path: PathBuf = self.link_path("");
+
+        if !config_path.exists() {
+            return HealthStatus::Error {
+                message: "starship.toml not found".into(),
+                fix_hint: Some(format!("Create config at {}", config_path.display())),
+            };
         }
 
-        None
-    }
-}
+        let theme: &String = &ctx.state.current_theme;
 
-/// Replaces [palettes.<name>] block with new content
-fn replace_palette_block(content: &str, header: &str, new_block: &str) -> String {
-    let start = match content.find(header) {
-        Some(i) => i,
-        None => return format!("{}\n{}", content.trim_end(), new_block),
-    };
+        if !theme.is_empty() {
+            let content: String = fs::read_to_string(&config_path).unwrap_or_default();
 
-    let after = &content[start + header.len()..];
-    let end = after
-        .find("\n[")
-        .map(|i| start + header.len() + i)
-        .unwrap_or(content.len());
+            let expected_key = format!("palette = \"{}\"", theme);
+            if !content.contains(&expected_key) {
+                return HealthStatus::Warning(format!(
+                    "Starship is not using the current palette '{}'",
+                    theme
+                ));
+            }
 
-    format!(
-        "{}{}{}",
-        &content[..start],
-        new_block.trim(),
-        &content[end..]
-    )
-}
+            let expected_header = format!("[palettes.{}]", theme);
+            if !content.contains(&expected_header) {
+                return HealthStatus::Error {
+                    message: format!("Palette block '{}' missing in config", theme),
+                    fix_hint: Some("Run `iris sync` to inject the palette block".into()),
+                };
+            }
+        }
 
-/// Updates or inserts `palette = "<name>"` line
-fn set_palette_key(content: &str, name: &str) -> String {
-    let new_line = format!("palette = \"{}\"", name);
-    if content.contains("palette =") {
-        content
-            .lines()
-            .map(|l| {
-                if l.trim_start().starts_with("palette =") {
-                    new_line.clone()
-                } else {
-                    l.to_string()
-                }
-            })
-            .collect::<Vec<_>>()
-            .join("\n")
-    } else {
-        format!("{}\n{}", new_line, content)
+        HealthStatus::Ok
     }
 }
 
@@ -157,7 +148,6 @@ fn set_palette_key(content: &str, name: &str) -> String {
 mod tests {
     use super::*;
     use crate::test_utils::create_test_context;
-    use tempdir::TempDir;
 
     #[test]
     fn should_return_starship_metadata() {
@@ -189,49 +179,138 @@ mod tests {
     }
 
     #[test]
-    fn should_handle_palette_key_set_for_starship() {
-        let content = "line1 = true\nline2 = false";
-        let updated = set_palette_key(content, "my-theme");
-        assert!(updated.starts_with("palette = \"my-theme\""));
-
-        let content_with_key = "palette = \"old\"\nother = 1";
-        let updated_key = set_palette_key(content_with_key, "new");
-        assert!(updated_key.contains("palette = \"new\""));
-        assert!(!updated_key.contains("palette = \"old\""));
-    }
-
-    #[test]
-    fn should_handle_replace_palette_block_for_starship() {
-        let header = "[palettes.test]";
-        let new_block = "[palettes.test]\ncolor = \"red\"\n";
-        let content = "[directory]\ntruncation_length = 3";
-        let result = replace_palette_block(content, header, new_block);
-        assert!(result.contains(new_block));
-
-        let complex_content = "[palettes.test]\nold = true\n\n[character]\nsymbol = \">\"";
-        let result_complex = replace_palette_block(complex_content, header, new_block);
-        assert!(result_complex.contains(new_block));
-        assert!(result_complex.contains("[character]"));
-        assert!(!result_complex.contains("old = true"));
-    }
-
-    #[test]
-    fn should_generate_setup_hint_for_starship() {
+    fn should_clean_and_inject_correctly() {
+        let (tmp_dir, ctx) = create_test_context();
         let generator = StarshipGenerator;
-        let temp_dir: TempDir = TempDir::new("starship_test").unwrap();
-        let config_path = temp_dir.path().join("starship.toml");
+        let p = Palette::mock();
+        let config_path = tmp_dir.path().join("starship.toml");
+
+        let initial_content = r##"
+    palette = "old_theme"
+    [directory]
+    style = "blue"
+
+    [palettes.old_theme]
+    base = "#000000"
+
+    palette = "duplicate_key"
+    "##;
+        fs::write(&config_path, initial_content).unwrap();
 
         temp_env::with_var("STARSHIP_CONFIG", Some(&config_path), || {
-            let hint = generator.setup_hint();
-            assert!(hint.unwrap().contains("Starship config not found"));
+            generator.apply(&p, &ctx).expect("Failed to apply");
+            let result = fs::read_to_string(&config_path).unwrap();
 
-            fs::write(&config_path, "[character]\nsuccess_symbol = \">\"").unwrap();
-            let hint_no_key = generator.setup_hint();
-            assert!(hint_no_key.unwrap().contains("palette ="));
-
-            fs::write(&config_path, "palette = \"some-theme\"").unwrap();
-            assert!(generator.setup_hint().is_none());
+            let palette_occurrences: Vec<_> = result.matches("palette =").collect();
+            assert_eq!(
+                palette_occurrences.len(),
+                1,
+                "Should have exactly one palette key"
+            );
+            assert!(result.starts_with(&format!("palette = \"{}\"", p.name)));
+            assert!(!result.contains("[palettes.old_theme]"));
+            assert!(result.contains(&format!("[palettes.{}]", p.name)));
+            assert!(result.contains("[directory]"));
+            assert!(result.contains("style = \"blue\""));
         });
+    }
+
+    #[test]
+    fn starship_health_ok() {
+        let (tmp_dir, mut ctx) = create_test_context();
+        let generator = StarshipGenerator;
+        let p = Palette::mock();
+        let root = tmp_dir.path();
+        let config_path = root.join("starship.toml");
+
+        temp_env::with_vars(
+            vec![
+                ("HOME", Some(root.to_str().unwrap())),
+                ("STARSHIP_CONFIG", Some(config_path.to_str().unwrap())),
+            ],
+            || {
+                ctx.state.current_theme = p.name.clone();
+                generator.apply(&p, &ctx).unwrap();
+
+                let status = generator.health_check(&ctx);
+                assert!(
+                    matches!(status, HealthStatus::Ok),
+                    "Expected Ok, got {:?}",
+                    status
+                );
+            },
+        );
+    }
+
+    #[test]
+    fn starship_health_warning_wrong_palette() {
+        let (tmp_dir, mut ctx) = create_test_context();
+        let generator = StarshipGenerator;
+        let p = Palette::mock();
+        let root = tmp_dir.path();
+        let config_path = root.join("starship.toml");
+
+        temp_env::with_vars(
+            vec![
+                ("HOME", Some(root.to_str().unwrap())),
+                ("STARSHIP_CONFIG", Some(config_path.to_str().unwrap())),
+            ],
+            || {
+                ctx.state.current_theme = p.name.clone();
+                generator.apply(&p, &ctx).unwrap();
+
+                let content = fs::read_to_string(&config_path).unwrap();
+                let corrupted =
+                    content.replace(&format!("palette = \"{}\"", p.name), "palette = \"wrong\"");
+                fs::write(&config_path, corrupted).unwrap();
+
+                let status = generator.health_check(&ctx);
+                assert!(
+                    matches!(&status, HealthStatus::Warning(msg) if msg.contains("not using the current palette")),
+                    "Expected Warning for wrong palette, got {:?}",
+                    status
+                );
+            },
+        );
+    }
+
+    #[test]
+    fn starship_health_error_missing_palette_block() {
+        let (tmp_dir, mut ctx) = create_test_context();
+        let generator = StarshipGenerator;
+        let p = Palette::mock();
+        let root = tmp_dir.path();
+        let config_path = root.join("starship.toml");
+
+        temp_env::with_vars(
+            vec![
+                ("HOME", Some(root.to_str().unwrap())),
+                ("STARSHIP_CONFIG", Some(config_path.to_str().unwrap())),
+            ],
+            || {
+                ctx.state.current_theme = p.name.clone();
+                generator.apply(&p, &ctx).unwrap();
+
+                let content = fs::read_to_string(&config_path).unwrap();
+                let header = format!("[palettes.{}]", p.name);
+                let lines: Vec<&str> = content
+                    .lines()
+                    .filter(|line| !line.trim().starts_with(&header))
+                    .collect();
+                fs::write(&config_path, lines.join("\n")).unwrap();
+
+                let status = generator.health_check(&ctx);
+                match status {
+                    HealthStatus::Error { ref message, .. } => {
+                        assert!(
+                            message.contains("missing"),
+                            "Error message should mention 'missing' block"
+                        );
+                    }
+                    _ => panic!("Expected Error for missing palette block, got {:?}", status),
+                }
+            },
+        );
     }
 
     #[test]

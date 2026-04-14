@@ -1,4 +1,5 @@
 use crate::{
+    commands::HealthStatus,
     core::IrisContext,
     models::Palette,
     modules::{Generator, GeneratorType},
@@ -24,34 +25,33 @@ impl Generator for YaziGenerator {
         "theme.toml".into()
     }
 
-    fn apply(&self, p: &Palette, ctx: &IrisContext) -> Result<()> {
-        let theme_name: &String = &p.name;
-
-        let render_ctx: tera::Context = self.build_render_context(p);
-        let content: String = ctx.templater.render(&self.template_path(), &render_ctx)?;
-
-        let yazi_dir: PathBuf = self.resolve_config_directory();
-        if !yazi_dir.exists() {
-            ctx.log.info(&format!(
-                "Creating {} config directory...",
-                self.name().bold()
-            ));
-            fs::create_dir_all(&yazi_dir)?;
-        }
-
-        let cache_file: PathBuf = ctx
-            .paths
+    fn cache_path(&self, ctx: &IrisContext, _theme_name: &str) -> PathBuf {
+        ctx.paths
             .cache
             .join("yazi_themes")
-            .join(format!("{}.toml", theme_name));
-        let theme_link: PathBuf = yazi_dir.join(self.target_file_name(theme_name));
+            .join(self.target_file_name(""))
+    }
+
+    fn link_path(&self, _theme_name: &str) -> PathBuf {
+        self.resolve_config_directory()
+            .join(self.target_file_name(""))
+    }
+
+    fn apply(&self, p: &Palette, ctx: &IrisContext) -> Result<()> {
+        let theme_name: &String = &p.name;
+        let cache_file: PathBuf = self.cache_path(ctx, theme_name);
+        let theme_link: PathBuf = self.link_path(theme_name);
+
+        let render_ctx = self.build_render_context(p);
+        let content: String = ctx.templater.render(&self.template_path(), &render_ctx)?;
 
         fs::create_dir_all(cache_file.parent().unwrap())?;
-        fs::write(&cache_file, content)?;
+        fs::create_dir_all(theme_link.parent().unwrap())?;
 
+        fs::write(&cache_file, content)?;
         ctx.log.info(&format!(
             "Theme {} generated in cache.",
-            utils::capitalize(theme_name).yellow()
+            theme_name.yellow()
         ));
 
         if theme_link.exists() || theme_link.is_symlink() {
@@ -62,8 +62,9 @@ impl Generator for YaziGenerator {
         {
             use std::os::unix::fs::symlink;
             ctx.log.info(&format!(
-                "Linking theme.toml to {} config...",
-                self.name().bold()
+                "Linking {} theme to {}...",
+                self.name().bold(),
+                utils::pretty_path(&cache_file).cyan(),
             ));
             symlink(&cache_file, &theme_link).with_context(|| {
                 format!(
@@ -112,27 +113,51 @@ impl Generator for YaziGenerator {
         c
     }
 
-    fn setup_hint(&self) -> Option<String> {
-        let yazi_dir: PathBuf = self.resolve_config_directory();
-
-        if !yazi_dir.exists() {
-            return Some(format!(
-                "No {} found — make sure Yazi is installed and run it once to initialize config.",
-                yazi_dir.display().to_string().cyan(),
-            ));
+    fn health_check(&self, ctx: &IrisContext) -> HealthStatus {
+        if !self.is_installed() {
+            return HealthStatus::Warning("Yazi binary not found".into());
         }
 
-        None
+        let link_path: PathBuf = self.link_path("");
+        let expected_cache: PathBuf = self.cache_path(ctx, "");
+
+        if !link_path.exists() && !link_path.is_symlink() {
+            return HealthStatus::Error {
+                message: "theme.toml link missing in yazi config".into(),
+                fix_hint: Some("run `iris sync` to create the symlink".into()),
+            };
+        }
+
+        #[cfg(unix)]
+        if let Ok(target) = std::fs::read_link(&link_path) {
+            if target != expected_cache {
+                return HealthStatus::Warning(format!(
+                    "Yazi theme link points to an unexpected location: {:?}",
+                    target
+                ));
+            }
+        }
+
+        if !expected_cache.exists() {
+            return HealthStatus::Error {
+                message: "Yazi theme cache file is missing".into(),
+                fix_hint: Some("run `iris sync` to regenerate".into()),
+            };
+        }
+
+        HealthStatus::Ok
     }
 }
 
 /// Unit-tests for yazi generator
 #[cfg(test)]
 mod tests {
+    #[cfg(unix)]
+    use std::os::unix::fs::symlink;
+
     use super::*;
     use crate::test_utils::create_test_context;
     use temp_env;
-    use tempdir::TempDir;
 
     #[test]
     fn should_return_yazi_metadata() {
@@ -161,31 +186,85 @@ mod tests {
     }
 
     #[test]
-    fn should_generate_setup_hint_for_yazi() {
+    fn yazi_health_ok() {
+        let (tmp_dir, mut ctx) = create_test_context();
         let generator = YaziGenerator;
-        let temp_dir: TempDir = TempDir::new("yazi_hint").unwrap();
-        let fake_config_root = temp_dir.path().join("config");
-        fs::create_dir_all(&fake_config_root).unwrap();
+        let p = Palette::mock();
+        let root = tmp_dir.path();
 
-        temp_env::with_vars(
-            vec![
-                ("XDG_CONFIG_HOME", Some(&fake_config_root)),
-                ("HOME", Some(&temp_dir.into_path())),
-            ],
-            || {
-                let resolved = generator.resolve_config_directory();
+        temp_env::with_var("HOME", Some(root), || {
+            ctx.state.current_theme = p.name.clone();
+            generator.apply(&p, &ctx).unwrap();
 
-                let hint = generator.setup_hint();
-                assert!(
-                    hint.is_some(),
-                    "Hint should be Some for path: {:?}",
-                    resolved
-                );
+            let status = generator.health_check(&ctx);
+            assert!(matches!(status, HealthStatus::Ok));
+        });
+    }
 
-                fs::create_dir_all(&resolved).unwrap();
-                assert!(generator.setup_hint().is_none());
-            },
-        );
+    #[test]
+    fn yazi_health_error_missing_link() {
+        let (tmp_dir, ctx) = create_test_context();
+        let generator = YaziGenerator;
+        let root = tmp_dir.path();
+
+        temp_env::with_var("HOME", Some(root), || {
+            let status = generator.health_check(&ctx);
+
+            match status {
+                HealthStatus::Error { message, .. } => {
+                    assert!(message.contains("link missing"));
+                }
+                _ => panic!("Expected Error, got {:?}", status),
+            }
+        });
+    }
+
+    #[test]
+    fn yazi_health_warning_wrong_target() {
+        let (tmp_dir, mut ctx) = create_test_context();
+        let generator = YaziGenerator;
+        let p = Palette::mock();
+        let root = tmp_dir.path();
+
+        temp_env::with_var("HOME", Some(root), || {
+            ctx.state.current_theme = p.name.clone();
+            generator.apply(&p, &ctx).unwrap();
+
+            let link_path = generator.link_path(&p.name);
+            let wrong_target = root.join("some_other_place.toml");
+            fs::write(&wrong_target, "").unwrap();
+
+            fs::remove_file(&link_path).unwrap();
+            #[cfg(unix)]
+            symlink(&wrong_target, &link_path).unwrap();
+
+            let status = generator.health_check(&ctx);
+            assert!(matches!(status, HealthStatus::Warning(_)));
+        });
+    }
+
+    #[test]
+    fn yazi_health_error_missing_cache() {
+        let (tmp_dir, mut ctx) = create_test_context();
+        let generator = YaziGenerator;
+        let p = Palette::mock();
+        let root = tmp_dir.path();
+
+        temp_env::with_var("HOME", Some(root), || {
+            ctx.state.current_theme = p.name.clone();
+            generator.apply(&p, &ctx).unwrap();
+
+            let cache_path = generator.cache_path(&ctx, &p.name);
+            fs::remove_file(cache_path).unwrap();
+
+            let status = generator.health_check(&ctx);
+            match status {
+                HealthStatus::Error { message, .. } => {
+                    assert!(message.contains("cache file is missing"));
+                }
+                _ => panic!("Expected Error, got {:?}", status),
+            }
+        });
     }
 
     #[test]

@@ -1,4 +1,4 @@
-use crate::{core::IrisContext, models::Palette, modules::GeneratorType};
+use crate::{commands::HealthStatus, core::IrisContext, models::Palette, modules::GeneratorType};
 use std::{env, path::PathBuf};
 
 /// Main trait for all generators
@@ -11,6 +11,22 @@ pub trait Generator: Send + Sync {
 
     /// Returns the name of the file responsible for configuring app
     fn target_file_name(&self, theme: &str) -> String;
+
+    /// Generator path in cache.
+    /// By default: ~/.cache/iris/[name]/[target_file]
+    fn cache_path(&self, ctx: &IrisContext, theme_name: &str) -> PathBuf {
+        ctx.paths
+            .cache
+            .join(self.name())
+            .join(self.target_file_name(theme_name))
+    }
+
+    /// Path, where app expects to apply config/theme
+    /// By default: ~/.config/[name]/[target_file]
+    fn link_path(&self, theme_name: &str) -> PathBuf {
+        self.resolve_config_directory()
+            .join(self.target_file_name(theme_name))
+    }
 
     /// Dynamically forms ID template for Tera
     /// E.g. "tool/yazi", "terminal/alacritty"
@@ -50,9 +66,10 @@ pub trait Generator: Send + Sync {
         None
     }
 
-    /// Optional post-apply hint (e.g. "add import to config")
-    fn setup_hint(&self) -> Option<String> {
-        None
+    /// "Health" generator check
+    /// Implementation by default checks if binary is installed
+    fn health_check(&self, _ctx: &IrisContext) -> HealthStatus {
+        HealthStatus::Ok
     }
 
     /// Basic template context builder

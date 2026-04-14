@@ -1,4 +1,5 @@
 use crate::{
+    commands::HealthStatus,
     core::IrisContext,
     models::Palette,
     modules::{Generator, GeneratorType},
@@ -24,29 +25,33 @@ impl Generator for AlacrittyGenerator {
         "current_theme.toml".into()
     }
 
+    fn cache_path(&self, ctx: &IrisContext, _theme_name: &str) -> PathBuf {
+        ctx.paths
+            .cache
+            .join("alacritty")
+            .join(self.target_file_name(""))
+    }
+
+    fn link_path(&self, _theme_name: &str) -> PathBuf {
+        self.resolve_config_directory()
+            .join(self.target_file_name(""))
+    }
+
     fn apply(&self, p: &Palette, ctx: &IrisContext) -> Result<()> {
+        let theme_name: &String = &p.name;
+        let cache_file: PathBuf = self.cache_path(ctx, theme_name);
         let alacritty_dir: PathBuf = self.resolve_config_directory();
-        let theme_file_name: String = self.target_file_name("");
-        let cache_file: PathBuf = ctx.paths.cache.join("alacritty").join(&theme_file_name);
-        let link_path: PathBuf = alacritty_dir.join(&theme_file_name);
+        let link_path: PathBuf = self.link_path(theme_name);
 
         let render_ctx = self.build_render_context(p);
         let content: String = ctx.templater.render(&self.template_path(), &render_ctx)?;
 
-        if let Some(parent) = cache_file.parent() {
-            fs::create_dir_all(parent)
-                .with_context(|| format!("Failed to create cache directory for {}", self.name()))?;
-        }
+        fs::create_dir_all(cache_file.parent().unwrap())?;
         if !alacritty_dir.exists() {
-            ctx.log.info(&format!(
-                "Creating {} config directory...",
-                "alacritty".bold()
-            ));
             fs::create_dir_all(&alacritty_dir)?;
         }
 
-        fs::write(&cache_file, content)
-            .with_context(|| format!("Failed to write alacritty cache to {:?}", cache_file))?;
+        fs::write(&cache_file, content)?;
 
         if link_path.exists() || link_path.is_symlink() {
             fs::remove_file(&link_path)?;
@@ -56,8 +61,9 @@ impl Generator for AlacrittyGenerator {
         {
             use std::os::unix::fs::symlink;
             ctx.log.info(&format!(
-                "Linking cache to {} config...",
-                self.name().bold()
+                "Linking {} theme to {}...",
+                self.name().bold(),
+                utils::pretty_path(&alacritty_dir).cyan()
             ));
             symlink(&cache_file, &link_path)
                 .with_context(|| format!("Failed to link {:?} -> {:?}", link_path, cache_file))?;
@@ -77,30 +83,47 @@ impl Generator for AlacrittyGenerator {
         c
     }
 
-    fn setup_hint(&self) -> Option<String> {
+    fn health_check(&self, ctx: &IrisContext) -> HealthStatus {
+        if !self.is_installed() {
+            return HealthStatus::Warning("Alacritty binary not found".into());
+        }
+
         let alacritty_dir: PathBuf = self.resolve_config_directory();
         let main_config: PathBuf = alacritty_dir.join("alacritty.toml");
-        let theme_path: PathBuf = alacritty_dir.join(self.target_file_name(""));
-        let import_line: String = format!("import = [\"{}\"]", theme_path.display());
+        let link_path: PathBuf = self.link_path("");
+        let expected_cache: PathBuf = self.cache_path(ctx, "");
+
+        if !link_path.exists() {
+            return HealthStatus::Error {
+                message: "current_theme.toml missing in config dir".into(),
+                fix_hint: Some("run `iris sync` to regenerate".into()),
+            };
+        }
+
+        #[cfg(unix)]
+        if let Ok(target) = std::fs::read_link(&link_path) {
+            if target != expected_cache {
+                return HealthStatus::Warning("Link points to an old or manual theme file".into());
+            }
+        }
 
         if !main_config.exists() {
-            return Some(format!(
-                "No config found. Create {} and add:\n      {}",
-                main_config.display().to_string().cyan(),
-                import_line.yellow()
-            ));
+            return HealthStatus::Warning(
+                "alacritty.toml not found (using default settings)".into(),
+            );
         }
 
         let content = fs::read_to_string(&main_config).unwrap_or_default();
         if !content.contains("current_theme.toml") {
-            return Some(format!(
-                "Add this line to your {}:\n      {}",
-                main_config.display().to_string().cyan(),
-                import_line.yellow()
-            ));
+            return HealthStatus::Error {
+                message: "Theme is not imported in alacritty.toml".into(),
+                fix_hint: Some(
+                    "Add `import = [\"~/.config/alacritty/current_theme.toml\"]`".into(),
+                ),
+            };
         }
 
-        None
+        HealthStatus::Ok
     }
 }
 
@@ -109,7 +132,6 @@ impl Generator for AlacrittyGenerator {
 mod tests {
     use super::*;
     use crate::test_utils::create_test_context;
-    use tempdir::TempDir;
 
     #[test]
     fn should_return_alacritty_metadata() {
@@ -143,33 +165,81 @@ mod tests {
     }
 
     #[test]
-    fn should_generate_setup_hint_for_alacritty() {
+    fn alacritty_health_ok() {
+        let (tmp_dir, mut ctx) = create_test_context();
         let generator = AlacrittyGenerator;
-        let temp_dir: TempDir = TempDir::new("alacritty_test").unwrap();
+        let p = Palette::mock();
+        let root = tmp_dir.path();
 
         temp_env::with_vars(
             vec![
-                ("XDG_CONFIG_HOME", Some(temp_dir.path())),
-                ("HOME", Some(temp_dir.path())),
+                ("HOME", Some(root.to_str().unwrap())),
+                (
+                    "XDG_CONFIG_HOME",
+                    Some(root.join(".config").to_str().unwrap()),
+                ),
             ],
             || {
+                ctx.state.current_theme = p.name.clone();
+                generator.apply(&p, &ctx).unwrap();
+
                 let alacritty_dir = generator.resolve_config_directory();
                 let main_config = alacritty_dir.join("alacritty.toml");
-
-                let hint_no_config = generator.setup_hint();
-                assert!(hint_no_config.is_some());
-                assert!(hint_no_config.unwrap().contains("No config found"));
-
-                fs::create_dir_all(&alacritty_dir).unwrap();
-                fs::write(&main_config, "[window]\nopacity = 0.9").unwrap();
-                let hint_no_import = generator.setup_hint();
-                assert!(hint_no_import.is_some());
-                assert!(hint_no_import.unwrap().contains("import = ["));
-
                 fs::write(&main_config, "import = [\"current_theme.toml\"]").unwrap();
-                assert!(generator.setup_hint().is_none());
+
+                let status = generator.health_check(&ctx);
+                assert!(
+                    matches!(status, HealthStatus::Ok),
+                    "Expected Ok, got {:?}",
+                    status
+                );
             },
         );
+    }
+
+    #[test]
+    fn alacritty_health_error_no_import() {
+        let (tmp_dir, mut ctx) = create_test_context();
+        let generator = AlacrittyGenerator;
+        let p = Palette::mock();
+        let root = tmp_dir.path();
+
+        temp_env::with_vars(vec![("HOME", Some(root.to_str().unwrap()))], || {
+            ctx.state.current_theme = p.name.clone();
+            generator.apply(&p, &ctx).unwrap();
+
+            let main_config = generator.resolve_config_directory().join("alacritty.toml");
+            fs::write(&main_config, "[window]\ndecorations = \"none\"").unwrap();
+
+            let status = generator.health_check(&ctx);
+            match status {
+                HealthStatus::Error { ref message, .. } => {
+                    assert!(message.contains("not imported"));
+                }
+                _ => panic!("Expected Error for missing import, got {:?}", status),
+            }
+        });
+    }
+
+    #[test]
+    fn alacritty_health_warning_no_main_config() {
+        let (tmp_dir, mut ctx) = create_test_context();
+        let generator = AlacrittyGenerator;
+        let p = Palette::mock();
+        let root = tmp_dir.path();
+
+        temp_env::with_vars(vec![("HOME", Some(root.to_str().unwrap()))], || {
+            ctx.state.current_theme = p.name.clone();
+            generator.apply(&p, &ctx).unwrap();
+
+            let main_config = generator.resolve_config_directory().join("alacritty.toml");
+            if main_config.exists() {
+                fs::remove_file(main_config).unwrap();
+            }
+
+            let status = generator.health_check(&ctx);
+            assert!(matches!(status, HealthStatus::Warning(msg) if msg.contains("not found")));
+        });
     }
 
     #[test]

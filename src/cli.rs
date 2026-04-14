@@ -37,6 +37,9 @@ pub enum Commands {
         interval: u64,
     },
 
+    /// Check whether there are any problems with application before applying
+    Health,
+
     /// Manage generators through selection
     Gen {
         #[command(subcommand)]

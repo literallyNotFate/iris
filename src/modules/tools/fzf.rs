@@ -1,10 +1,10 @@
 use crate::{
+    commands::HealthStatus,
     core::IrisContext,
     models::Palette,
     modules::{Generator, GeneratorType},
     utils::{self},
 };
-use anyhow::{Context, Result};
 use colored::Colorize;
 use std::{fs, path::PathBuf};
 
@@ -24,25 +24,33 @@ impl Generator for FzfGenerator {
         "fzf.sh".into()
     }
 
+    fn cache_path(&self, ctx: &IrisContext, _theme_name: &str) -> PathBuf {
+        ctx.paths.cache.join(self.target_file_name(""))
+    }
+
+    fn link_path(&self, _theme_name: &str) -> PathBuf {
+        dirs::home_dir().unwrap_or_default().join(".zshrc")
+    }
+
     fn is_installed(&self) -> bool {
         let home: PathBuf = dirs::home_dir().unwrap_or_default();
         which::which("fzf").is_ok() || home.join(".zshrc").exists()
     }
 
-    fn apply(&self, p: &Palette, ctx: &IrisContext) -> Result<()> {
-        let cache_file: PathBuf = ctx.paths.cache.join(self.target_file_name(&p.name));
+    fn apply(&self, p: &Palette, ctx: &IrisContext) -> anyhow::Result<()> {
+        let cache_file: PathBuf = self.cache_path(ctx, &p.name);
         let render_ctx = self.build_render_context(p);
         let content: String = ctx.templater.render(&self.template_path(), &render_ctx)?;
 
         ctx.log.info(&format!(
-            "Generating FZF script in: {}",
-            cache_file.display()
+            "Generating {} script in: {}",
+            self.name().bold(),
+            utils::pretty_path(&cache_file).cyan()
         ));
 
-        fs::write(&cache_file, content)
-            .with_context(|| format!("Failed to write FZF config to {:?}", cache_file))?;
+        fs::create_dir_all(cache_file.parent().unwrap())?;
+        fs::write(&cache_file, content)?;
 
-        ctx.log.info("Colors exported to shell script.");
         Ok(())
     }
 
@@ -60,26 +68,35 @@ impl Generator for FzfGenerator {
         c
     }
 
-    fn setup_hint(&self) -> Option<String> {
-        let cache_file: PathBuf = dirs::home_dir()?
-            .join(".cache/iris")
-            .join(self.target_file_name(""));
-        let zshrc: PathBuf = dirs::home_dir()?.join(".zshrc");
-
-        let source_line: String = format!("source \"{}\"", cache_file.display());
-
-        if zshrc.exists() {
-            let content: String = fs::read_to_string(&zshrc).unwrap_or_default();
-            if content.contains("fzf.sh") {
-                return None;
-            }
+    fn health_check(&self, ctx: &IrisContext) -> HealthStatus {
+        if !self.is_installed() {
+            return HealthStatus::Warning("fzf binary not found".into());
         }
 
-        Some(format!(
-            "fzf theme won't load until you add to {}:\n     {}",
-            ".zshrc".cyan(),
-            source_line.yellow()
-        ))
+        let zshrc: PathBuf = self.link_path("");
+        let cache_file: PathBuf = self.cache_path(ctx, "");
+
+        if !zshrc.exists() {
+            return HealthStatus::Error {
+                message: ".zshrc not found".into(),
+                fix_hint: Some("fzf theme requires a shell config to source the colors".into()),
+            };
+        }
+
+        let content: String = fs::read_to_string(&zshrc).unwrap_or_default();
+        let source_line: String = format!("fzf.sh");
+
+        if !content.contains(&source_line) {
+            return HealthStatus::Error {
+                message: "fzf.sh is not sourced in .zshrc".into(),
+                fix_hint: Some(format!(
+                    "Add 'source \"{}\"' to your .zshrc",
+                    cache_file.display()
+                )),
+            };
+        }
+
+        HealthStatus::Ok
     }
 }
 
@@ -110,26 +127,6 @@ mod tests {
     }
 
     #[test]
-    fn should_generate_setup_hint_for_fzf() {
-        let generator = FzfGenerator;
-        let temp_dir: TempDir = TempDir::new("fzf_test").unwrap();
-        let zshrc_path = temp_dir.path().join(".zshrc");
-
-        temp_env::with_var("HOME", Some(temp_dir.path()), || {
-            let hint_no_zshrc = generator.setup_hint();
-            assert!(hint_no_zshrc.is_some());
-
-            fs::write(&zshrc_path, "# some config").unwrap();
-            let hint_no_source = generator.setup_hint();
-            assert!(hint_no_source.unwrap().contains("fzf theme won't load"));
-
-            fs::write(&zshrc_path, "source \"/some/path/fzf.sh\"").unwrap();
-            let hint_with_source = generator.setup_hint();
-            assert!(hint_with_source.is_none());
-        });
-    }
-
-    #[test]
     fn should_check_if_fzf_is_installed() {
         let generator = FzfGenerator;
         let temp_dir: TempDir = TempDir::new("fzf_test").unwrap();
@@ -138,6 +135,61 @@ mod tests {
         temp_env::with_var("HOME", Some(temp_dir.path()), || {
             fs::write(&zshrc_path, "").unwrap();
             assert!(generator.is_installed());
+        });
+    }
+
+    #[test]
+    fn fzf_health_ok() {
+        let (tmp_dir, ctx) = create_test_context();
+        let generator = FzfGenerator;
+        let root = tmp_dir.path();
+
+        temp_env::with_var("HOME", Some(root), || {
+            let zshrc_path = root.join(".zshrc");
+            let cache_file = generator.cache_path(&ctx, "any");
+
+            fs::write(&zshrc_path, format!("source \"{}\"", cache_file.display())).unwrap();
+
+            let status = generator.health_check(&ctx);
+            assert!(matches!(status, HealthStatus::Ok));
+        });
+    }
+
+    #[test]
+    fn fzf_health_error_no_zshrc() {
+        let (tmp_dir, ctx) = create_test_context();
+        let generator = FzfGenerator;
+        let root = tmp_dir.path();
+
+        temp_env::with_var("HOME", Some(root), || {
+            let status = generator.health_check(&ctx);
+
+            match status {
+                HealthStatus::Error { message, .. } => {
+                    assert!(message.contains(".zshrc not found"));
+                }
+                _ => panic!("Expected Error due to missing .zshrc"),
+            }
+        });
+    }
+
+    #[test]
+    fn fzf_health_error_not_sourced() {
+        let (tmp_dir, ctx) = create_test_context();
+        let generator = FzfGenerator;
+        let root = tmp_dir.path();
+
+        temp_env::with_var("HOME", Some(root), || {
+            let zshrc_path = root.join(".zshrc");
+            fs::write(&zshrc_path, "alias ls='ls --color=auto'").unwrap();
+
+            let status = generator.health_check(&ctx);
+            match status {
+                HealthStatus::Error { message, .. } => {
+                    assert!(message.contains("not sourced"));
+                }
+                _ => panic!("Expected Error because fzf.sh is not in .zshrc"),
+            }
         });
     }
 
