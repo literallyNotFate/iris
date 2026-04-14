@@ -2,10 +2,11 @@ pub mod alacritty;
 pub mod ghostty;
 
 use super::Generator;
+use std::sync::Arc;
 
-pub fn get_all() -> Vec<Box<dyn Generator>> {
+pub fn get_all() -> Vec<Arc<dyn Generator>> {
     vec![
-        Box::new(alacritty::AlacrittyGenerator),
-        Box::new(ghostty::GhosttyGenerator),
+        Arc::new(alacritty::AlacrittyGenerator),
+        Arc::new(ghostty::GhosttyGenerator),
     ]
 }

@@ -38,7 +38,11 @@ pub enum Commands {
     },
 
     /// Check whether there are any problems with application before applying
-    Health,
+    Health {
+        /// Automatically fix detected issues
+        #[arg(short, long)]
+        fix: bool,
+    },
 
     /// Manage generators through selection
     Gen {

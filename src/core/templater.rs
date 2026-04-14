@@ -6,6 +6,7 @@ use tera::{Context, Tera};
 static TEMPLATES_DIR: Dir = include_dir!("$CARGO_MANIFEST_DIR/templates");
 
 /// Tera templater made for tool themes
+#[derive(Clone)]
 pub struct Templater {
     tera: Tera,
 }

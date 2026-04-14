@@ -1,7 +1,8 @@
 pub mod btop;
 
 use super::Generator;
+use std::sync::Arc;
 
-pub fn get_all() -> Vec<Box<dyn Generator>> {
-    vec![Box::new(btop::BtopGenerator)]
+pub fn get_all() -> Vec<Arc<dyn Generator>> {
+    vec![Arc::new(btop::BtopGenerator)]
 }

@@ -38,19 +38,18 @@ impl Generator for FzfGenerator {
     }
 
     fn apply(&self, p: &Palette, ctx: &IrisContext) -> anyhow::Result<()> {
-        let cache_file: PathBuf = self.cache_path(ctx, &p.name);
-        let render_ctx = self.build_render_context(p);
-        let content: String = ctx.templater.render(&self.template_path(), &render_ctx)?;
-
         ctx.log.info(&format!(
             "Generating {} script in: {}",
-            self.name().bold(),
-            utils::pretty_path(&cache_file).cyan()
+            self.name().bold().cyan(),
+            utils::pretty_path(&self.cache_path(ctx, "")).magenta()
         ));
+        self.ensure_cache_file(p, ctx)?;
 
-        fs::create_dir_all(cache_file.parent().unwrap())?;
-        fs::write(&cache_file, content)?;
-
+        ctx.log.info(&format!(
+            "{} theme applied to {}",
+            utils::capitalize(&p.name).yellow(),
+            self.name().bold().cyan()
+        ));
         Ok(())
     }
 
@@ -97,6 +96,63 @@ impl Generator for FzfGenerator {
         }
 
         HealthStatus::Ok
+    }
+
+    fn fix(&self, status: &HealthStatus, p: &Palette, ctx: &IrisContext) -> anyhow::Result<()> {
+        match status {
+            HealthStatus::Error { message, .. } => {
+                if message.contains("not sourced") {
+                    ctx.log
+                        .step(
+                            &format!("Injecting source line into {}...", ".zshrc".magenta()),
+                            2,
+                        )
+                        .done(true);
+                    self.inject_source_line(ctx)?;
+                }
+
+                ctx.log.step("Regenerating fzf theme file...", 2).done(true);
+                self.ensure_cache_file(p, &ctx.silent())?;
+
+                Ok(())
+            }
+
+            _ => {
+                ctx.log
+                    .step(
+                        &format!("Re-applying {} configuration...", self.name().bold()),
+                        2,
+                    )
+                    .done(true);
+                self.apply(p, &ctx.silent())
+            }
+        }
+    }
+}
+
+impl FzfGenerator {
+    fn ensure_cache_file(&self, p: &Palette, ctx: &IrisContext) -> anyhow::Result<PathBuf> {
+        let cache_file: PathBuf = self.cache_path(ctx, &p.name);
+        let render_ctx = self.build_render_context(p);
+        let content: String = ctx.templater.render(&self.template_path(), &render_ctx)?;
+
+        fs::create_dir_all(cache_file.parent().unwrap())?;
+        fs::write(&cache_file, content)?;
+        Ok(cache_file)
+    }
+
+    fn inject_source_line(&self, ctx: &IrisContext) -> anyhow::Result<()> {
+        let zshrc: PathBuf = self.link_path("");
+        let cache_file: PathBuf = self.cache_path(ctx, "");
+        let source_line: String = format!(
+            "\n[ -f \"{0}\" ] && source \"{0}\" # iris:fzf\n",
+            cache_file.display()
+        );
+
+        let mut content = fs::read_to_string(&zshrc)?;
+        content.push_str(&source_line);
+        fs::write(&zshrc, content)?;
+        Ok(())
     }
 }
 
@@ -216,5 +272,65 @@ mod tests {
         let content = fs::read_to_string(cache_file).unwrap();
         assert!(content.contains("export FZF_DEFAULT_OPTS="));
         assert!(content.contains(&utils::capitalize(&p.name)));
+    }
+
+    #[test]
+    fn should_fix_source_line_injection_for_fzf() {
+        let (tmp_dir, ctx) = create_test_context();
+        let generator = FzfGenerator;
+        let p = Palette::mock();
+        let root = tmp_dir.path();
+
+        let zshrc = root.join(".zshrc");
+        fs::write(&zshrc, "# Initial zshrc\n").unwrap();
+
+        temp_env::with_var("HOME", Some(root.to_str().unwrap()), || {
+            generator.apply(&p, &ctx).unwrap();
+
+            let status = generator.health_check(&ctx);
+            assert!(
+                matches!(status, HealthStatus::Error { ref message, .. } if message.contains("not sourced")),
+                "Expected 'not sourced' error, got {:?}",
+                status
+            );
+
+            generator
+                .fix(&status, &p, &ctx.silent())
+                .expect("Fix failed");
+
+            let updated_content = fs::read_to_string(&zshrc).unwrap();
+            let cache_file = generator.cache_path(&ctx, &p.name);
+
+            assert!(
+                updated_content.contains(&cache_file.to_str().unwrap()),
+                "zshrc should now contain the source line for fzf.sh"
+            );
+            assert!(updated_content.contains("# iris:fzf"));
+
+            let final_status = generator.health_check(&ctx);
+            assert!(final_status.is_ok(), "Final status should be Ok");
+        });
+    }
+
+    #[test]
+    fn should_fix_missing_cache_for_fzf() {
+        let (tmp_dir, ctx) = create_test_context();
+        let generator = FzfGenerator;
+        let p = Palette::mock();
+        let root = tmp_dir.path();
+
+        let zshrc = root.join(".zshrc");
+        let cache_file = generator.cache_path(&ctx, &p.name);
+        fs::write(&zshrc, format!("source {}", cache_file.display())).unwrap();
+
+        temp_env::with_var("HOME", Some(root.to_str().unwrap()), || {
+            let status = HealthStatus::Error {
+                message: "cache missing".into(),
+                fix_hint: None,
+            };
+
+            generator.fix(&status, &p, &ctx.silent()).unwrap();
+            assert!(cache_file.exists(), "Cache file should be recreated");
+        });
     }
 }

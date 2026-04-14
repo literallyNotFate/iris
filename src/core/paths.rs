@@ -2,6 +2,7 @@ use anyhow::{Context, Result, anyhow};
 use std::path::PathBuf;
 
 /// Paths manager for application
+#[derive(Clone)]
 pub struct IrisPaths {
     /// Points to: ~/.config/iris
     pub config: PathBuf,

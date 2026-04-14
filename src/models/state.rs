@@ -3,7 +3,7 @@ pub use serde::{Deserialize, Serialize};
 use std::{collections::BTreeSet, fs, path::PathBuf};
 
 /// UI State of app which is being saved
-#[derive(Default, Serialize, Deserialize, Debug)]
+#[derive(Default, Serialize, Deserialize, Debug, Clone)]
 pub struct State {
     pub current_theme: String,
     pub enabled_generators: BTreeSet<String>,

@@ -4,18 +4,18 @@ use crate::{
     modules::{Generator, GeneratorType, multiplexer, prompts, system, terminals, tools},
 };
 use colored::Colorize;
-use std::collections::BTreeSet;
+use std::{collections::BTreeSet, sync::Arc};
 
 /// The list of all generators
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct GeneratorRegistry {
-    pub generators: Vec<Box<dyn Generator>>,
+    pub generators: Vec<Arc<dyn Generator>>,
 }
 
 impl GeneratorRegistry {
     /// Creates registy and appends all generators/modules
     pub fn new() -> Self {
-        let mut generators: Vec<Box<dyn Generator>> = Vec::new();
+        let mut generators: Vec<Arc<dyn Generator>> = Vec::new();
 
         generators.extend(terminals::get_all());
         generators.extend(prompts::get_all());
@@ -143,6 +143,7 @@ impl GeneratorRegistry {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::commands::HealthStatus;
 
     // Mock generator and trait implementation
     struct MockGenerator {
@@ -175,22 +176,26 @@ mod tests {
         fn build_render_context(&self, _: &Palette) -> tera::Context {
             tera::Context::new()
         }
+
+        fn fix(&self, _: &HealthStatus, _: &Palette, _: &IrisContext) -> anyhow::Result<()> {
+            Ok(())
+        }
     }
 
     // Helper function to setup generator registry with mocks
     fn setup_registry() -> GeneratorRegistry {
         let mut reg = GeneratorRegistry::default();
-        reg.generators.push(Box::new(MockGenerator {
+        reg.generators.push(Arc::new(MockGenerator {
             name: "alacritty",
             g_type: GeneratorType::Terminal,
             installed: true,
         }));
-        reg.generators.push(Box::new(MockGenerator {
+        reg.generators.push(Arc::new(MockGenerator {
             name: "zsh",
             g_type: GeneratorType::Prompt,
             installed: false,
         }));
-        reg.generators.push(Box::new(MockGenerator {
+        reg.generators.push(Arc::new(MockGenerator {
             name: "kitty",
             g_type: GeneratorType::Terminal,
             installed: true,

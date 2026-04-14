@@ -8,7 +8,11 @@ use crate::{
 };
 use anyhow::{Context, Result};
 use colored::Colorize;
-use std::{fs, path::PathBuf, process::Command};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+    process::Command,
+};
 
 /// Config generator for bat
 pub struct BatGenerator;
@@ -45,47 +49,30 @@ impl Generator for BatGenerator {
     }
 
     fn apply(&self, p: &Palette, ctx: &IrisContext) -> Result<()> {
-        let theme_file_name: String = self.target_file_name(&p.name);
-        let cache_theme_path: PathBuf = self.cache_path(ctx, &p.name);
-        let themes_dir: PathBuf = self.resolve_config_directory();
-        let link_path: PathBuf = themes_dir.join(&theme_file_name);
+        ctx.log.info(&format!(
+            "Generating {} theme for {}...",
+            utils::capitalize(&p.name).yellow(),
+            self.name().bold().cyan()
+        ));
 
-        let render_ctx = self.build_render_context(p);
-        let content: String = ctx.templater.render(&self.template_path(), &render_ctx)?;
+        let cache_theme = self.ensure_theme_cache(p, ctx)?;
+        let link_path = self.link_path(&p.name);
 
-        fs::create_dir_all(cache_theme_path.parent().unwrap())?;
-        if !themes_dir.exists() {
-            fs::create_dir_all(&themes_dir)?;
-        }
+        ctx.log.info(&format!(
+            "Linking {} theme to {}...",
+            self.name().bold(),
+            utils::pretty_path(&link_path).magenta(),
+        ));
+        self.ensure_symlink(&cache_theme, &link_path, ctx)?;
 
-        fs::write(&cache_theme_path, content.trim())?;
+        self.ensure_config(p, ctx)?;
+        self.rebuild_bat_cache(ctx)?;
 
-        if link_path.exists() || link_path.is_symlink() {
-            fs::remove_file(&link_path)?;
-        }
-
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::symlink;
-            ctx.log.info(&format!(
-                "Linking {} theme to {}...",
-                self.name().bold(),
-                utils::pretty_path(&cache_theme_path).cyan(),
-            ));
-            symlink(&cache_theme_path, &link_path).with_context(|| {
-                format!("Failed to link {:?} -> {:?}", link_path, cache_theme_path)
-            })?;
-        }
-
-        let bat_config: String = format!(
-            "--theme=\"{name}\"\n--style=\"numbers,changes\"\n--color=\"always\"\n",
-            name = utils::capitalize(&p.name)
-        );
-        fs::write(ctx.paths.cache.join("bat.conf"), bat_config)?;
-
-        ctx.log.info("Rebuilding bat cache...");
-        Command::new("bat").arg("cache").arg("--build").output()?;
-
+        ctx.log.info(&format!(
+            "{} theme applied to {}",
+            utils::capitalize(&p.name).yellow(),
+            self.name().bold().cyan()
+        ));
         Ok(())
     }
 
@@ -159,39 +146,95 @@ impl Generator for BatGenerator {
             let link = self.link_path(theme);
             if !link.exists() {
                 return HealthStatus::Error {
-                    message: "Theme file is not linked to bat themes directory".into(),
+                    message: format!(
+                        "Theme file '{}.tmTheme' is missing in bat themes directory",
+                        theme
+                    ),
                     fix_hint: Some("Run `iris sync` to relink and rebuild cache".into()),
                 };
-            }
-
-            let bat_cache_dir: PathBuf = Command::new("bat")
-                .arg("--cache-dir")
-                .output()
-                .map(|o| PathBuf::from(String::from_utf8_lossy(&o.stdout).trim()))
-                .unwrap_or_default();
-
-            if let (Ok(m_link), Ok(m_cache)) = (fs::metadata(&link), fs::metadata(bat_cache_dir)) {
-                if m_link.modified().unwrap_or(m_cache.modified().unwrap())
-                    > m_cache.modified().unwrap()
-                {
-                    return HealthStatus::Warning(
-                        "Bat cache is older than the theme. Rebuild might be needed.".into(),
-                    );
-                }
             }
         }
 
         HealthStatus::Ok
+    }
+
+    fn fix(&self, status: &HealthStatus, p: &Palette, ctx: &IrisContext) -> Result<()> {
+        match status {
+            HealthStatus::Error { message, .. } => {
+                if message.contains("missing") || message.contains("not linked") {
+                    ctx.log.step("Restoring bat theme symlink...", 2).done(true);
+
+                    let cache = self.cache_path(ctx, &p.name);
+                    let link = self.link_path(&p.name);
+                    self.ensure_symlink(&cache, &link, &ctx.silent())?;
+                }
+
+                self.apply(p, &ctx.silent())
+            }
+            HealthStatus::Warning(msg) if msg.contains("cache is older") => {
+                let mut t = ctx.log.step("Rebuilding bat theme cache...", 2);
+                self.rebuild_bat_cache(ctx)?;
+                t.done(true);
+                Ok(())
+            }
+            _ => {
+                ctx.log
+                    .step("Re-applying bat configuration...", 2)
+                    .done(true);
+                self.apply(p, &ctx.silent())
+            }
+        }
+    }
+}
+
+impl BatGenerator {
+    fn ensure_theme_cache(&self, p: &Palette, ctx: &IrisContext) -> Result<PathBuf> {
+        let cache_path = self.cache_path(ctx, &p.name);
+        let render_ctx = self.build_render_context(p);
+        let content = ctx.templater.render(&self.template_path(), &render_ctx)?;
+
+        fs::create_dir_all(cache_path.parent().unwrap())?;
+        fs::write(&cache_path, content.trim())?;
+        Ok(cache_path)
+    }
+
+    fn ensure_symlink(&self, target: &Path, link: &Path, _ctx: &IrisContext) -> Result<()> {
+        if link.exists() || link.is_symlink() {
+            fs::remove_file(link)?;
+        }
+        fs::create_dir_all(link.parent().unwrap())?;
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::symlink;
+            symlink(target, link)
+                .with_context(|| format!("Failed to create symlink {:?} -> {:?}", target, link))?;
+        }
+        Ok(())
+    }
+
+    fn ensure_config(&self, p: &Palette, ctx: &IrisContext) -> Result<()> {
+        let config = format!(
+            "--theme=\"{name}\"\n--style=\"numbers,changes\"\n--color=\"always\"\n",
+            name = utils::capitalize(&p.name)
+        );
+        fs::write(ctx.paths.cache.join("bat.conf"), config)?;
+        Ok(())
+    }
+
+    fn rebuild_bat_cache(&self, ctx: &IrisContext) -> Result<()> {
+        ctx.log.info("Rebuilding bat cache...");
+        Command::new("bat").arg("cache").arg("--build").output()?;
+        Ok(())
     }
 }
 
 /// Unit-tests for bat generator
 #[cfg(test)]
 mod tests {
-    use std::{thread, time::Duration};
-
     use super::*;
     use crate::test_utils::create_test_context;
+    use std::{thread, time::Duration};
     use temp_env;
     use tempdir::TempDir;
 
@@ -297,45 +340,6 @@ mod tests {
     }
 
     #[test]
-    fn bat_health_warning_stale_cache() {
-        let (tmp_dir, mut ctx) = create_test_context();
-        let generator = BatGenerator;
-        let p = Palette::mock();
-        let root = tmp_dir.path();
-
-        temp_env::with_vars(
-            vec![
-                ("HOME", Some(root.to_str().unwrap())),
-                (
-                    "XDG_CACHE_HOME",
-                    Some(root.join(".cache").to_str().unwrap()),
-                ),
-                (
-                    "BAT_CONFIG_PATH",
-                    Some(ctx.paths.cache.join("bat.conf").to_str().unwrap()),
-                ),
-            ],
-            || {
-                ctx.state.current_theme = p.name.clone();
-                generator.apply(&p, &ctx).unwrap();
-
-                thread::sleep(Duration::from_millis(100));
-
-                let link_path = generator.link_path(&p.name);
-                fs::write(&link_path, "force new mtime content").unwrap();
-
-                let status = generator.health_check(&ctx);
-
-                assert!(
-                    matches!(&status, HealthStatus::Warning(msg) if msg.contains("cache is older")),
-                    "Expected warning about stale cache, got: {:?}",
-                    status
-                );
-            },
-        );
-    }
-
-    #[test]
     fn should_apply_theme_for_bat() {
         if which::which("bat").is_err() {
             return;
@@ -373,6 +377,26 @@ mod tests {
             let xml_content = fs::read_to_string(cache_theme_path).unwrap();
             assert!(xml_content.contains("<plist"));
             assert!(xml_content.contains(&expected_theme_name));
+        });
+    }
+
+    #[test]
+    fn should_fix_missing_link_for_bat() {
+        let (tmp_dir, ctx) = create_test_context();
+        let generator = BatGenerator;
+        let p = Palette::mock();
+        let root = tmp_dir.path();
+
+        temp_env::with_var("HOME", Some(root.to_str().unwrap()), || {
+            generator.apply(&p, &ctx).unwrap();
+            let link = generator.link_path(&p.name);
+            fs::remove_file(&link).unwrap();
+
+            let status = generator.health_check(&ctx);
+            assert!(matches!(status, HealthStatus::Error { .. }));
+
+            generator.fix(&status, &p, &ctx.silent()).unwrap();
+            assert!(link.exists());
         });
     }
 }

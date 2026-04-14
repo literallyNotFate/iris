@@ -1,7 +1,8 @@
 pub mod starship;
 
 use super::Generator;
+use std::sync::Arc;
 
-pub fn get_all() -> Vec<Box<dyn Generator>> {
-    vec![Box::new(starship::StarshipGenerator)]
+pub fn get_all() -> Vec<Arc<dyn Generator>> {
+    vec![Arc::new(starship::StarshipGenerator)]
 }

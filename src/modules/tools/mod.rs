@@ -4,11 +4,12 @@ pub mod rules;
 pub mod yazi;
 
 use super::Generator;
+use std::sync::Arc;
 
-pub fn get_all() -> Vec<Box<dyn Generator>> {
+pub fn get_all() -> Vec<Arc<dyn Generator>> {
     vec![
-        Box::new(bat::BatGenerator),
-        Box::new(yazi::YaziGenerator),
-        Box::new(fzf::FzfGenerator),
+        Arc::new(bat::BatGenerator),
+        Arc::new(yazi::YaziGenerator),
+        Arc::new(fzf::FzfGenerator),
     ]
 }

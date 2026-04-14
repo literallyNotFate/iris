@@ -72,6 +72,9 @@ pub trait Generator: Send + Sync {
         HealthStatus::Ok
     }
 
+    /// Automatically fix detected issues (based on HealthStatus)
+    fn fix(&self, status: &HealthStatus, p: &Palette, ctx: &IrisContext) -> anyhow::Result<()>;
+
     /// Basic template context builder
     /// Basically passes all palette colors to templater
     fn build_render_context(&self, p: &Palette) -> tera::Context;

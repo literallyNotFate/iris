@@ -7,7 +7,10 @@ use crate::{
 };
 use anyhow::{Context, Result};
 use colored::Colorize;
-use std::{fs, path::PathBuf};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+};
 
 /// Config generator for ghostty terminal
 pub struct GhosttyGenerator;
@@ -38,37 +41,27 @@ impl Generator for GhosttyGenerator {
     }
 
     fn apply(&self, p: &Palette, ctx: &IrisContext) -> Result<()> {
-        let theme_name: &String = &p.name;
-        let cache_file: PathBuf = self.cache_path(ctx, theme_name);
-        let ghostty_dir: PathBuf = self.resolve_config_directory();
-        let link_path: PathBuf = self.link_path(theme_name);
+        ctx.log.info(&format!(
+            "Generating {} theme for {}",
+            utils::capitalize(&p.name).yellow(),
+            self.name().bold().cyan(),
+        ));
+        let cache_file: PathBuf = self.ensure_cache_file(p, ctx)?;
+        let link_path: PathBuf = self.link_path(&p.name);
 
-        let render_ctx = self.build_render_context(p);
-        let content: String = ctx.templater.render(&self.template_path(), &render_ctx)?;
+        ctx.log.info(&format!(
+            "Linking {} theme to {}...",
+            self.name().bold(),
+            utils::pretty_path(&link_path).magenta(),
+        ));
 
-        fs::create_dir_all(cache_file.parent().unwrap())?;
-        if !ghostty_dir.exists() {
-            fs::create_dir_all(&ghostty_dir)?;
-        }
+        self.ensure_symlink(&cache_file, &link_path, ctx)?;
 
-        fs::write(&cache_file, content)?;
-
-        if link_path.exists() || link_path.is_symlink() {
-            fs::remove_file(&link_path)?;
-        }
-
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::symlink;
-            ctx.log.info(&format!(
-                "Linking {} theme to {}...",
-                self.name().bold(),
-                utils::pretty_path(&ghostty_dir).cyan()
-            ));
-            symlink(&cache_file, &link_path)
-                .with_context(|| format!("Failed to link {:?} -> {:?}", link_path, cache_file))?;
-        }
-
+        ctx.log.info(&format!(
+            "{} theme applied to {}",
+            utils::capitalize(&p.name).yellow(),
+            self.name().bold().cyan()
+        ));
         Ok(())
     }
 
@@ -126,6 +119,94 @@ impl Generator for GhosttyGenerator {
         }
 
         HealthStatus::Ok
+    }
+
+    fn fix(&self, status: &HealthStatus, p: &Palette, ctx: &IrisContext) -> Result<()> {
+        match status {
+            HealthStatus::Error { message, .. } => {
+                if message.contains("current_theme.conf missing") {
+                    ctx.log
+                        .step(
+                            &format!("Restoring {} theme symlink...", self.name().bold()),
+                            2,
+                        )
+                        .done(true);
+
+                    let cache = self.cache_path(ctx, &p.name);
+                    let link = self.link_path(&p.name);
+                    self.ensure_symlink(&cache, &link, &ctx.silent())?;
+                }
+
+                self.apply(p, &ctx.silent())
+            }
+
+            HealthStatus::Warning(msg) if msg.contains("not imported") => {
+                ctx.log
+                    .step(
+                        &format!(
+                            "Injecting theme import into {} config...",
+                            self.name().bold()
+                        ),
+                        2,
+                    )
+                    .done(true);
+
+                self.inject_import_line()?;
+                Ok(())
+            }
+
+            _ => {
+                ctx.log
+                    .step(
+                        &format!("Refreshing {} configuration...", self.name().bold()),
+                        2,
+                    )
+                    .done(true);
+                self.apply(p, &ctx.silent())
+            }
+        }
+    }
+}
+
+impl GhosttyGenerator {
+    fn ensure_cache_file(&self, p: &Palette, ctx: &IrisContext) -> Result<PathBuf> {
+        let cache_file = self.cache_path(ctx, &p.name);
+        let render_ctx = self.build_render_context(p);
+        let content = ctx.templater.render(&self.template_path(), &render_ctx)?;
+
+        fs::create_dir_all(cache_file.parent().unwrap())?;
+        fs::write(&cache_file, content)?;
+        Ok(cache_file)
+    }
+
+    fn ensure_symlink(&self, target: &Path, link: &Path, _ctx: &IrisContext) -> Result<()> {
+        if link.exists() || link.is_symlink() {
+            fs::remove_file(link)?;
+        }
+        fs::create_dir_all(link.parent().unwrap())?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::symlink;
+            symlink(target, link)
+                .with_context(|| format!("Failed to link {:?} -> {:?}", target, link))?;
+        }
+        Ok(())
+    }
+
+    fn inject_import_line(&self) -> Result<()> {
+        let config_path = self.resolve_config_directory().join("config");
+        let import_line = format!("\nconfig-file = {}\n", self.target_file_name(""));
+
+        if !config_path.exists() {
+            fs::write(&config_path, import_line)?;
+        } else {
+            let mut content = fs::read_to_string(&config_path)?;
+            if !content.contains(&import_line.trim()) {
+                content.push_str(&import_line);
+                fs::write(&config_path, content)?;
+            }
+        }
+        Ok(())
     }
 }
 
@@ -259,5 +340,59 @@ mod tests {
                 assert!(content.contains("palette = 15="));
             },
         );
+    }
+
+    #[test]
+
+    fn should_fix_inject_issue_for_ghostty() {
+        let (tmp_dir, ctx) = create_test_context();
+        let generator = GhosttyGenerator;
+        let p = Palette::mock();
+        let root = tmp_dir.path();
+
+        let ghostty_dir = root.join(".config/ghostty");
+        fs::create_dir_all(&ghostty_dir).unwrap();
+        let config_path = ghostty_dir.join("config");
+        fs::write(&config_path, "font-size = 12\n").unwrap();
+
+        temp_env::with_var("HOME", Some(root.to_str().unwrap()), || {
+            generator.apply(&p, &ctx).unwrap();
+
+            let status = generator.health_check(&ctx);
+            assert!(
+                matches!(status, HealthStatus::Warning(ref msg) if msg.contains("not imported"))
+            );
+
+            generator
+                .fix(&status, &p, &ctx.silent())
+                .expect("Fix failed");
+
+            let content = fs::read_to_string(&config_path).unwrap();
+            assert!(content.contains("config-file = current_theme.conf"));
+            assert!(generator.health_check(&ctx).is_ok());
+        });
+    }
+
+    #[test]
+    fn shoud_fix_broken_link_for_ghostty() {
+        let (tmp_dir, ctx) = create_test_context();
+        let generator = GhosttyGenerator;
+        let p = Palette::mock();
+        let root = tmp_dir.path();
+
+        temp_env::with_var("HOME", Some(root.to_str().unwrap()), || {
+            generator.apply(&p, &ctx).unwrap();
+            let config_path = root.join(".config/ghostty/config");
+            fs::write(config_path, "config-file = current_theme.conf").unwrap();
+
+            let link_path = generator.link_path("");
+            fs::remove_file(&link_path).unwrap();
+
+            let status = generator.health_check(&ctx);
+            assert!(matches!(status, HealthStatus::Error { .. }));
+
+            generator.fix(&status, &p, &ctx.silent()).unwrap();
+            assert!(link_path.exists());
+        });
     }
 }

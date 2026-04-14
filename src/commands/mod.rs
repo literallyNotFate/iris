@@ -19,7 +19,7 @@ pub fn handle(command: Commands, ctx: &mut IrisContext) -> Result<()> {
         Commands::Sync => sync::exec(ctx)?,
         Commands::Status => status::exec(ctx)?,
         Commands::Watch { interval } => watch::exec(interval, ctx)?,
-        Commands::Health => health::exec(ctx)?,
+        Commands::Health { fix } => health::exec(fix, ctx)?,
         Commands::Gen { action } => generators::exec(action, ctx)?,
     }
 

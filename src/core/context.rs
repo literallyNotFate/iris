@@ -4,6 +4,7 @@ use anyhow::{Context as _, Result};
 use std::{fs, path::PathBuf};
 
 /// Application context with state and paths (config/cache/base)
+#[derive(Clone)]
 pub struct IrisContext {
     pub paths: IrisPaths,
     pub state: State,
@@ -35,6 +36,17 @@ impl IrisContext {
             templater: Templater::new(user_templates),
         };
         Ok(ctx)
+    }
+
+    /// Make context copy with quiet mode in logger
+    pub fn silent(&self) -> Self {
+        Self {
+            log: self.log.as_quiet(),
+            paths: self.paths.clone(),
+            state: self.state.clone(),
+            registry: self.registry.clone(),
+            templater: self.templater.clone(),
+        }
     }
 
     /// Switch to specifc theme
