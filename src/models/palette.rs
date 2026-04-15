@@ -1,8 +1,9 @@
-use crate::ui::Logger;
+use crate::{ui::Logger, utils};
 use anyhow::{Context, Result};
 use colored::Colorize;
 use serde::{Deserialize, Serialize};
 use std::{
+    fs,
     path::PathBuf,
     process::{Command, Output},
 };
@@ -55,7 +56,26 @@ impl Palette {
 
     /// Fetch palette from nvim using lua script
     pub fn fetch(theme: &str, log: &Logger) -> Result<Self> {
-        log.info("Loading Neovim runtime and lazy.nvim plugins...");
+        let theme_lower: String = theme.to_lowercase();
+        let cache_dir: PathBuf = dirs::home_dir()
+            .context("Home dir not found")?
+            .join(".cache/iris/palettes");
+
+        let cache_path: PathBuf = cache_dir.join(format!("{}.json", theme_lower));
+
+        if cache_path.exists() {
+            if let Ok(content) = fs::read_to_string(&cache_path) {
+                if let Ok(cached) = serde_json::from_str::<Self>(&content) {
+                    log.info(&format!(
+                        "Using cached palette for {}...",
+                        theme.yellow().bold()
+                    ));
+                    return Ok(cached);
+                }
+            }
+        }
+
+        log.info("Cache miss. Loading Neovim runtime and lazy.nvim plugins...");
         let args: Vec<String> = Self::build_fetch_args(theme);
 
         log.info("Executing Lua bridge in headless mode...");
@@ -73,11 +93,29 @@ impl Palette {
         let mut palette: Palette = Self::parse_nvim_json(&stdout)?;
         palette.name = theme.to_string();
 
+        if let Err(e) = Self::save_to_cache(&cache_path, &palette) {
+            log.warn(&format!("Failed to cache palette: {}", e), 1);
+        }
+
         Ok(palette)
     }
 
     /// Checks whether this theme exists in nvim colorscheme
     pub fn exists(theme: &str, log: &Logger) -> bool {
+        let theme_lower: String = theme.to_lowercase();
+        let home: PathBuf = dirs::home_dir().expect("Home dir not found");
+        let cache_path: PathBuf = home
+            .join(".cache/iris/palettes")
+            .join(format!("{}.json", theme_lower));
+
+        if cache_path.exists() {
+            println!(
+                "   {} found in cache!",
+                utils::capitalize(&theme_lower).yellow().bold()
+            );
+            return true;
+        }
+
         if which::which("nvim").is_err() {
             log.warn("Neovim not found. Skipping theme verification.", 0);
             return false;
@@ -89,12 +127,11 @@ impl Palette {
         );
 
         let args: Vec<String> = Self::build_exists_args(theme);
-        let output = Command::new("nvim").args(&args).output();
-
-        let success: bool = match output {
-            Ok(o) => o.status.success(),
-            Err(_) => false,
-        };
+        let success: bool = Command::new("nvim")
+            .args(&args)
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false);
 
         if success {
             check_task.done(true);
@@ -103,6 +140,21 @@ impl Palette {
         }
 
         success
+    }
+
+    /// Helper function to save palette to cache
+    pub fn save_to_cache(path: &PathBuf, palette: &Palette) -> Result<()> {
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)
+                .with_context(|| format!("Failed to create cache directory: {:?}", parent))?;
+        }
+
+        let json: String =
+            serde_json::to_string_pretty(palette).context("Failed to serialize palette to JSON")?;
+
+        fs::write(path, json)
+            .with_context(|| format!("Failed to write palette cache to {:?}", path))?;
+        Ok(())
     }
 
     /// Helper function to read theme from given path (easy to test)
@@ -270,6 +322,49 @@ mod tests {
         let palette: Palette = serde_json::from_str(json).unwrap();
         assert_eq!(palette.bg, "#1e1e2e");
         assert_eq!(palette.ansi.len(), 16);
+    }
+
+    #[test]
+    fn should_save_and_load_cache() {
+        let temp_dir: TempDir = TempDir::new("iris_cache").unwrap();
+        let palette_dir: PathBuf = temp_dir.path().join("core/palettes");
+        let cache_path: PathBuf = palette_dir.join("catppuccin.json");
+
+        let palette = Palette {
+            name: "Catppuccin".to_string(),
+            bg: "#1e1e2e".to_string(),
+            fg: "#cdd6f4".to_string(),
+            ..serde_json::from_str(
+                r##"{
+                    "bg":"#1e1e2e",
+                    "fg":"#cdd6f4",
+                    "caret":"",
+                    "line_hl":""
+                    ,"sel":"",
+                    "gutter_fg":"",
+                    "comment":"",
+                    "variable":"",
+                    "constant":"",
+                    "number":"",
+                    "string":"",
+                    "keyword":"",
+                    "operator":"",
+                    "func":"",
+                    "type_name":"",
+                    "tag":"",
+                    "attribute":"",
+                    "white":"",
+                    "ansi":[]}"##,
+            )
+            .unwrap()
+        };
+
+        Palette::save_to_cache(&cache_path, &palette).expect("Should save cache");
+        assert!(cache_path.exists());
+
+        let content = fs::read_to_string(&cache_path).unwrap();
+        let loaded: Palette = serde_json::from_str(&content).unwrap();
+        assert_eq!(loaded.name, "Catppuccin");
     }
 
     #[test]

@@ -27,8 +27,8 @@ pub fn exec(name: String, ctx: &mut IrisContext) -> anyhow::Result<()> {
 
         if !ctx.log.quiet {
             println!(
-                "{} Run `:colorscheme <Tab>` in Neovim to see all available themes.",
-                "󰋗 Tip:".blue()
+                "{}  Run `:colorscheme <Tab>` in Neovim to see all available themes.",
+                "󰋗".blue()
             );
         }
         return Ok(());

@@ -1,4 +1,4 @@
-use crate::{cli::Commands, core::IrisContext};
+use crate::{cli::Commands, core::IrisContext, utils};
 use anyhow::{Context, Result};
 
 pub mod apply;
@@ -35,9 +35,9 @@ use colored::Colorize;
 pub(crate) fn apply_theme(theme: &str, ctx: &mut IrisContext) -> Result<()> {
     if !ctx.log.quiet {
         println!(
-            "\n {} {}",
+            "\n {}  {}",
             "󰚔".green().bold(),
-            format!("Applying {}...", theme).bold()
+            format!("Applying {}...", utils::capitalize(theme)).bold()
         );
         println!();
     }

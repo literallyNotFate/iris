@@ -111,7 +111,7 @@ impl GeneratorRegistry {
         }
 
         if !ctx.log.quiet {
-            println!("\n {} {}", "󰚗".magenta(), "Updating targets...".bold());
+            println!("\n {}  {}\n", "󰚗".magenta(), "Updating targets...".bold());
         }
 
         let total = to_apply.len();
