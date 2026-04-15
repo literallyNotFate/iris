@@ -25,7 +25,7 @@ impl Generator for FzfGenerator {
     }
 
     fn cache_path(&self, ctx: &IrisContext, _theme_name: &str) -> PathBuf {
-        ctx.paths.cache.join(self.target_file_name(""))
+        ctx.paths.bin.join(self.target_file_name(""))
     }
 
     fn link_path(&self, _theme_name: &str) -> PathBuf {
@@ -160,8 +160,7 @@ impl FzfGenerator {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_utils::create_test_context;
-    use std::fs;
+    use crate::core::tests::create_test_context;
     use tempdir::TempDir;
 
     #[test]
@@ -266,7 +265,7 @@ mod tests {
             result.err()
         );
 
-        let cache_file = ctx.paths.cache.join("fzf.sh");
+        let cache_file = ctx.paths.bin.join("fzf.sh");
         assert!(cache_file.exists(), "Cache file fzf.sh was not created");
 
         let content = fs::read_to_string(cache_file).unwrap();

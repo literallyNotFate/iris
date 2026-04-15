@@ -28,18 +28,6 @@ impl Generator for TmuxGenerator {
         format!("{}.conf", theme)
     }
 
-    fn cache_path(&self, ctx: &IrisContext, theme_name: &str) -> PathBuf {
-        ctx.paths
-            .cache
-            .join("tmux_themes")
-            .join(self.target_file_name(theme_name))
-    }
-
-    fn link_path(&self, theme_name: &str) -> PathBuf {
-        self.resolve_config_directory()
-            .join(self.target_file_name(theme_name))
-    }
-
     fn resolve_config_directory(&self) -> PathBuf {
         dirs::home_dir()
             .map(|p| p.join(".config").join("tmux").join("themes"))
@@ -262,7 +250,7 @@ impl TmuxGenerator {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_utils::create_test_context;
+    use crate::core::tests::create_test_context;
     use tempdir::TempDir;
 
     // Helper function to get tmux conf just like in generator

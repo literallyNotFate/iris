@@ -40,7 +40,7 @@ impl Palette {
     /// Uses logger for warnings and errors output
     pub fn current(log: &Logger) -> Result<String> {
         let home: PathBuf = dirs::home_dir().context("Home dir not found")?;
-        let path: PathBuf = home.join(".cache/iris/current_theme");
+        let path: PathBuf = home.join(".cache/iris/core/current_theme");
 
         match Self::read_theme_from_path(&path) {
             Ok(theme) => Ok(theme),
@@ -59,7 +59,7 @@ impl Palette {
         let theme_lower: String = theme.to_lowercase();
         let cache_dir: PathBuf = dirs::home_dir()
             .context("Home dir not found")?
-            .join(".cache/iris/palettes");
+            .join(".cache/iris/core/palettes");
 
         let cache_path: PathBuf = cache_dir.join(format!("{}.json", theme_lower));
 
@@ -105,7 +105,7 @@ impl Palette {
         let theme_lower: String = theme.to_lowercase();
         let home: PathBuf = dirs::home_dir().expect("Home dir not found");
         let cache_path: PathBuf = home
-            .join(".cache/iris/palettes")
+            .join(".cache/iris/core/palettes")
             .join(format!("{}.json", theme_lower));
 
         if cache_path.exists() {
@@ -286,13 +286,39 @@ impl Palette {
         io.write(vim.fn.json_encode(res))
         "##
     }
+
+    #[cfg(test)]
+    /// Function to create palette mock
+    pub fn mock() -> Self {
+        Self {
+            name: "test-theme".into(),
+            bg: "#1a1b26".into(),
+            fg: "#c0caf5".into(),
+            caret: "#c0caf5".into(),
+            line_hl: "#292e42".into(),
+            sel: "#334455".into(),
+            gutter_fg: "#3b4261".into(),
+            comment: "#565f89".into(),
+            variable: "#bb9af7".into(),
+            constant: "#ff9e64".into(),
+            number: "#ff9e64".into(),
+            string: "#9ece6a".into(),
+            keyword: "#7aa2f7".into(),
+            operator: "#89ddff".into(),
+            func: "#7ad6ff".into(),
+            type_name: "#2ac3de".into(),
+            tag: "#f7768e".into(),
+            attribute: "#e0af68".into(),
+            white: "#ffffff".into(),
+            ansi: (0..16).map(|_| "#ffffff".to_string()).collect(),
+        }
+    }
 }
 
 /// Unit-tests for palette operation
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::fs;
     use tempdir::TempDir;
 
     #[test]

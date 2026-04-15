@@ -1,6 +1,6 @@
 use anyhow::{Result, anyhow};
 use include_dir::{Dir, include_dir};
-use std::path::PathBuf;
+use std::{ffi, fs, path::PathBuf};
 use tera::{Context, Tera};
 
 static TEMPLATES_DIR: Dir = include_dir!("$CARGO_MANIFEST_DIR/templates");
@@ -23,7 +23,7 @@ impl Templater {
                 match entry {
                     include_dir::DirEntry::Dir(d) => stack.push(d),
                     include_dir::DirEntry::File(f) => {
-                        if f.path().extension() == Some(std::ffi::OsStr::new("hbs")) {
+                        if f.path().extension() == Some(ffi::OsStr::new("hbs")) {
                             let id = f
                                 .path()
                                 .with_extension("")
@@ -58,7 +58,7 @@ impl Templater {
 
     /// Load all external templates recursively
     fn load_external_recursive(tera: &mut Tera, base: &PathBuf, current: &PathBuf) {
-        let Ok(entries) = std::fs::read_dir(current) else {
+        let Ok(entries) = fs::read_dir(current) else {
             return;
         };
 
@@ -66,8 +66,8 @@ impl Templater {
             let path = entry.path();
             if path.is_dir() {
                 Self::load_external_recursive(tera, base, &path);
-            } else if path.extension() == Some(std::ffi::OsStr::new("hbs")) {
-                if let Ok(content) = std::fs::read_to_string(&path) {
+            } else if path.extension() == Some(ffi::OsStr::new("hbs")) {
+                if let Ok(content) = fs::read_to_string(&path) {
                     if let Ok(rel) = path.strip_prefix(base) {
                         let id = rel.with_extension("").to_string_lossy().replace('\\', "/");
 
@@ -83,7 +83,6 @@ impl Templater {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::fs;
     use tempdir::TempDir;
     use tera::Context;
 

@@ -13,6 +13,3 @@ pub mod utils;
 #[cfg(test)]
 #[macro_use]
 extern crate pretty_assertions;
-
-#[cfg(test)]
-pub mod test_utils;

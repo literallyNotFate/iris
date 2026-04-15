@@ -28,12 +28,12 @@ impl Generator for StarshipGenerator {
     }
 
     fn link_path(&self, _theme_name: &str) -> PathBuf {
-        std::env::var("STARSHIP_CONFIG")
-            .map(PathBuf::from)
-            .unwrap_or_else(|_| {
-                self.resolve_config_directory()
-                    .join(self.target_file_name(""))
-            })
+        if let Some(env_path) = self.env_config_directory() {
+            return env_path;
+        }
+
+        self.resolve_config_directory()
+            .join(self.target_file_name(""))
     }
 
     fn env_config_directory(&self) -> Option<PathBuf> {
@@ -191,7 +191,7 @@ impl StarshipGenerator {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_utils::create_test_context;
+    use crate::core::tests::create_test_context;
 
     #[test]
     fn should_return_starship_metadata() {

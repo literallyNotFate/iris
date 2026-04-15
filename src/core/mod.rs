@@ -3,6 +3,9 @@ pub mod paths;
 pub mod setup;
 pub mod templater;
 
+#[cfg(test)]
+pub mod tests;
+
 pub use context::IrisContext;
 pub use paths::IrisPaths;
 pub use setup::IrisSetup;

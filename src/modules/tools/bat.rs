@@ -9,7 +9,7 @@ use crate::{
 use anyhow::{Context, Result};
 use colored::Colorize;
 use std::{
-    fs,
+    env, fs,
     path::{Path, PathBuf},
     process::Command,
 };
@@ -28,18 +28,6 @@ impl Generator for BatGenerator {
 
     fn target_file_name(&self, theme: &str) -> String {
         format!("{}.tmTheme", theme)
-    }
-
-    fn cache_path(&self, ctx: &IrisContext, theme_name: &str) -> PathBuf {
-        ctx.paths
-            .cache
-            .join("bat_themes")
-            .join(self.target_file_name(theme_name))
-    }
-
-    fn link_path(&self, theme_name: &str) -> PathBuf {
-        self.resolve_config_directory()
-            .join(self.target_file_name(theme_name))
     }
 
     fn resolve_config_directory(&self) -> PathBuf {
@@ -127,14 +115,14 @@ impl Generator for BatGenerator {
             return HealthStatus::Warning("bat binary not found".into());
         }
 
-        let expected_env: PathBuf = ctx.paths.cache.join("bat.conf");
-        let current_env: String = std::env::var("BAT_CONFIG_PATH").unwrap_or_default();
+        let expected_env: PathBuf = ctx.paths.generators.join(self.name()).join("bat.conf");
+        let current_env: String = env::var("BAT_CONFIG_PATH").unwrap_or_default();
 
         if current_env != expected_env.to_string_lossy() {
             return HealthStatus::Error {
                 message: "BAT_CONFIG_PATH is not set correctly".into(),
                 fix_hint: Some(format!(
-                    "Add 'export BAT_CONFIG_PATH=\"{}\"' to shell config",
+                    "Add 'export BAT_CONFIG_PATH=\"{}\"' to your shell config",
                     expected_env.display()
                 )),
             };
@@ -214,11 +202,18 @@ impl BatGenerator {
     }
 
     fn ensure_config(&self, p: &Palette, ctx: &IrisContext) -> Result<()> {
-        let config = format!(
+        let theme_name = utils::capitalize(&p.name);
+
+        let config_content = format!(
             "--theme=\"{name}\"\n--style=\"numbers,changes\"\n--color=\"always\"\n",
-            name = utils::capitalize(&p.name)
+            name = theme_name
         );
-        fs::write(ctx.paths.cache.join("bat.conf"), config)?;
+
+        let generator_dir: PathBuf = ctx.paths.generators.join(self.name());
+        let config_path: PathBuf = generator_dir.join("bat.conf");
+
+        fs::create_dir_all(&generator_dir)?;
+        fs::write(config_path, config_content)?;
         Ok(())
     }
 
@@ -233,7 +228,7 @@ impl BatGenerator {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_utils::create_test_context;
+    use crate::core::tests::create_test_context;
     use std::{thread, time::Duration};
     use temp_env;
     use tempdir::TempDir;
@@ -284,8 +279,8 @@ mod tests {
         let p = Palette::mock();
         let root = tmp_dir.path();
 
-        let bat_conf_path = ctx.paths.cache.join("bat.conf");
-        let bat_cache_dir = root.join(".cache/bat");
+        let bat_conf_path = ctx.paths.generators.join("bat").join("bat.conf");
+        let bat_cache_dir = root.join(".cache/generators/bat");
         let themes_bin = bat_cache_dir.join("themes.bin");
 
         temp_env::with_vars(
@@ -357,8 +352,8 @@ mod tests {
             assert!(result.is_ok(), "Apply failed: {:?}", result.err());
 
             let cache_theme_path: PathBuf =
-                ctx.paths.cache.join("bat_themes").join(&expected_file_name);
-            let bat_conf_path: PathBuf = ctx.paths.cache.join("bat.conf");
+                ctx.paths.generators.join("bat").join(&expected_file_name);
+            let bat_conf_path: PathBuf = ctx.paths.generators.join("bat").join("bat.conf");
 
             assert!(
                 cache_theme_path.exists(),

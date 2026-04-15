@@ -20,8 +20,8 @@ impl IrisContext {
         let paths = IrisPaths::new()?;
         let user_templates: Option<PathBuf> = Some(paths.config.join("templates"));
 
-        let state = if paths.state_file.exists() {
-            let content = std::fs::read_to_string(&paths.state_file)
+        let state: State = if paths.state_file.exists() {
+            let content: String = fs::read_to_string(&paths.state_file)
                 .with_context(|| format!("Failed to read state at {:?}", &paths.state_file))?;
             serde_json::from_str(&content).with_context(|| "Failed to parse state.json")?
         } else {
@@ -55,7 +55,7 @@ impl IrisContext {
         self.paths.ensure_dirs()?;
 
         let json: String = self.state.to_json()?;
-        std::fs::write(&self.paths.state_file, json)
+        fs::write(&self.paths.state_file, json)
             .with_context(|| format!("Failed to save state to {:?}", self.paths.state_file))?;
 
         fs::write(&self.paths.current_theme, name).with_context(|| {
@@ -79,7 +79,7 @@ impl IrisContext {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_utils::create_test_context;
+    use crate::core::tests::create_test_context;
 
     #[test]
     fn should_handle_context_update_theme_persistence() {

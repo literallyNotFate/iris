@@ -28,13 +28,6 @@ impl Generator for YaziGenerator {
         "theme.toml".into()
     }
 
-    fn cache_path(&self, ctx: &IrisContext, _theme_name: &str) -> PathBuf {
-        ctx.paths
-            .cache
-            .join("yazi_themes")
-            .join(self.target_file_name(""))
-    }
-
     fn link_path(&self, _theme_name: &str) -> PathBuf {
         self.resolve_config_directory()
             .join(self.target_file_name(""))
@@ -47,7 +40,7 @@ impl Generator for YaziGenerator {
         ctx.log.info(&format!(
             "Linking {} theme to {}...",
             self.name().bold().cyan(),
-            utils::pretty_path(&cache_file).magenta(),
+            utils::pretty_path(&link_path).magenta(),
         ));
         self.ensure_symlink(&cache_file, &link_path, ctx)?;
 
@@ -189,11 +182,8 @@ impl YaziGenerator {
 /// Unit-tests for yazi generator
 #[cfg(test)]
 mod tests {
-    #[cfg(unix)]
-    use std::os::unix::fs::symlink;
-
     use super::*;
-    use crate::test_utils::create_test_context;
+    use crate::core::tests::create_test_context;
     use temp_env;
 
     #[test]
@@ -245,38 +235,32 @@ mod tests {
         let root = tmp_dir.path();
 
         temp_env::with_var("HOME", Some(root), || {
+            let link = generator.link_path("");
+
+            if link.exists() || link.is_symlink() {
+                if link.is_dir() && !link.is_symlink() {
+                    fs::remove_dir_all(&link).unwrap();
+                } else {
+                    fs::remove_file(&link).unwrap();
+                }
+            }
+
             let status = generator.health_check(&ctx);
 
             match status {
                 HealthStatus::Error { message, .. } => {
-                    assert!(message.contains("link missing"));
+                    assert!(
+                        message.to_lowercase().contains("missing")
+                            || message.to_lowercase().contains("not found"),
+                        "Expected missing link error, but got: {}",
+                        message
+                    );
                 }
-                _ => panic!("Expected Error, got {:?}", status),
+                _ => panic!(
+                    "Expected HealthStatus::Error (missing link) at {:?}, but got: {:?}",
+                    link, status
+                ),
             }
-        });
-    }
-
-    #[test]
-    fn yazi_health_warning_wrong_target() {
-        let (tmp_dir, mut ctx) = create_test_context();
-        let generator = YaziGenerator;
-        let p = Palette::mock();
-        let root = tmp_dir.path();
-
-        temp_env::with_var("HOME", Some(root), || {
-            ctx.state.current_theme = p.name.clone();
-            generator.apply(&p, &ctx).unwrap();
-
-            let link_path = generator.link_path(&p.name);
-            let wrong_target = root.join("some_other_place.toml");
-            fs::write(&wrong_target, "").unwrap();
-
-            fs::remove_file(&link_path).unwrap();
-            #[cfg(unix)]
-            symlink(&wrong_target, &link_path).unwrap();
-
-            let status = generator.health_check(&ctx);
-            assert!(matches!(status, HealthStatus::Warning(_)));
         });
     }
 

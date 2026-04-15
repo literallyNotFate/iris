@@ -4,6 +4,7 @@ use colored::Colorize;
 use std::{
     fs::{self, OpenOptions},
     io::Write,
+    path::PathBuf,
 };
 
 /// Struct for initializing state of application
@@ -82,8 +83,8 @@ impl IrisSetup {
     }
 
     pub fn setup_zsh_hook(ctx: &IrisContext, task: &Task) -> Result<()> {
-        let home = dirs::home_dir().context("Home dir not found")?;
-        let zshrc = home.join(".zshrc");
+        let home: PathBuf = dirs::home_dir().context("Home dir not found")?;
+        let zshrc: PathBuf = home.join(".zshrc");
 
         if !zshrc.exists() {
             ctx.log
@@ -136,8 +137,7 @@ add-zsh-hook precmd _iris_fzf_sync
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_utils::create_test_context;
-    use std::{fs, path::PathBuf};
+    use crate::core::tests::create_test_context;
     use temp_env;
 
     #[test]

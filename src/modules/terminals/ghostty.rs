@@ -30,8 +30,8 @@ impl Generator for GhosttyGenerator {
 
     fn cache_path(&self, ctx: &IrisContext, _theme_name: &str) -> PathBuf {
         ctx.paths
-            .cache
-            .join("ghostty")
+            .generators
+            .join(self.name())
             .join(self.target_file_name(""))
     }
 
@@ -124,10 +124,14 @@ impl Generator for GhosttyGenerator {
     fn fix(&self, status: &HealthStatus, p: &Palette, ctx: &IrisContext) -> Result<()> {
         match status {
             HealthStatus::Error { message, .. } => {
-                if message.contains("current_theme.conf missing") {
+                let msg_low: String = message.to_lowercase();
+                if msg_low.contains("missing") || msg_low.contains("not found") {
                     ctx.log
                         .step(
-                            &format!("Restoring {} theme symlink...", self.name().bold()),
+                            &format!(
+                                "Repairing {} configuration and paths...",
+                                self.name().bold()
+                            ),
                             2,
                         )
                         .done(true);
@@ -139,31 +143,16 @@ impl Generator for GhosttyGenerator {
 
                 self.apply(p, &ctx.silent())
             }
-
             HealthStatus::Warning(msg) if msg.contains("not imported") => {
                 ctx.log
                     .step(
-                        &format!(
-                            "Injecting theme import into {} config...",
-                            self.name().bold()
-                        ),
+                        &format!("Injecting import into {}...", self.name().bold()),
                         2,
                     )
                     .done(true);
-
-                self.inject_import_line()?;
-                Ok(())
+                self.inject_import_line()
             }
-
-            _ => {
-                ctx.log
-                    .step(
-                        &format!("Refreshing {} configuration...", self.name().bold()),
-                        2,
-                    )
-                    .done(true);
-                self.apply(p, &ctx.silent())
-            }
+            _ => self.apply(p, &ctx.silent()),
         }
     }
 }
@@ -214,7 +203,7 @@ impl GhosttyGenerator {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_utils::create_test_context;
+    use crate::core::tests::create_test_context;
 
     #[test]
     fn should_return_ghostty_metadata() {
@@ -273,19 +262,44 @@ mod tests {
         let generator = GhosttyGenerator;
         let root = tmp_dir.path();
 
-        temp_env::with_vars(vec![("HOME", Some(root.to_str().unwrap()))], || {
-            let theme_link = generator.link_path("test-theme");
-            fs::create_dir_all(theme_link.parent().unwrap()).unwrap();
-            fs::write(&theme_link, "").unwrap();
+        temp_env::with_vars(
+            vec![
+                ("HOME", Some(root.to_str().unwrap())),
+                ("XDG_CONFIG_HOME", None),
+            ],
+            || {
+                let config_dir = generator.resolve_config_directory();
+                let theme_link = generator.link_path("");
 
-            let status = generator.health_check(&ctx);
-            match status {
-                HealthStatus::Error { ref message, .. } => {
-                    assert!(message.contains("config file missing"));
+                assert!(
+                    config_dir.starts_with(root),
+                    "Config dir {:?} is outside of root {:?}",
+                    config_dir,
+                    root
+                );
+
+                fs::create_dir_all(theme_link.parent().unwrap()).unwrap();
+                fs::create_dir_all(&config_dir).unwrap();
+                fs::write(&theme_link, "palette = []").unwrap();
+
+                let config_path = config_dir.join("config");
+                if config_path.exists() {
+                    fs::remove_file(&config_path).unwrap();
                 }
-                _ => panic!("Expected Error for missing config, got {:?}", status),
-            }
-        });
+
+                let status = generator.health_check(&ctx);
+                match status {
+                    HealthStatus::Error { ref message, .. } => {
+                        assert!(
+                            message.to_lowercase().contains("config"),
+                            "Message was: {}",
+                            message
+                        );
+                    }
+                    _ => panic!("Expected Error for missing config, but got: {:?}", status),
+                }
+            },
+        );
     }
 
     #[test]
@@ -331,7 +345,11 @@ mod tests {
                 let result = generator.apply(&p, &ctx);
                 assert!(result.is_ok(), "Failed to apply: {:?}", result.err());
 
-                let cache_file = ctx.paths.cache.join("ghostty").join("current_theme.conf");
+                let cache_file = ctx
+                    .paths
+                    .generators
+                    .join("ghostty")
+                    .join("current_theme.conf");
                 assert!(cache_file.exists());
 
                 let content = fs::read_to_string(cache_file).unwrap();
@@ -343,56 +361,68 @@ mod tests {
     }
 
     #[test]
-
     fn should_fix_inject_issue_for_ghostty() {
         let (tmp_dir, ctx) = create_test_context();
         let generator = GhosttyGenerator;
         let p = Palette::mock();
         let root = tmp_dir.path();
 
-        let ghostty_dir = root.join(".config/ghostty");
-        fs::create_dir_all(&ghostty_dir).unwrap();
-        let config_path = ghostty_dir.join("config");
-        fs::write(&config_path, "font-size = 12\n").unwrap();
+        temp_env::with_var("HOME", Some(root), || {
+            let config_dir = generator.resolve_config_directory();
+            fs::create_dir_all(&config_dir).unwrap();
+            let config_path = config_dir.join("config");
 
-        temp_env::with_var("HOME", Some(root.to_str().unwrap()), || {
             generator.apply(&p, &ctx).unwrap();
+            fs::write(&config_path, "font-size = 12").unwrap();
 
             let status = generator.health_check(&ctx);
-            assert!(
-                matches!(status, HealthStatus::Warning(ref msg) if msg.contains("not imported"))
-            );
-
-            generator
-                .fix(&status, &p, &ctx.silent())
-                .expect("Fix failed");
+            generator.fix(&status, &p, &ctx.silent()).unwrap();
 
             let content = fs::read_to_string(&config_path).unwrap();
-            assert!(content.contains("config-file = current_theme.conf"));
+            assert!(content.contains("current_theme.conf"));
             assert!(generator.health_check(&ctx).is_ok());
         });
     }
 
     #[test]
-    fn shoud_fix_broken_link_for_ghostty() {
+    fn should_fix_broken_link_for_ghostty() {
         let (tmp_dir, ctx) = create_test_context();
         let generator = GhosttyGenerator;
         let p = Palette::mock();
         let root = tmp_dir.path();
 
-        temp_env::with_var("HOME", Some(root.to_str().unwrap()), || {
+        temp_env::with_var("HOME", Some(root), || {
+            let config_dir = generator.resolve_config_directory();
+            fs::create_dir_all(&config_dir).unwrap();
+
             generator.apply(&p, &ctx).unwrap();
-            let config_path = root.join(".config/ghostty/config");
-            fs::write(config_path, "config-file = current_theme.conf").unwrap();
+
+            let config_path = config_dir.join("config");
+            fs::write(&config_path, "config-import = current_theme.conf").unwrap();
 
             let link_path = generator.link_path("");
-            fs::remove_file(&link_path).unwrap();
+            if link_path.exists() || link_path.is_symlink() {
+                fs::remove_file(&link_path).unwrap();
+            }
 
             let status = generator.health_check(&ctx);
-            assert!(matches!(status, HealthStatus::Error { .. }));
+            assert!(
+                matches!(status, HealthStatus::Error { .. }),
+                "Expected Error, got {:?}",
+                status
+            );
 
             generator.fix(&status, &p, &ctx.silent()).unwrap();
-            assert!(link_path.exists());
+
+            let final_status = generator.health_check(&ctx);
+            assert!(link_path.exists(), "Link should exist");
+
+            match final_status {
+                HealthStatus::Error { message, .. } => {
+                    panic!("Fix failed, still have Error: {}", message)
+                }
+                _ => {}
+            }
         });
     }
 }

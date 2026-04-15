@@ -13,10 +13,10 @@ pub trait Generator: Send + Sync {
     fn target_file_name(&self, theme: &str) -> String;
 
     /// Generator path in cache.
-    /// By default: ~/.cache/iris/[name]/[target_file]
+    /// By default: ~/.cache/iris/gen/[name]/[target_file]
     fn cache_path(&self, ctx: &IrisContext, theme_name: &str) -> PathBuf {
         ctx.paths
-            .cache
+            .generators
             .join(self.name())
             .join(self.target_file_name(theme_name))
     }
@@ -52,13 +52,15 @@ pub trait Generator: Send + Sync {
             return p;
         }
 
-        if let Some(home) = dirs::home_dir() {
-            let config_path = home.join(".config").join(self.name());
-            return config_path;
-        }
+        let home: PathBuf = env::var("HOME")
+            .map(PathBuf::from)
+            .unwrap_or_else(|_| dirs::home_dir().unwrap_or_else(|| PathBuf::from(".")));
 
-        let home = env::var("HOME").unwrap_or_else(|_| ".".into());
-        PathBuf::from(home).join(".config").join(self.name())
+        let config_base: PathBuf = env::var("XDG_CONFIG_HOME")
+            .map(PathBuf::from)
+            .unwrap_or_else(|_| home.join(".config"));
+
+        config_base.join(self.name())
     }
 
     /// Allows module to pass environment value path of the config (e.g STARSHIP_CONFIG)

@@ -28,18 +28,6 @@ impl Generator for BtopGenerator {
         format!("{}.theme", theme)
     }
 
-    fn cache_path(&self, ctx: &IrisContext, theme_name: &str) -> PathBuf {
-        ctx.paths
-            .cache
-            .join("btop_themes")
-            .join(self.target_file_name(theme_name))
-    }
-
-    fn link_path(&self, theme_name: &str) -> PathBuf {
-        self.resolve_config_directory()
-            .join(self.target_file_name(theme_name))
-    }
-
     fn resolve_config_directory(&self) -> PathBuf {
         dirs::home_dir()
             .map(|p| p.join(".config").join("btop").join("themes"))
@@ -254,7 +242,7 @@ impl BtopGenerator {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_utils::create_test_context;
+    use crate::core::tests::create_test_context;
     use tempdir::TempDir;
 
     #[test]
@@ -431,7 +419,7 @@ mod tests {
                 let result = generator.apply(&p, &ctx);
                 assert!(result.is_ok());
 
-                let cache_file = ctx.paths.cache.join("btop_themes").join("test-theme.theme");
+                let cache_file = ctx.paths.generators.join("btop").join("test-theme.theme");
                 assert!(cache_file.exists());
 
                 let updated_content = fs::read_to_string(&btop_conf).unwrap();
