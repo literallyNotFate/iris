@@ -1,5 +1,5 @@
 use crate::{commands::HealthStatus, core::IrisContext, models::Palette, modules::GeneratorType};
-use std::{env, path::PathBuf};
+use std::path::PathBuf;
 
 /// Main trait for all generators
 pub trait Generator: Send + Sync {
@@ -23,8 +23,8 @@ pub trait Generator: Send + Sync {
 
     /// Path, where app expects to apply config/theme
     /// By default: ~/.config/[name]/[target_file]
-    fn link_path(&self, theme_name: &str) -> PathBuf {
-        self.resolve_config_directory()
+    fn link_path(&self, ctx: &IrisContext, theme_name: &str) -> PathBuf {
+        self.resolve_config_directory(ctx)
             .join(self.target_file_name(theme_name))
     }
 
@@ -43,22 +43,21 @@ pub trait Generator: Send + Sync {
     fn apply(&self, p: &Palette, ctx: &IrisContext) -> anyhow::Result<()>;
 
     /// Automatic config directory resolver
-    fn resolve_config_directory(&self) -> PathBuf {
+    fn resolve_config_directory(&self, ctx: &IrisContext) -> PathBuf {
         if let Some(p) = self.env_config_directory() {
-            if p.is_file() {
-                return p.parent().unwrap_or(&p).to_path_buf();
-            }
-
-            return p;
+            return if p.is_file() {
+                p.parent().unwrap_or(&p).to_path_buf()
+            } else {
+                p
+            };
         }
 
-        let home: PathBuf = env::var("HOME")
-            .map(PathBuf::from)
-            .unwrap_or_else(|_| dirs::home_dir().unwrap_or_else(|| PathBuf::from(".")));
-
-        let config_base: PathBuf = env::var("XDG_CONFIG_HOME")
-            .map(PathBuf::from)
-            .unwrap_or_else(|_| home.join(".config"));
+        let config_base: PathBuf = ctx
+            .paths
+            .config
+            .parent()
+            .map(|p| p.to_path_buf())
+            .unwrap_or_else(|| ctx.paths.config.clone());
 
         config_base.join(self.name())
     }

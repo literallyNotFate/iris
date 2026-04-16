@@ -28,10 +28,15 @@ impl Generator for TmuxGenerator {
         format!("{}.conf", theme)
     }
 
-    fn resolve_config_directory(&self) -> PathBuf {
-        dirs::home_dir()
-            .map(|p| p.join(".config").join("tmux").join("themes"))
-            .unwrap_or_else(|| PathBuf::from(".config/tmux/themes"))
+    fn resolve_config_directory(&self, ctx: &IrisContext) -> PathBuf {
+        let config_base: PathBuf = ctx
+            .paths
+            .config
+            .parent()
+            .map(|p| p.to_path_buf())
+            .unwrap_or_else(|| ctx.paths.config.clone());
+
+        config_base.join(self.name()).join("themes")
     }
 
     fn apply(&self, p: &Palette, ctx: &IrisContext) -> Result<()> {
@@ -42,7 +47,7 @@ impl Generator for TmuxGenerator {
         ));
 
         let cache_file = self.ensure_cache_file(p, ctx)?;
-        let link_path = self.link_path(&p.name);
+        let link_path = self.link_path(ctx, &p.name);
 
         ctx.log.info(&format!(
             "Linking {} theme to {}...",
@@ -51,7 +56,7 @@ impl Generator for TmuxGenerator {
         ));
         self.ensure_symlink(&cache_file, &link_path, ctx)?;
 
-        let conf_path = self.resolve_tmux_conf_path();
+        let conf_path = self.resolve_tmux_conf_path(ctx);
 
         if conf_path.exists() {
             ctx.log.info(&format!(
@@ -90,7 +95,7 @@ impl Generator for TmuxGenerator {
             return HealthStatus::Warning("tmux binary not found".into());
         }
 
-        let tmux_conf: PathBuf = self.resolve_tmux_conf_path();
+        let tmux_conf: PathBuf = self.resolve_tmux_conf_path(ctx);
 
         if !tmux_conf.exists() {
             return HealthStatus::Error {
@@ -120,7 +125,7 @@ impl Generator for TmuxGenerator {
                 ));
             }
 
-            let link: PathBuf = self.link_path(theme);
+            let link: PathBuf = self.link_path(ctx, theme);
             if !link.exists() {
                 return HealthStatus::Error {
                     message: format!("Theme link missing: {}", link.display()),
@@ -152,7 +157,7 @@ impl Generator for TmuxGenerator {
                     .step("Repairing tmux.conf source line...", 2)
                     .done(true);
 
-                let conf_path = self.resolve_tmux_conf_path();
+                let conf_path = self.resolve_tmux_conf_path(ctx);
                 self.update_tmux_conf(&conf_path, &p.name)
             }
 
@@ -211,8 +216,8 @@ impl TmuxGenerator {
         Ok(())
     }
 
-    fn resolve_tmux_conf_path(&self) -> PathBuf {
-        let themes_dir = self.resolve_config_directory();
+    fn resolve_tmux_conf_path(&self, ctx: &IrisContext) -> PathBuf {
+        let themes_dir: PathBuf = self.resolve_config_directory(ctx);
 
         themes_dir
             .parent()
@@ -254,8 +259,9 @@ mod tests {
     use tempdir::TempDir;
 
     // Helper function to get tmux conf just like in generator
-    fn get_tmux_conf_path(generator: &TmuxGenerator) -> PathBuf {
-        let themes_dir = generator.resolve_config_directory();
+    fn get_tmux_conf_path(ctx: &IrisContext) -> PathBuf {
+        let generator = TmuxGenerator;
+        let themes_dir = generator.resolve_config_directory(ctx);
         themes_dir.parent().unwrap_or(&themes_dir).join("tmux.conf")
     }
 
@@ -307,7 +313,7 @@ mod tests {
     }
 
     #[test]
-    fn tmux_health_ok() {
+    fn should_return_health_ok_for_tmux() {
         let (tmp_dir, mut ctx) = create_test_context();
         let generator = TmuxGenerator;
         let p = Palette::mock();
@@ -327,30 +333,19 @@ mod tests {
         )
         .unwrap();
 
-        temp_env::with_vars(
-            vec![
-                ("HOME", Some(root.to_str().unwrap())),
-                (
-                    "XDG_CONFIG_HOME",
-                    Some(root.join(".config").to_str().unwrap()),
-                ),
-            ],
-            || {
-                ctx.state.current_theme = p.name.clone();
-                generator.apply(&p, &ctx).expect("Apply failed");
+        ctx.state.current_theme = p.name.clone();
+        generator.apply(&p, &ctx).expect("Apply failed");
 
-                let status = generator.health_check(&ctx);
-                assert!(
-                    matches!(status, HealthStatus::Ok),
-                    "Expected Ok, got {:?}",
-                    status
-                );
-            },
+        let status = generator.health_check(&ctx);
+        assert!(
+            matches!(status, HealthStatus::Ok),
+            "Expected Ok, got {:?}",
+            status
         );
     }
 
     #[test]
-    fn tmux_health_warning_missing_marker() {
+    fn should_return_health_warning_missing_marker_for_tmux() {
         let (tmp_dir, mut ctx) = create_test_context();
         let generator = TmuxGenerator;
         let p = Palette::mock();
@@ -369,26 +364,24 @@ mod tests {
         )
         .unwrap();
 
-        temp_env::with_var("HOME", Some(root.to_str().unwrap()), || {
-            ctx.state.current_theme = p.name.clone();
-            generator.apply(&p, &ctx).unwrap();
+        ctx.state.current_theme = p.name.clone();
+        generator.apply(&p, &ctx).unwrap();
 
-            let link = generator.link_path(&p.name);
-            if link.exists() {
-                fs::remove_file(&link).unwrap();
-            }
+        let link = generator.link_path(&ctx, &p.name);
+        if link.exists() {
+            fs::remove_file(&link).unwrap();
+        }
 
-            let status = generator.health_check(&ctx);
-            assert!(
-                matches!(status, HealthStatus::Error { ref message, .. } if message.contains("Theme link missing")),
-                "Expected Theme link missing, got {:?}",
-                status
-            );
-        });
+        let status = generator.health_check(&ctx);
+        assert!(
+            matches!(status, HealthStatus::Error { ref message, .. } if message.contains("Theme link missing")),
+            "Expected Theme link missing, got {:?}",
+            status
+        );
     }
 
     #[test]
-    fn tmux_health_warning_wrong_theme_sourced() {
+    fn should_return_health_warning_wrong_theme_sourced_for_tmux() {
         let (tmp_dir, mut ctx) = create_test_context();
         let generator = TmuxGenerator;
         let p = Palette::mock();
@@ -398,25 +391,23 @@ mod tests {
         fs::create_dir_all(&tmux_dir).unwrap();
         let tmux_conf = tmux_dir.join("tmux.conf");
 
-        temp_env::with_var("HOME", Some(root.to_str().unwrap()), || {
-            ctx.state.current_theme = p.name.clone();
-            fs::write(
-                &tmux_conf,
-                "source-file ~/.config/tmux/themes/wrong.conf # iris-theme",
-            )
-            .unwrap();
+        ctx.state.current_theme = p.name.clone();
+        fs::write(
+            &tmux_conf,
+            "source-file ~/.config/tmux/themes/wrong.conf # iris-theme",
+        )
+        .unwrap();
 
-            let status = generator.health_check(&ctx);
-            assert!(
-                matches!(&status, HealthStatus::Warning(msg) if msg.contains("sources a different theme")),
-                "Expected Warning for wrong theme, got {:?}",
-                status
-            );
-        });
+        let status = generator.health_check(&ctx);
+        assert!(
+            matches!(&status, HealthStatus::Warning(msg) if msg.contains("sources a different theme")),
+            "Expected Warning for wrong theme, got {:?}",
+            status
+        );
     }
 
     #[test]
-    fn tmux_health_error_link_missing() {
+    fn should_return_health_error_link_missing_for_tmux() {
         let (tmp_dir, mut ctx) = create_test_context();
         let generator = TmuxGenerator;
         let p = Palette::mock();
@@ -434,28 +425,17 @@ mod tests {
         )
         .unwrap();
 
-        temp_env::with_vars(
-            vec![
-                ("HOME", Some(root.to_str().unwrap())),
-                (
-                    "XDG_CONFIG_HOME",
-                    Some(root.join(".config").to_str().unwrap()),
-                ),
-            ],
-            || {
-                ctx.state.current_theme = p.name.clone();
-                generator.apply(&p, &ctx).unwrap();
+        ctx.state.current_theme = p.name.clone();
+        generator.apply(&p, &ctx).unwrap();
 
-                let link = generator.link_path(&p.name);
-                fs::remove_file(&link).unwrap();
+        let link = generator.link_path(&ctx, &p.name);
+        fs::remove_file(&link).unwrap();
 
-                let status = generator.health_check(&ctx);
-                assert!(
-                    matches!(status, HealthStatus::Error { ref message, .. } if message.contains("Theme link missing")),
-                    "Expected link missing error, got {:?}",
-                    status
-                );
-            },
+        let status = generator.health_check(&ctx);
+        assert!(
+            matches!(status, HealthStatus::Error { ref message, .. } if message.contains("Theme link missing")),
+            "Expected link missing error, got {:?}",
+            status
         );
     }
 
@@ -466,72 +446,49 @@ mod tests {
         let p = Palette::mock();
         let root = tmp_dir.path();
 
-        temp_env::with_vars(
-            vec![
-                ("HOME", Some(root.to_str().unwrap())),
-                (
-                    "XDG_CONFIG_HOME",
-                    Some(root.join(".config").to_str().unwrap()),
-                ),
-            ],
-            || {
-                let tmux_dir = root.join(".config").join("tmux");
-                let tmux_conf = tmux_dir.join("tmux.conf");
-                fs::create_dir_all(&tmux_dir).unwrap();
-                fs::write(&tmux_conf, "run '~/.tmux/plugins/tpm/tpm'").unwrap();
+        let tmux_dir = root.join(".config").join("tmux");
+        let tmux_conf = tmux_dir.join("tmux.conf");
+        fs::create_dir_all(&tmux_dir).unwrap();
+        fs::write(&tmux_conf, "run '~/.tmux/plugins/tpm/tpm'").unwrap();
 
-                generator.apply(&p, &ctx).expect("Apply failed");
-                let content = fs::read_to_string(&tmux_conf).expect("Read failed");
+        generator.apply(&p, &ctx).expect("Apply failed");
+        let content = fs::read_to_string(&tmux_conf).expect("Read failed");
 
-                assert!(
-                    content.contains("# iris-theme"),
-                    "Marker missing. Content: \n{}\nPath: {:?}",
-                    content,
-                    tmux_conf
-                );
-                assert!(content.contains(&p.name));
-            },
+        assert!(
+            content.contains("# iris-theme"),
+            "Marker missing. Content: \n{}\nPath: {:?}",
+            content,
+            tmux_conf
         );
+        assert!(content.contains(&p.name));
     }
 
     #[test]
     fn should_fix_inject_before_tpm_issue_for_tmux() {
-        let (tmp_dir, ctx) = create_test_context();
+        let (_, ctx) = create_test_context();
         let generator = TmuxGenerator;
         let p = Palette::mock();
-        let root = tmp_dir.path();
 
-        temp_env::with_vars(
-            vec![
-                ("HOME", Some(root.to_str().unwrap())),
-                (
-                    "XDG_CONFIG_HOME",
-                    Some(root.join(".config").to_str().unwrap()),
-                ),
-            ],
-            || {
-                let tmux_conf = get_tmux_conf_path(&generator);
-                fs::create_dir_all(tmux_conf.parent().unwrap()).unwrap();
-                fs::write(&tmux_conf, "run '~/.tmux/plugins/tpm/tpm'").unwrap();
+        let tmux_conf = get_tmux_conf_path(&ctx);
+        fs::create_dir_all(tmux_conf.parent().unwrap()).unwrap();
+        fs::write(&tmux_conf, "run '~/.tmux/plugins/tpm/tpm'").unwrap();
 
-                let status = generator.health_check(&ctx);
-                generator.fix(&status, &p, &ctx.silent()).unwrap();
+        let status = generator.health_check(&ctx);
+        generator.fix(&status, &p, &ctx.silent()).unwrap();
 
-                let content = fs::read_to_string(&tmux_conf).unwrap();
-                let lines: Vec<&str> = content.lines().filter(|l| !l.is_empty()).collect();
+        let content = fs::read_to_string(&tmux_conf).unwrap();
+        let lines: Vec<&str> = content.lines().filter(|l| !l.is_empty()).collect();
 
-                let theme_pos = lines
-                    .iter()
-                    .position(|l| l.contains("# iris-theme"))
-                    .expect("No theme line");
-                let tpm_pos = lines
-                    .iter()
-                    .position(|l| l.contains("tpm"))
-                    .expect("No tpm line");
+        let theme_pos = lines
+            .iter()
+            .position(|l| l.contains("# iris-theme"))
+            .expect("No theme line");
+        let tpm_pos = lines
+            .iter()
+            .position(|l| l.contains("tpm"))
+            .expect("No tpm line");
 
-                assert!(theme_pos < tpm_pos, "Theme should be before TPM");
-            },
-        );
+        assert!(theme_pos < tpm_pos, "Theme should be before TPM");
     }
 
     #[test]
@@ -541,61 +498,47 @@ mod tests {
         let p = Palette::mock();
         let root = tmp_dir.path();
 
-        temp_env::with_vars(
-            vec![
-                ("HOME", Some(root.to_str().unwrap())),
-                (
-                    "XDG_CONFIG_HOME",
-                    Some(root.join(".config").to_str().unwrap()),
-                ),
-            ],
-            || {
-                ctx.state.current_theme = p.name.clone();
+        ctx.state.current_theme = p.name.clone();
 
-                let tmux_dir = root.join(".config").join("tmux");
-                let tmux_conf = tmux_dir.join("tmux.conf");
-                fs::create_dir_all(&tmux_dir).unwrap();
-                fs::write(
-                    &tmux_conf,
-                    "source-file \"~/.config/tmux/themes/wrong.conf\" # iris-theme",
-                )
-                .unwrap();
+        let tmux_dir = root.join(".config").join("tmux");
+        let tmux_conf = tmux_dir.join("tmux.conf");
+        fs::create_dir_all(&tmux_dir).unwrap();
+        fs::write(
+            &tmux_conf,
+            "source-file \"~/.config/tmux/themes/wrong.conf\" # iris-theme",
+        )
+        .unwrap();
 
-                let status = generator.health_check(&ctx);
+        let status = generator.health_check(&ctx);
 
-                assert!(
-                    matches!(status, HealthStatus::Warning(_)),
-                    "Expected Warning, got {:?}",
-                    status
-                );
-
-                generator.fix(&status, &p, &ctx.silent()).unwrap();
-
-                let content = fs::read_to_string(&tmux_conf).unwrap();
-                assert!(content.contains(&p.name));
-                assert!(!content.contains("wrong.conf"));
-            },
+        assert!(
+            matches!(status, HealthStatus::Warning(_)),
+            "Expected Warning, got {:?}",
+            status
         );
+
+        generator.fix(&status, &p, &ctx.silent()).unwrap();
+
+        let content = fs::read_to_string(&tmux_conf).unwrap();
+        assert!(content.contains(&p.name));
+        assert!(!content.contains("wrong.conf"));
     }
 
     #[test]
     fn should_fix_broken_symlink_for_tmux() {
-        let (tmp_dir, ctx) = create_test_context();
+        let (_, ctx) = create_test_context();
         let generator = TmuxGenerator;
         let p = Palette::mock();
-        let root = tmp_dir.path();
 
-        temp_env::with_var("HOME", Some(root.to_str().unwrap()), || {
-            generator.apply(&p, &ctx).unwrap();
-            let link_path = generator.link_path(&p.name);
+        generator.apply(&p, &ctx).unwrap();
+        let link_path = generator.link_path(&ctx, &p.name);
 
-            fs::remove_file(&link_path).unwrap();
+        fs::remove_file(&link_path).unwrap();
 
-            let status = generator.health_check(&ctx);
-            assert!(matches!(status, HealthStatus::Error { .. }));
+        let status = generator.health_check(&ctx);
+        assert!(matches!(status, HealthStatus::Error { .. }));
 
-            generator.fix(&status, &p, &ctx.silent()).unwrap();
-            assert!(link_path.exists());
-        });
+        generator.fix(&status, &p, &ctx.silent()).unwrap();
+        assert!(link_path.exists());
     }
 }

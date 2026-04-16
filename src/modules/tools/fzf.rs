@@ -28,13 +28,13 @@ impl Generator for FzfGenerator {
         ctx.paths.bin.join(self.target_file_name(""))
     }
 
-    fn link_path(&self, _theme_name: &str) -> PathBuf {
-        dirs::home_dir().unwrap_or_default().join(".zshrc")
-    }
-
-    fn is_installed(&self) -> bool {
-        let home: PathBuf = dirs::home_dir().unwrap_or_default();
-        which::which("fzf").is_ok() || home.join(".zshrc").exists()
+    fn link_path(&self, ctx: &IrisContext, _theme_name: &str) -> PathBuf {
+        ctx.paths
+            .config
+            .parent()
+            .map(|p| p.parent().unwrap_or(p))
+            .unwrap_or(&ctx.paths.config)
+            .join(".zshrc")
     }
 
     fn apply(&self, p: &Palette, ctx: &IrisContext) -> anyhow::Result<()> {
@@ -72,7 +72,7 @@ impl Generator for FzfGenerator {
             return HealthStatus::Warning("fzf binary not found".into());
         }
 
-        let zshrc: PathBuf = self.link_path("");
+        let zshrc: PathBuf = self.link_path(ctx, "");
         let cache_file: PathBuf = self.cache_path(ctx, "");
 
         if !zshrc.exists() {
@@ -142,7 +142,7 @@ impl FzfGenerator {
     }
 
     fn inject_source_line(&self, ctx: &IrisContext) -> anyhow::Result<()> {
-        let zshrc: PathBuf = self.link_path("");
+        let zshrc: PathBuf = self.link_path(ctx, "");
         let cache_file: PathBuf = self.cache_path(ctx, "");
         let source_line: String = format!(
             "\n[ -f \"{0}\" ] && source \"{0}\" # iris:fzf\n",
@@ -161,7 +161,6 @@ impl FzfGenerator {
 mod tests {
     use super::*;
     use crate::core::tests::create_test_context;
-    use tempdir::TempDir;
 
     #[test]
     fn should_return_fzf_metadata() {
@@ -182,79 +181,54 @@ mod tests {
     }
 
     #[test]
-    fn should_check_if_fzf_is_installed() {
-        let generator = FzfGenerator;
-        let temp_dir: TempDir = TempDir::new("fzf_test").unwrap();
-        let zshrc_path = temp_dir.path().join(".zshrc");
-
-        temp_env::with_var("HOME", Some(temp_dir.path()), || {
-            fs::write(&zshrc_path, "").unwrap();
-            assert!(generator.is_installed());
-        });
-    }
-
-    #[test]
-    fn fzf_health_ok() {
+    fn should_return_health_ok_for_fzf() {
         let (tmp_dir, ctx) = create_test_context();
         let generator = FzfGenerator;
         let root = tmp_dir.path();
+        let zshrc_path = root.join(".zshrc");
+        let cache_file = generator.cache_path(&ctx, "any");
 
-        temp_env::with_var("HOME", Some(root), || {
-            let zshrc_path = root.join(".zshrc");
-            let cache_file = generator.cache_path(&ctx, "any");
+        fs::write(&zshrc_path, format!("source \"{}\"", cache_file.display())).unwrap();
 
-            fs::write(&zshrc_path, format!("source \"{}\"", cache_file.display())).unwrap();
-
-            let status = generator.health_check(&ctx);
-            assert!(matches!(status, HealthStatus::Ok));
-        });
+        let status = generator.health_check(&ctx);
+        assert!(matches!(status, HealthStatus::Ok));
     }
 
     #[test]
-    fn fzf_health_error_no_zshrc() {
-        let (tmp_dir, ctx) = create_test_context();
+    fn should_return_health_error_no_zshrc_for_fzf() {
+        let (_, ctx) = create_test_context();
         let generator = FzfGenerator;
-        let root = tmp_dir.path();
+        let status = generator.health_check(&ctx);
 
-        temp_env::with_var("HOME", Some(root), || {
-            let status = generator.health_check(&ctx);
-
-            match status {
-                HealthStatus::Error { message, .. } => {
-                    assert!(message.contains(".zshrc not found"));
-                }
-                _ => panic!("Expected Error due to missing .zshrc"),
+        match status {
+            HealthStatus::Error { message, .. } => {
+                assert!(message.contains(".zshrc not found"));
             }
-        });
+            _ => panic!("Expected Error due to missing .zshrc"),
+        }
     }
 
     #[test]
-    fn fzf_health_error_not_sourced() {
+    fn should_return_health_error_not_sourced_for_fzf() {
         let (tmp_dir, ctx) = create_test_context();
         let generator = FzfGenerator;
         let root = tmp_dir.path();
+        let zshrc_path = root.join(".zshrc");
 
-        temp_env::with_var("HOME", Some(root), || {
-            let zshrc_path = root.join(".zshrc");
-            fs::write(&zshrc_path, "alias ls='ls --color=auto'").unwrap();
+        fs::write(&zshrc_path, "alias ls='ls --color=auto'").unwrap();
 
-            let status = generator.health_check(&ctx);
-            match status {
-                HealthStatus::Error { message, .. } => {
-                    assert!(message.contains("not sourced"));
-                }
-                _ => panic!("Expected Error because fzf.sh is not in .zshrc"),
+        let status = generator.health_check(&ctx);
+        match status {
+            HealthStatus::Error { message, .. } => {
+                assert!(message.contains("not sourced"));
             }
-        });
+            _ => panic!("Expected Error because fzf.sh is not in .zshrc"),
+        }
     }
 
     #[test]
     fn should_apply_fzf_theme_to_cache() {
-        if which::which("fzf").is_err() {
-            return;
-        }
-
-        let (_tmp_dir, ctx) = create_test_context();
+        let (_, ctx) = create_test_context();
         let generator = FzfGenerator;
         let p = Palette::mock();
 
@@ -283,32 +257,29 @@ mod tests {
         let zshrc = root.join(".zshrc");
         fs::write(&zshrc, "# Initial zshrc\n").unwrap();
 
-        temp_env::with_var("HOME", Some(root.to_str().unwrap()), || {
-            generator.apply(&p, &ctx).unwrap();
+        generator.apply(&p, &ctx).unwrap();
+        let status = generator.health_check(&ctx);
+        assert!(
+            matches!(status, HealthStatus::Error { ref message, .. } if message.contains("not sourced")),
+            "Expected 'not sourced' error, got {:?}",
+            status
+        );
 
-            let status = generator.health_check(&ctx);
-            assert!(
-                matches!(status, HealthStatus::Error { ref message, .. } if message.contains("not sourced")),
-                "Expected 'not sourced' error, got {:?}",
-                status
-            );
+        generator
+            .fix(&status, &p, &ctx.silent())
+            .expect("Fix failed");
 
-            generator
-                .fix(&status, &p, &ctx.silent())
-                .expect("Fix failed");
+        let updated_content = fs::read_to_string(&zshrc).unwrap();
+        let cache_file = generator.cache_path(&ctx, &p.name);
 
-            let updated_content = fs::read_to_string(&zshrc).unwrap();
-            let cache_file = generator.cache_path(&ctx, &p.name);
+        assert!(
+            updated_content.contains(&cache_file.to_str().unwrap()),
+            "zshrc should now contain the source line for fzf.sh"
+        );
+        assert!(updated_content.contains("# iris:fzf"));
 
-            assert!(
-                updated_content.contains(&cache_file.to_str().unwrap()),
-                "zshrc should now contain the source line for fzf.sh"
-            );
-            assert!(updated_content.contains("# iris:fzf"));
-
-            let final_status = generator.health_check(&ctx);
-            assert!(final_status.is_ok(), "Final status should be Ok");
-        });
+        let final_status = generator.health_check(&ctx);
+        assert!(final_status.is_ok(), "Final status should be Ok");
     }
 
     #[test]
@@ -322,14 +293,12 @@ mod tests {
         let cache_file = generator.cache_path(&ctx, &p.name);
         fs::write(&zshrc, format!("source {}", cache_file.display())).unwrap();
 
-        temp_env::with_var("HOME", Some(root.to_str().unwrap()), || {
-            let status = HealthStatus::Error {
-                message: "cache missing".into(),
-                fix_hint: None,
-            };
+        let status = HealthStatus::Error {
+            message: "cache missing".into(),
+            fix_hint: None,
+        };
 
-            generator.fix(&status, &p, &ctx.silent()).unwrap();
-            assert!(cache_file.exists(), "Cache file should be recreated");
-        });
+        generator.fix(&status, &p, &ctx.silent()).unwrap();
+        assert!(cache_file.exists(), "Cache file should be recreated");
     }
 }

@@ -45,11 +45,14 @@ impl Palette {
         match Self::read_theme_from_path(&path) {
             Ok(theme) => Ok(theme),
             Err(_) => {
-                log.error("No active theme found in cache.", 1);
-                anyhow::bail!(
-                    "No active theme detected.\n {} Make sure to switch theme in Neovim or pass the name manually: `iris switch <name>`",
-                    "Tip:".yellow()
+                log.warn("Neovim session not found or theme not set.", 1);
+                let tip: String = format!(
+                    "\n  {} Make sure to switch theme in Neovim or pass the name manually: {}",
+                    "󰓦 Tip:".yellow().bold(),
+                    "iris switch <name>".cyan().bold()
                 );
+
+                anyhow::bail!("{}\n{}", "No active theme detected.".red().bold(), tip);
             }
         }
     }

@@ -90,14 +90,7 @@ pub fn exec(fix: bool, ctx: &IrisContext) -> anyhow::Result<()> {
         }
     }
 
-    let indent = if !issues_found { "\n" } else { "" };
-    println!(
-        "{}  {}  {}",
-        indent,
-        "󰚥".dimmed(),
-        "Check complete".dimmed()
-    );
-
+    println!("\n  {}  {}", "󰚥".dimmed(), "Check complete".dimmed());
     if issues_found && !fix {
         println!(
             "  {}  Run {} to resolve issues automatically.",
