@@ -61,11 +61,14 @@ impl State {
     /// Save state to disk
     pub fn save_to(&self, path: &PathBuf) -> Result<()> {
         if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent)?;
+            fs::create_dir_all(parent).with_context(|| {
+                format!("Failed to create directory structure: {}", parent.display())
+            })?;
         }
 
         let json: String = self.to_json()?;
-        fs::write(path, json).with_context(|| format!("Failed to save state to {:?}", path))
+        fs::write(path, json)
+            .with_context(|| format!("Failed to write state file to: {}", path.display()))
     }
 
     /// Load state from file

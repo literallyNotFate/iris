@@ -5,6 +5,7 @@ use crate::{
     modules::{Generator, GeneratorType},
     utils,
 };
+use anyhow::{Context, Result};
 use colored::Colorize;
 use std::{
     env, fs,
@@ -40,7 +41,7 @@ impl Generator for StarshipGenerator {
         env::var("STARSHIP_CONFIG").ok().map(PathBuf::from)
     }
 
-    fn apply(&self, p: &Palette, ctx: &IrisContext) -> anyhow::Result<()> {
+    fn apply(&self, p: &Palette, ctx: &IrisContext) -> Result<()> {
         ctx.log.info(&format!(
             "Writing {} theme to {}",
             utils::capitalize(&p.name).yellow(),
@@ -72,7 +73,7 @@ impl Generator for StarshipGenerator {
 
     fn health_check(&self, ctx: &IrisContext) -> HealthStatus {
         if !self.is_installed() {
-            return HealthStatus::Warning("starship binary not found".into());
+            return HealthStatus::Warning("`starship` binary not found".into());
         }
 
         let config_path: PathBuf = self.link_path(ctx, "");
@@ -92,7 +93,7 @@ impl Generator for StarshipGenerator {
             let expected_key = format!("palette = \"{}\"", theme);
             if !content.contains(&expected_key) {
                 return HealthStatus::Warning(format!(
-                    "Starship is not using the current palette '{}'",
+                    "`starship` is not using the current palette '{}'",
                     theme
                 ));
             }
@@ -101,7 +102,9 @@ impl Generator for StarshipGenerator {
             if !content.contains(&expected_header) {
                 return HealthStatus::Error {
                     message: format!("Palette block '{}' missing in config", theme),
-                    fix_hint: Some("Run `iris sync` to inject the palette block".into()),
+                    fix_hint: Some(
+                        "Run `iris sync` or `iris health --fix` to inject the palette block".into(),
+                    ),
                 };
             }
         }
@@ -109,15 +112,12 @@ impl Generator for StarshipGenerator {
         HealthStatus::Ok
     }
 
-    fn fix(&self, status: &HealthStatus, p: &Palette, ctx: &IrisContext) -> anyhow::Result<()> {
+    fn fix(&self, status: &HealthStatus, p: &Palette, ctx: &IrisContext) -> Result<()> {
         match status {
             HealthStatus::Error { .. } | HealthStatus::Warning(_) => {
                 ctx.log
                     .step(
-                        &format!(
-                            "Repairing {} config (re-injecting palette)...",
-                            self.name().bold()
-                        ),
+                        &format!("Re-applying `{}` configuration...", self.name().bold()),
                         2,
                     )
                     .done(true);
@@ -130,17 +130,13 @@ impl Generator for StarshipGenerator {
 }
 
 impl StarshipGenerator {
-    fn update_config_file(
-        &self,
-        path: &Path,
-        p: &Palette,
-        ctx: &IrisContext,
-    ) -> anyhow::Result<()> {
+    fn update_config_file(&self, path: &Path, p: &Palette, ctx: &IrisContext) -> Result<()> {
         let render_ctx = self.build_render_context(p);
-        let new_palette_block = ctx.templater.render(&self.template_path(), &render_ctx)?;
+        let new_palette_block: String = ctx.templater.render(&self.template_path(), &render_ctx)?;
 
         let content = if path.exists() {
-            fs::read_to_string(path)?
+            fs::read_to_string(path)
+                .with_context(|| format!("Failed to read `starship` config: {}", path.display()))?
         } else {
             String::new()
         };
@@ -176,9 +172,17 @@ impl StarshipGenerator {
         final_content.push_str(&new_palette_block);
 
         if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent)?;
+            fs::create_dir_all(parent).with_context(|| {
+                format!(
+                    "Failed to create directory for `starship` config: {}",
+                    parent.display()
+                )
+            })?;
         }
-        fs::write(path, final_content.trim())?;
+
+        fs::write(path, final_content)
+            .with_context(|| format!("Failed to write `starship` config: {}", path.display()))?;
+
         Ok(())
     }
 }

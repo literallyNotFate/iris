@@ -10,10 +10,10 @@ pub fn exec(ctx: &IrisContext) -> anyhow::Result<()> {
     let current = &ctx.state.current_theme;
     let enabled = &ctx.state.enabled_generators;
 
-    if ctx.log.quiet {
-        let nvim_theme = Palette::current(&ctx.log).unwrap_or_else(|_| "Unknown".to_string());
-        let is_sync = nvim_theme.to_lowercase() == current.to_lowercase();
+    let nvim_theme: String = Palette::current().unwrap_or_else(|_| "".to_string());
+    let is_sync: bool = nvim_theme.to_lowercase() == current.to_lowercase();
 
+    if ctx.log.quiet {
         let gens = if enabled.is_empty() {
             "none".dimmed().to_string()
         } else {
@@ -46,7 +46,7 @@ pub fn exec(ctx: &IrisContext) -> anyhow::Result<()> {
 
         if !is_sync {
             ctx.log
-                .warn(&format!("Out of sync with Neovim ({})", nvim_theme), 2);
+                .warn(&format!("Out of sync: Neovim is using `{}`", nvim_theme), 2);
         }
 
         return Ok(());
@@ -69,7 +69,7 @@ pub fn exec(ctx: &IrisContext) -> anyhow::Result<()> {
     if enabled.is_empty() {
         println!(
             "    {}",
-            "No generators enabled. Use 'iris gen auto' to find apps.".dimmed()
+            "No generators enabled. Use `iris gen auto` to find apps.".dimmed()
         );
     } else {
         for name in enabled {
@@ -83,25 +83,23 @@ pub fn exec(ctx: &IrisContext) -> anyhow::Result<()> {
         println!();
     }
 
-    if let Ok(nvim_theme) = Palette::current(&ctx.log) {
-        println!();
-        if nvim_theme.to_lowercase() != current.to_lowercase() {
-            ctx.log.warn("Out of sync with Neovim", 2);
-            println!(
-                "    {} {} {}  {} {}",
-                "Neovim:".dimmed(),
-                nvim_theme.bright_yellow(),
-                "󰄬".dimmed(),
-                "Iris:".dimmed(),
-                current.dimmed()
-            );
-            println!(
-                "    {}",
-                "󰚔  Run 'iris sync' to update all configs".cyan().italic()
-            );
-        } else {
-            println!("  {} {}", "󰄬".green(), "Sync successful".green());
-        }
+    println!();
+    if !is_sync {
+        ctx.log.warn("Out of sync with Neovim", 2);
+        println!(
+            "    {} {} {}  {} {}",
+            "Neovim:".dimmed(),
+            nvim_theme.bright_yellow(),
+            "󰄬".dimmed(),
+            "Iris:".dimmed(),
+            current.dimmed()
+        );
+        println!(
+            "    {}",
+            "󰚔  Run `iris sync` to update all configs".cyan().italic()
+        );
+    } else {
+        println!("  {}  {}", "󰄬".green(), "Sync with Neovim: OK".green());
     }
 
     if let Ok(palette) = Palette::fetch(current, &ctx.log.as_quiet()) {

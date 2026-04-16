@@ -1,4 +1,4 @@
-use crate::{ui::Logger, utils};
+use crate::ui::Logger;
 use anyhow::{Context, Result};
 use colored::Colorize;
 use serde::{Deserialize, Serialize};
@@ -37,31 +37,25 @@ pub struct Palette {
 
 impl Palette {
     /// Get currently installed theme name
-    /// Uses logger for warnings and errors output
-    pub fn current(log: &Logger) -> Result<String> {
-        let home: PathBuf = dirs::home_dir().context("Home dir not found")?;
+    pub fn current() -> Result<String> {
+        let home: PathBuf = dirs::home_dir().context("Failed to determine home directory")?;
         let path: PathBuf = home.join(".cache/iris/core/current_theme");
 
-        match Self::read_theme_from_path(&path) {
-            Ok(theme) => Ok(theme),
-            Err(_) => {
-                log.warn("Neovim session not found or theme not set.", 1);
-                let tip: String = format!(
-                    "\n  {} Make sure to switch theme in Neovim or pass the name manually: {}",
-                    "󰓦 Tip:".yellow().bold(),
-                    "iris switch <name>".cyan().bold()
-                );
-
-                anyhow::bail!("{}\n{}", "No active theme detected.".red().bold(), tip);
-            }
-        }
+        Self::read_theme_from_path(&path).map_err(|_| {
+            anyhow::anyhow!(format!(
+                "No active theme detected.\n\
+                 {}: Make sure to switch theme in Neovim or pass the name manually: `{}`",
+                "Tip".bold().cyan(),
+                "iris switch <name>".italic().cyan()
+            ))
+        })
     }
 
     /// Fetch palette from nvim using lua script
     pub fn fetch(theme: &str, log: &Logger) -> Result<Self> {
         let theme_lower: String = theme.to_lowercase();
-        let cache_dir: PathBuf = dirs::home_dir()
-            .context("Home dir not found")?
+        let cache_dir = dirs::home_dir()
+            .context("Failed to determine home directory")?
             .join(".cache/iris/core/palettes");
 
         let cache_path: PathBuf = cache_dir.join(format!("{}.json", theme_lower));
@@ -78,16 +72,18 @@ impl Palette {
             }
         }
 
-        log.info("Cache miss. Loading Neovim runtime and lazy.nvim plugins...");
+        log.info("Cache miss. Loading Neovim runtime and plugins...");
         let args: Vec<String> = Self::build_fetch_args(theme);
 
         log.info("Executing Lua bridge in headless mode...");
-        let output: Output = Command::new("nvim").args(&args).output()?;
+        let output: Output = Command::new("nvim")
+            .args(&args)
+            .output()
+            .context("Failed to execute 'nvim' command. Is Neovim installed?")?;
 
         if !output.status.success() {
             let error_msg = String::from_utf8_lossy(&output.stderr);
-            log.error(&format!("Neovim error: {}", error_msg.trim()), 2);
-            anyhow::bail!("Neovim error: {}", error_msg.red());
+            anyhow::bail!("Neovim failed to export palette: {}", error_msg.trim());
         }
 
         log.info("Parsing palette data...");
@@ -104,45 +100,27 @@ impl Palette {
     }
 
     /// Checks whether this theme exists in nvim colorscheme
-    pub fn exists(theme: &str, log: &Logger) -> bool {
+    pub fn exists(theme: &str) -> bool {
         let theme_lower: String = theme.to_lowercase();
-        let home: PathBuf = dirs::home_dir().expect("Home dir not found");
-        let cache_path: PathBuf = home
-            .join(".cache/iris/core/palettes")
-            .join(format!("{}.json", theme_lower));
+        let cache_dir = dirs::home_dir().map(|h| h.join(".cache/iris/core/palettes"));
 
-        if cache_path.exists() {
-            println!(
-                "   {} found in cache!",
-                utils::capitalize(&theme_lower).yellow().bold()
-            );
-            return true;
+        if let Some(path) = cache_dir {
+            if path.join(format!("{}.json", theme_lower)).exists() {
+                return true;
+            }
         }
 
         if which::which("nvim").is_err() {
-            log.warn("Neovim not found. Skipping theme verification.", 0);
             return false;
         }
 
-        let mut check_task = log.step(
-            &format!("Checking theme availability: {}", theme.yellow().bold()),
-            1,
-        );
-
         let args: Vec<String> = Self::build_exists_args(theme);
-        let success: bool = Command::new("nvim")
-            .args(&args)
-            .output()
-            .map(|o| o.status.success())
-            .unwrap_or(false);
+        let output = Command::new("nvim").args(&args).output();
 
-        if success {
-            check_task.done(true);
-        } else {
-            log.error(&format!("Theme {} not found in Neovim", theme.red()), 2);
+        match output {
+            Ok(o) if o.status.success() => true,
+            _ => false,
         }
-
-        success
     }
 
     /// Helper function to save palette to cache

@@ -23,7 +23,7 @@ impl IrisContext {
         let state: State = if paths.state_file.exists() {
             let content: String = fs::read_to_string(&paths.state_file)
                 .with_context(|| format!("Failed to read state at {:?}", &paths.state_file))?;
-            serde_json::from_str(&content).with_context(|| "Failed to parse state.json")?
+            serde_json::from_str(&content).context("Failed to parse state.json")?
         } else {
             State::default()
         };

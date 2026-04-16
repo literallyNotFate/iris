@@ -1,4 +1,6 @@
 use crate::{commands::HealthStatus, core::IrisContext, models::Palette, modules::GeneratorType};
+use anyhow::{Context, Result};
+use colored::Colorize;
 use std::{fs, path::PathBuf};
 
 /// Main trait for all generators
@@ -40,7 +42,7 @@ pub trait Generator: Send + Sync {
     }
 
     /// Logic of applying the theme (file writing, building cache etc)
-    fn apply(&self, p: &Palette, ctx: &IrisContext) -> anyhow::Result<()>;
+    fn apply(&self, p: &Palette, ctx: &IrisContext) -> Result<()>;
 
     /// Automatic config directory resolver
     fn resolve_config_directory(&self, ctx: &IrisContext) -> PathBuf {
@@ -74,23 +76,36 @@ pub trait Generator: Send + Sync {
     }
 
     /// Automatically fix detected issues (based on HealthStatus)
-    fn fix(&self, status: &HealthStatus, p: &Palette, ctx: &IrisContext) -> anyhow::Result<()>;
+    fn fix(&self, status: &HealthStatus, p: &Palette, ctx: &IrisContext) -> Result<()>;
 
     /// Basic template context builder
     /// Basically passes all palette colors to templater
     fn build_render_context(&self, p: &Palette) -> tera::Context;
 
     /// Clear generator cached files
-    fn clear(&self, ctx: &IrisContext) -> anyhow::Result<()> {
+    fn clear(&self, ctx: &IrisContext) -> Result<()> {
         let name: &str = self.name();
         let gen_cache_dir: PathBuf = ctx.paths.generators.join(name);
+
         if gen_cache_dir.exists() {
-            fs::remove_dir_all(&gen_cache_dir)?;
+            fs::remove_dir_all(&gen_cache_dir).with_context(|| {
+                format!(
+                    "Failed to remove generator directory for {}: {}",
+                    name.bold(),
+                    gen_cache_dir.display()
+                )
+            })?;
         }
 
         let bin_file: PathBuf = self.cache_path(ctx, "");
         if bin_file.exists() {
-            fs::remove_file(bin_file)?;
+            fs::remove_file(&bin_file).with_context(|| {
+                format!(
+                    "Failed to remove cache file for {}: {}",
+                    name.bold(),
+                    bin_file.display()
+                )
+            })?;
         }
 
         Ok(())

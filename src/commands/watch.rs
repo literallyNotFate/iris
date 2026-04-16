@@ -5,7 +5,8 @@ use notify_debouncer_mini::{new_debouncer, notify::*};
 use std::{
     fs,
     io::{self, Write},
-    sync::mpsc::channel,
+    path::PathBuf,
+    sync::mpsc::{RecvTimeoutError, channel},
     time::{Duration, Instant},
 };
 
@@ -14,13 +15,13 @@ pub fn exec(interval_ms: u64, ctx: &mut IrisContext) -> Result<()> {
     let (tx, rx) = channel();
 
     let mut debouncer = new_debouncer(Duration::from_millis(interval_ms), tx)
-        .context("Failed to create watcher")?;
-    let cache_path = ctx.paths.cache.join("current_theme");
+        .context("Failed to initialize file watcher")?;
+    let cache_path: PathBuf = ctx.paths.cache.join("current_theme");
 
     debouncer
         .watcher()
         .watch(&cache_path, RecursiveMode::NonRecursive)
-        .context("Failed to start watching")?;
+        .with_context(|| format!("Failed to watch path: {}", cache_path.display()))?;
 
     let print_header = |path: &str| {
         print!("\x1B[2J\x1B[1;1H");
@@ -28,7 +29,7 @@ pub fn exec(interval_ms: u64, ctx: &mut IrisContext) -> Result<()> {
         println!(" {} Watching: {}", "󰈚".dimmed(), path.dimmed());
         println!(" {} {}", "󰜺".red(), "Press Ctrl+C to exit".dimmed());
         println!();
-        io::stdout().flush().unwrap();
+        let _ = io::stdout().flush();
     };
 
     print_header(&utils::pretty_path(&cache_path));
@@ -37,45 +38,45 @@ pub fn exec(interval_ms: u64, ctx: &mut IrisContext) -> Result<()> {
     ctrlc::set_handler(move || {
         let _ = exit_tx.send(());
     })
-    .expect("Error setting Ctrl-C handler");
+    .context("Error setting Ctrl-C handler")?;
 
     loop {
-        if let Ok(_) = exit_rx.try_recv() {
+        if exit_rx.try_recv().is_ok() {
             println!("\n {} {}", "󰈆".yellow().bold(), "Watcher stopped.".yellow());
             break;
         }
 
-        if let Ok(result) = rx.recv_timeout(Duration::from_millis(500)) {
-            match result {
+        match rx.recv_timeout(Duration::from_millis(200)) {
+            Ok(result) => match result {
                 Ok(_) => {
-                    let content = fs::read_to_string(&cache_path).unwrap_or_default();
-                    let theme = content.trim().to_string();
+                    let content: String = fs::read_to_string(&cache_path)
+                        .with_context(|| format!("Could not read {}", cache_path.display()))?;
 
+                    let theme: String = content.trim().to_string();
                     if theme.is_empty() || theme == ctx.state.current_theme {
                         continue;
                     }
 
                     println!(
-                        " {} {} {}",
+                        " {}  {} {}",
                         "󱐋".yellow().bold(),
                         "Change detected!".bold(),
                         "Re-applying...".dimmed()
                     );
 
+                    let start = Instant::now();
                     let original_quiet: bool = ctx.log.quiet;
                     ctx.log.quiet = true;
-                    let start = Instant::now();
 
                     let res = super::apply_theme(&theme, ctx);
-
                     ctx.log.quiet = original_quiet;
 
-                    print_header(&cache_path.display().to_string());
+                    print_header(&utils::pretty_path(&cache_path));
 
                     match res {
                         Ok(_) => {
                             println!(
-                                " {} {} {} {} {}",
+                                " {}  {} {} {} {}",
                                 "󰄬".green().bold(),
                                 "Theme".green(),
                                 theme.cyan().bold(),
@@ -84,12 +85,21 @@ pub fn exec(interval_ms: u64, ctx: &mut IrisContext) -> Result<()> {
                             );
                         }
                         Err(e) => {
-                            eprintln!(" {} {} {}", "󰅙".red(), "Error:".red().bold(), e);
+                            eprintln!(
+                                " {}  {} {:?}",
+                                "󰅙".red(),
+                                "Application error:".red().bold(),
+                                e
+                            );
                         }
                     }
                 }
-                Err(e) => eprintln!("Watcher error: {:?}", e),
-            }
+                Err(e) => {
+                    eprintln!(" {}  Watcher error: {:?}", "󰅙".red(), e);
+                }
+            },
+            Err(RecvTimeoutError::Timeout) => continue,
+            Err(RecvTimeoutError::Disconnected) => anyhow::bail!("Watcher channel disconnected"),
         }
     }
 

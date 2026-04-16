@@ -32,15 +32,15 @@ pub fn exec(fix: bool, ctx: &IrisContext) -> anyhow::Result<()> {
         None
     };
 
-    for generator in &ctx.registry.all() {
+    for generator in ctx.registry.all() {
         if !ctx.state.is_enabled(generator.name()) {
             continue;
         }
 
-        let status: HealthStatus = generator.health_check(ctx);
         let name: &str = generator.name();
+        let status: HealthStatus = generator.health_check(ctx);
 
-        match &status {
+        match status {
             HealthStatus::Ok => {
                 println!(
                     "  {}  {:<12}  {}",
@@ -51,6 +51,7 @@ pub fn exec(fix: bool, ctx: &IrisContext) -> anyhow::Result<()> {
             }
             _ => {
                 issues_found = true;
+
                 match &status {
                     HealthStatus::Warning(msg) => {
                         println!("  {}  {:<12}  {}", "󱈸".yellow(), name.bold(), msg.yellow());
@@ -61,9 +62,8 @@ pub fn exec(fix: bool, ctx: &IrisContext) -> anyhow::Result<()> {
                             println!("      {}  {}", "󰋽".blue(), hint.dimmed());
                         }
                     }
-                    _ => {}
+                    _ => unreachable!(),
                 }
-
                 if fix {
                     if let Some(ref p) = palette {
                         println!(
@@ -71,19 +71,8 @@ pub fn exec(fix: bool, ctx: &IrisContext) -> anyhow::Result<()> {
                             "󰁕".yellow().bold(),
                             "Fixing...".bright_yellow()
                         );
-
-                        match generator.fix(&status, p, ctx) {
-                            Ok(_) => {
-                                println!(
-                                    "\n {} {}\n",
-                                    name.bold().green(),
-                                    "generator fixed!".green()
-                                );
-                            }
-                            Err(e) => {
-                                ctx.log.error(&format!("Failed: {}", e), 1);
-                            }
-                        }
+                        generator.fix(&status, p, ctx)?;
+                        println!("    {}  {}", "󰄬".green(), "Fixed successfully!".green());
                     }
                 }
             }

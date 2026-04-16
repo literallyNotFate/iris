@@ -117,7 +117,7 @@ impl Generator for BatGenerator {
 
     fn health_check(&self, ctx: &IrisContext) -> HealthStatus {
         if !self.is_installed() {
-            return HealthStatus::Warning("bat binary not found".into());
+            return HealthStatus::Warning("`bat` binary not found".into());
         }
 
         let expected_env: PathBuf = ctx.paths.generators.join(self.name()).join("bat.conf");
@@ -143,7 +143,9 @@ impl Generator for BatGenerator {
                         "Theme file '{}.tmTheme' is missing in bat themes directory",
                         theme
                     ),
-                    fix_hint: Some("Run `iris sync` to relink and rebuild cache".into()),
+                    fix_hint: Some(
+                        "Run `iris sync` or `iris health --fix` to relink and rebuild cache".into(),
+                    ),
                 };
             }
         }
@@ -155,7 +157,7 @@ impl Generator for BatGenerator {
         match status {
             HealthStatus::Error { message, .. } => {
                 if message.contains("missing") || message.contains("not linked") {
-                    ctx.log.step("Restoring bat theme symlink...", 2).done(true);
+                    ctx.log.step("Restoring missing symlink...", 2).done(true);
 
                     let cache = self.cache_path(ctx, &p.name);
                     let link = self.link_path(ctx, &p.name);
@@ -164,15 +166,12 @@ impl Generator for BatGenerator {
 
                 self.apply(p, &ctx.silent())
             }
-            HealthStatus::Warning(msg) if msg.contains("cache is older") => {
-                let mut t = ctx.log.step("Rebuilding bat theme cache...", 2);
-                self.rebuild_bat_cache(ctx)?;
-                t.done(true);
-                Ok(())
-            }
             _ => {
                 ctx.log
-                    .step("Re-applying bat configuration...", 2)
+                    .step(
+                        &format!("Re-applying `{}` configuration...", self.name().bold()),
+                        2,
+                    )
                     .done(true);
                 self.apply(p, &ctx.silent())
             }
@@ -182,34 +181,57 @@ impl Generator for BatGenerator {
 
 impl BatGenerator {
     fn ensure_theme_cache(&self, p: &Palette, ctx: &IrisContext) -> Result<PathBuf> {
-        let cache_path = self.cache_path(ctx, &p.name);
+        let cache_path: PathBuf = self.cache_path(ctx, &p.name);
         let render_ctx = self.build_render_context(p);
-        let content = ctx.templater.render(&self.template_path(), &render_ctx)?;
+        let content: String = ctx.templater.render(&self.template_path(), &render_ctx)?;
 
-        fs::create_dir_all(cache_path.parent().unwrap())?;
-        fs::write(&cache_path, content.trim())?;
+        if let Some(parent) = cache_path.parent() {
+            fs::create_dir_all(parent).with_context(|| {
+                format!(
+                    "Failed to create `bat` theme directory: {}",
+                    parent.display()
+                )
+            })?;
+        }
+
+        fs::write(&cache_path, content.trim()).with_context(|| {
+            format!("Failed to write `bat` theme file: {}", cache_path.display())
+        })?;
         Ok(cache_path)
     }
 
-    fn ensure_symlink(&self, target: &Path, link: &Path, _ctx: &IrisContext) -> Result<()> {
+    fn ensure_symlink(&self, target: &Path, link: &Path, _ctx: &IrisContext) -> anyhow::Result<()> {
         if link.exists() || link.is_symlink() {
-            fs::remove_file(link)?;
+            fs::remove_file(link)
+                .with_context(|| format!("Failed to remove old `bat` link: {}", link.display()))?;
         }
-        fs::create_dir_all(link.parent().unwrap())?;
+
+        if let Some(parent) = link.parent() {
+            fs::create_dir_all(parent).with_context(|| {
+                format!(
+                    "Failed to create directory for `bat` config: {}",
+                    parent.display()
+                )
+            })?;
+        }
 
         #[cfg(unix)]
         {
             use std::os::unix::fs::symlink;
-            symlink(target, link)
-                .with_context(|| format!("Failed to create symlink {:?} -> {:?}", target, link))?;
+            symlink(target, link).with_context(|| {
+                format!(
+                    "Failed to create `bat` symlink: {} -> {}",
+                    target.display(),
+                    link.display()
+                )
+            })?;
         }
         Ok(())
     }
 
-    fn ensure_config(&self, p: &Palette, ctx: &IrisContext) -> Result<()> {
-        let theme_name = utils::capitalize(&p.name);
-
-        let config_content = format!(
+    fn ensure_config(&self, p: &Palette, ctx: &IrisContext) -> anyhow::Result<()> {
+        let theme_name: String = utils::capitalize(&p.name);
+        let config_content: String = format!(
             "--theme=\"{name}\"\n--style=\"numbers,changes\"\n--color=\"always\"\n",
             name = theme_name
         );
@@ -217,14 +239,31 @@ impl BatGenerator {
         let generator_dir: PathBuf = ctx.paths.generators.join(self.name());
         let config_path: PathBuf = generator_dir.join("bat.conf");
 
-        fs::create_dir_all(&generator_dir)?;
-        fs::write(config_path, config_content)?;
+        fs::create_dir_all(&generator_dir).with_context(|| {
+            format!(
+                "Failed to create `bat` generator directory: {}",
+                generator_dir.display()
+            )
+        })?;
+
+        fs::write(&config_path, config_content)
+            .with_context(|| format!("Failed to write bat config: {}", config_path.display()))?;
         Ok(())
     }
 
     fn rebuild_bat_cache(&self, ctx: &IrisContext) -> Result<()> {
-        ctx.log.info("Rebuilding bat cache...");
-        Command::new("bat").arg("cache").arg("--build").output()?;
+        ctx.log.info("Rebuilding `bat` cache...");
+        let output = Command::new("bat")
+            .arg("cache")
+            .arg("--build")
+            .output()
+            .context("Failed to execute `bat` command. Is it installed and in your PATH?")?;
+
+        if !output.status.success() {
+            let err = String::from_utf8_lossy(&output.stderr);
+            anyhow::bail!("`bat` cache rebuild failed: {}", err.trim());
+        }
+
         Ok(())
     }
 }

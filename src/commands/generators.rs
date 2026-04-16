@@ -90,57 +90,52 @@ pub fn exec(action: GenAction, ctx: &mut IrisContext) -> anyhow::Result<()> {
         }
 
         GenAction::Enable { name } => {
+            let g = ctx.registry.get(&name).ok_or_else(|| {
+                anyhow::anyhow!(
+                    "Unknown generator: `{}`. Use `{}` to see available.",
+                    name.bold().green(),
+                    "iris gen list".italic().cyan()
+                )
+            })?;
             println!();
 
-            if !ctx.registry.exists(&name) {
-                ctx.log.error(
-                    &format!(
-                        "Unknown generator: '{}'. Use 'iris gen list' to see available.",
-                        name.bold()
-                    ),
-                    0,
-                );
-                return Ok(());
-            }
-
-            if !ctx.registry.is_installed(&name) {
+            if !g.is_installed() {
                 ctx.log.warn(
-                    "Generator exists in Iris, but the app is not installed in your OS",
-                    0,
+                    &format!(
+                        "Generator `{}` is recognized, but the app is not found in your OS",
+                        name.bold().green()
+                    ),
+                    1,
                 );
             }
 
             if ctx.state.enable_generator(&name) {
-                let mut task = ctx.log.step(&format!("Enabling: {}", name.cyan()), 0);
+                let mut task = ctx.log.step(&format!("Enabling: {}", name.cyan()), 1);
                 ctx.save()?;
                 task.done(true);
             } else {
                 ctx.log
-                    .warn(&format!("'{}' is already active", name.bold()), 0);
+                    .warn(&format!("`{}` is already active", name.bold().cyan()), 0);
             }
         }
 
         GenAction::Disable { name } => {
+            let _ = ctx.registry.get(&name).ok_or_else(|| {
+                anyhow::anyhow!(
+                    "Unknown generator: `{}`. Use `{}` to see available.",
+                    name.bold().green(),
+                    "iris gen list".italic().cyan()
+                )
+            })?;
             println!();
 
-            if !ctx.registry.exists(&name) {
-                ctx.log.error(
-                    &format!(
-                        "Unknown generator: '{}'. Use 'iris gen list' to see available.",
-                        name.bold()
-                    ),
-                    0,
-                );
-                return Ok(());
-            }
-
             if ctx.state.disable_generator(&name) {
-                let mut task = ctx.log.step(&format!("Disabling: {}", name.cyan()), 0);
+                let mut task = ctx.log.step(&format!("Disabling: {}", name.cyan()), 1);
                 ctx.save()?;
                 task.done(true);
             } else {
                 ctx.log
-                    .warn(&format!("'{}' is already disabled", name.bold()), 0);
+                    .warn(&format!("`{}` is already disabled", name.cyan().bold()), 0);
             }
         }
 
@@ -276,7 +271,7 @@ pub fn exec(action: GenAction, ctx: &mut IrisContext) -> anyhow::Result<()> {
                     println!(
                         " {} {}",
                         "󰚔".yellow(),
-                        "Tip: use 'iris gen enable <name>' to start syncing configs".dimmed()
+                        "Tip: use `iris gen enable <name>` to start syncing configs".dimmed()
                     );
                 }
             }
@@ -298,7 +293,7 @@ pub fn exec(action: GenAction, ctx: &mut IrisContext) -> anyhow::Result<()> {
                 if ctx.state.is_enabled(name) {
                     if !ctx.log.quiet {
                         ctx.log
-                            .info(&format!("{} is already active", name.dimmed()));
+                            .info(&format!("`{}` is already active", name.dimmed()));
                     }
                 } else {
                     {

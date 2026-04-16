@@ -1,7 +1,8 @@
-use anyhow::{Result, anyhow};
+use anyhow::{Context, Result};
+use colored::Colorize;
 use include_dir::{Dir, include_dir};
 use std::{ffi, fs, path::PathBuf};
-use tera::{Context, Tera};
+use tera::{Context as TeraContext, Tera};
 
 static TEMPLATES_DIR: Dir = include_dir!("$CARGO_MANIFEST_DIR/templates");
 
@@ -50,10 +51,15 @@ impl Templater {
     }
 
     /// Renders the resulting templated based on context
-    pub fn render(&self, template_name: &str, context: &Context) -> Result<String> {
+    pub fn render(&self, template_name: &str, context: &TeraContext) -> Result<String> {
         self.tera
-            .render(template_name, context)
-            .map_err(|e| anyhow!("Template error [{}]: {}", template_name, e))
+                .render(template_name, context)
+                .with_context(|| {
+                    format!(
+                        "Failed to render template: `{}`. Check if all variables are provided in the context.",
+                        template_name.bold().yellow()
+                    )
+                })
     }
 
     /// Load all external templates recursively

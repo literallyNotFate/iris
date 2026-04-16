@@ -42,7 +42,7 @@ impl Generator for YaziGenerator {
             self.name().bold().cyan(),
             utils::pretty_path(&link_path).magenta(),
         ));
-        self.ensure_symlink(&cache_file, &link_path, ctx)?;
+        self.ensure_symlink(&cache_file, &link_path)?;
 
         ctx.log.info(&format!(
             "{} theme applied to {}",
@@ -90,7 +90,7 @@ impl Generator for YaziGenerator {
 
     fn health_check(&self, ctx: &IrisContext) -> HealthStatus {
         if !self.is_installed() {
-            return HealthStatus::Warning("Yazi binary not found".into());
+            return HealthStatus::Warning("`yazi` binary not found".into());
         }
 
         let link_path: PathBuf = self.link_path(ctx, "");
@@ -99,15 +99,17 @@ impl Generator for YaziGenerator {
         if !link_path.exists() && !link_path.is_symlink() {
             return HealthStatus::Error {
                 message: "theme.toml link missing in yazi config".into(),
-                fix_hint: Some("run `iris sync` to create the symlink".into()),
+                fix_hint: Some(
+                    "run `iris sync` or `iris health --fix` to create the symlink".into(),
+                ),
             };
         }
 
         #[cfg(unix)]
-        if let Ok(target) = std::fs::read_link(&link_path) {
+        if let Ok(target) = fs::read_link(&link_path) {
             if target != expected_cache {
                 return HealthStatus::Warning(format!(
-                    "Yazi theme link points to an unexpected location: {:?}",
+                    "`yazi` theme link points to an unexpected location: {:?}",
                     target
                 ));
             }
@@ -115,8 +117,8 @@ impl Generator for YaziGenerator {
 
         if !expected_cache.exists() {
             return HealthStatus::Error {
-                message: "Yazi theme cache file is missing".into(),
-                fix_hint: Some("run `iris sync` to regenerate".into()),
+                message: "`yazi` theme cache file is missing".into(),
+                fix_hint: Some("run `iris sync` or `iris health --fix` to regenerate".into()),
             };
         }
 
@@ -135,19 +137,29 @@ impl Generator for YaziGenerator {
                     ctx.log.step("Restoring missing symlink...", 2).done(true);
                     let cache: PathBuf = self.cache_path(ctx, &p.name);
                     let link: PathBuf = self.link_path(ctx, &p.name);
-                    self.ensure_symlink(&cache, &link, ctx)?;
+                    self.ensure_symlink(&cache, &link)?;
                 }
                 Ok(())
             }
+
             HealthStatus::Warning(msg) if msg.contains("unexpected location") => {
                 ctx.log
                     .step("Relinking to correct location...", 2)
                     .done(true);
+
                 let cache: PathBuf = self.cache_path(ctx, &p.name);
                 let link: PathBuf = self.link_path(ctx, &p.name);
-                self.ensure_symlink(&cache, &link, ctx)
+                self.ensure_symlink(&cache, &link)
             }
-            _ => self.apply(p, ctx),
+            _ => {
+                ctx.log
+                    .step(
+                        &format!("Re-applying `{}` configuration...", self.name().bold()),
+                        2,
+                    )
+                    .done(true);
+                self.apply(p, ctx)
+            }
         }
     }
 }
@@ -158,23 +170,56 @@ impl YaziGenerator {
         let render_ctx = self.build_render_context(p);
         let content: String = ctx.templater.render(&self.template_path(), &render_ctx)?;
 
-        fs::create_dir_all(cache_file.parent().unwrap())?;
-        fs::write(&cache_file, content)?;
+        if let Some(parent) = cache_file.parent() {
+            fs::create_dir_all(parent).with_context(|| {
+                format!(
+                    "Failed to create `yazi` cache directory: {}",
+                    parent.display()
+                )
+            })?;
+        }
+
+        fs::write(&cache_file, content).with_context(|| {
+            format!(
+                "Failed to write `yazi` cache file: {}",
+                cache_file.display()
+            )
+        })?;
+
         Ok(cache_file)
     }
 
-    fn ensure_symlink(&self, target: &Path, link: &Path, _ctx: &IrisContext) -> Result<()> {
+    fn ensure_symlink(&self, target: &Path, link: &Path) -> Result<()> {
         if link.exists() || link.is_symlink() {
-            fs::remove_file(link)?;
+            fs::remove_file(link).with_context(|| {
+                format!(
+                    "Failed to remove `yazi` old symlink/file: {}",
+                    link.display()
+                )
+            })?;
         }
-        fs::create_dir_all(link.parent().unwrap())?;
+
+        if let Some(parent) = link.parent() {
+            fs::create_dir_all(parent).with_context(|| {
+                format!(
+                    "Failed to create directory for `yazi` symlink: {}",
+                    parent.display()
+                )
+            })?;
+        }
 
         #[cfg(unix)]
         {
             use std::os::unix::fs::symlink;
-            symlink(target, link)
-                .with_context(|| format!("Failed to create symlink {:?} -> {:?}", target, link))?;
+            symlink(target, link).with_context(|| {
+                format!(
+                    "Failed to create `yazi` symlink: {} -> {}",
+                    target.display(),
+                    link.display()
+                )
+            })?;
         }
+
         Ok(())
     }
 }

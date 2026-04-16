@@ -92,7 +92,7 @@ impl Generator for TmuxGenerator {
 
     fn health_check(&self, ctx: &IrisContext) -> HealthStatus {
         if !self.is_installed() {
-            return HealthStatus::Warning("tmux binary not found".into());
+            return HealthStatus::Warning("`tmux` binary not found".into());
         }
 
         let tmux_conf: PathBuf = self.resolve_tmux_conf_path(ctx);
@@ -112,7 +112,7 @@ impl Generator for TmuxGenerator {
 
             if !content.contains(marker) {
                 return HealthStatus::Warning(format!(
-                    "Iris theme is not sourced in {}. Run `iris sync`.",
+                    "Theme is not sourced in {}. Run `iris sync` or `iris health --fix` to source.",
                     tmux_conf.display()
                 ));
             }
@@ -120,7 +120,7 @@ impl Generator for TmuxGenerator {
             let expected_file = format!("{}.conf", theme);
             if !content.contains(&expected_file) {
                 return HealthStatus::Warning(format!(
-                    "tmux.conf sources a different theme, not '{}'",
+                    "tmux.conf sources a different theme, not `{}`",
                     theme
                 ));
             }
@@ -129,7 +129,9 @@ impl Generator for TmuxGenerator {
             if !link.exists() {
                 return HealthStatus::Error {
                     message: format!("Theme link missing: {}", link.display()),
-                    fix_hint: Some("Run `iris sync` to restore symlink".into()),
+                    fix_hint: Some(
+                        "Run `iris sync` or `iris health --fix` to restore symlink".into(),
+                    ),
                 };
             }
         }
@@ -141,10 +143,7 @@ impl Generator for TmuxGenerator {
         match status {
             HealthStatus::Error { message, .. } if message.contains("Theme link missing") => {
                 ctx.log
-                    .step(
-                        &format!("Restoring {} theme symlink...", self.name().bold()),
-                        2,
-                    )
+                    .step("Restoring `tmux` theme symlink...", 2)
                     .done(true);
 
                 self.apply(p, &ctx.silent())
@@ -164,7 +163,7 @@ impl Generator for TmuxGenerator {
             _ => {
                 ctx.log
                     .step(
-                        &format!("Refreshing {} configuration...", self.name().bold()),
+                        &format!("Re-applying `{}` configuration...", self.name().bold()),
                         2,
                     )
                     .done(true);
@@ -178,7 +177,7 @@ impl Generator for TmuxGenerator {
 impl TmuxGenerator {
     /// Ensure tmux.conf sources the iris theme file.
     /// Replaces an existing Iris source line or appends one before the `run` line (tpm).
-    fn update_tmux_conf(&self, path: &PathBuf, theme_name: &str) -> Result<()> {
+    fn update_tmux_conf(&self, path: &Path, theme_name: &str) -> Result<()> {
         if !path.exists() {
             return Ok(());
         }
@@ -188,7 +187,9 @@ impl TmuxGenerator {
             theme_name
         );
 
-        let content = fs::read_to_string(path)?;
+        let content: String = fs::read_to_string(path)
+            .with_context(|| format!("Failed to read `tmux` config: {}", path.display()))?;
+
         let mut lines: Vec<String> = content.lines().map(|s| s.to_string()).collect();
         let mut updated = false;
 
@@ -211,8 +212,9 @@ impl TmuxGenerator {
             }
         }
 
-        let new_content = lines.join("\n");
-        fs::write(path, new_content)?;
+        let new_content: String = lines.join("\n");
+        fs::write(path, new_content)
+            .with_context(|| format!("Failed to update tmux.conf: {}", path.display()))?;
         Ok(())
     }
 
@@ -227,25 +229,51 @@ impl TmuxGenerator {
     }
 
     fn ensure_cache_file(&self, p: &Palette, ctx: &IrisContext) -> Result<PathBuf> {
-        let cache_file = self.cache_path(ctx, &p.name);
+        let cache_file: PathBuf = self.cache_path(ctx, &p.name);
         let render_ctx = self.build_render_context(p);
-        let content = ctx.templater.render(&self.template_path(), &render_ctx)?;
+        let content: String = ctx.templater.render(&self.template_path(), &render_ctx)?;
 
-        fs::create_dir_all(cache_file.parent().unwrap())?;
-        fs::write(&cache_file, content)?;
+        if let Some(parent) = cache_file.parent() {
+            fs::create_dir_all(parent).with_context(|| {
+                format!("Failed to create `tmux` directory: {}", parent.display())
+            })?;
+        }
+
+        fs::write(&cache_file, content).with_context(|| {
+            format!(
+                "Failed to write `tmux` theme file: {}",
+                cache_file.display()
+            )
+        })?;
+
         Ok(cache_file)
     }
 
     fn ensure_symlink(&self, target: &Path, link: &Path, _ctx: &IrisContext) -> Result<()> {
         if link.exists() || link.is_symlink() {
-            fs::remove_file(link)?;
+            fs::remove_file(link)
+                .with_context(|| format!("Failed to remove `tmux` old link: {}", link.display()))?;
         }
-        fs::create_dir_all(link.parent().unwrap())?;
+
+        if let Some(parent) = link.parent() {
+            fs::create_dir_all(parent).with_context(|| {
+                format!(
+                    "Failed to create parent directory for `tmux` link: {}",
+                    parent.display()
+                )
+            })?;
+        }
+
         #[cfg(unix)]
         {
             use std::os::unix::fs::symlink;
-            symlink(target, link)
-                .with_context(|| format!("Failed to link {:?} -> {:?}", target, link))?;
+            symlink(target, link).with_context(|| {
+                format!(
+                    "Failed to create `tmux` symlink: {} -> {}",
+                    target.display(),
+                    link.display()
+                )
+            })?;
         }
         Ok(())
     }

@@ -1,8 +1,9 @@
 use crate::{
     core::IrisContext,
     models::{Palette, State},
-    modules::{Generator, GeneratorType, multiplexer, prompts, system, terminals, tools},
+    modules::{Generator, GeneratorType},
 };
+use anyhow::{Context, Result};
 use colored::Colorize;
 use std::{collections::BTreeSet, sync::Arc};
 
@@ -15,6 +16,7 @@ pub struct GeneratorRegistry {
 impl GeneratorRegistry {
     /// Creates registy and appends all generators/modules
     pub fn new() -> Self {
+        use crate::modules::{multiplexer, prompts, system, terminals, tools};
         let mut generators: Vec<Arc<dyn Generator>> = Vec::new();
 
         generators.extend(terminals::get_all());
@@ -98,7 +100,7 @@ impl GeneratorRegistry {
 
 impl GeneratorRegistry {
     /// Apply themes to available programs (enabled generators)
-    pub fn apply_all(&self, palette: &Palette, ctx: &IrisContext) -> anyhow::Result<()> {
+    pub fn apply_all(&self, palette: &Palette, ctx: &IrisContext) -> Result<()> {
         let to_apply: Vec<&dyn Generator> = self
             .generators
             .iter()
@@ -119,11 +121,11 @@ impl GeneratorRegistry {
 
         for (i, generator) in to_apply.iter().enumerate() {
             let mut task = ctx.log.step(generator.name(), 2);
-
-            generator.apply(palette, ctx).map_err(|e| {
-                ctx.log
-                    .error(&format!("Failed {}: {}", generator.name(), e), 1);
-                e
+            generator.apply(palette, ctx).with_context(|| {
+                format!(
+                    "Failed to apply theme to `{}`",
+                    generator.name().bold().green()
+                )
             })?;
 
             task.done(i == total - 1);

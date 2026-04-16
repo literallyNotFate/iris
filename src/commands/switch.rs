@@ -13,26 +13,20 @@ pub fn exec(name: String, ctx: &mut IrisContext) -> anyhow::Result<()> {
         "󰚔".yellow().bold(),
         "Manual theme switch".bold()
     );
-    println!();
 
-    if !Palette::exists(&name, &ctx.log) {
-        println!();
-        ctx.log.error(
-            &format!(
-                "Theme '{}' not found in Neovim.",
-                utils::capitalize(&name).red().bold()
-            ),
-            0,
+    if !Palette::exists(&name) {
+        anyhow::bail!(
+            "Theme '{}' not found in cache or Neovim.\n{}  Run `:colorscheme <Tab>` in Neovim to see all available themes.",
+            utils::capitalize(&name).yellow().bold(),
+            "󰋗".blue()
         );
-
-        if !ctx.log.quiet {
-            println!(
-                "{}  Run `:colorscheme <Tab>` in Neovim to see all available themes.",
-                "󰋗".blue()
-            );
-        }
-        return Ok(());
     }
+
+    println!(
+        "\n {}  Theme {} found!",
+        "󰄬".green().bold(),
+        utils::capitalize(&name).yellow().bold()
+    );
 
     apply_theme(&name, ctx)
 }

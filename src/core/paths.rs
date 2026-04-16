@@ -48,35 +48,32 @@ impl IrisPaths {
 
     /// Creates all folders for iris if there none
     pub fn ensure_dirs(&self) -> Result<()> {
-        fs::create_dir_all(&self.config).with_context(|| "Failed to create 'config' directory")?;
-        fs::create_dir_all(&self.core).with_context(|| "Failed to create 'core' directory")?;
-        fs::create_dir_all(&self.palettes).with_context(|| "Failed to create palette path")?;
-        fs::create_dir_all(&self.generators).with_context(|| "Failed to create 'gen' directory")?;
-        fs::create_dir_all(&self.bin).with_context(|| "Failed to create 'bin' directory")?;
+        fs::create_dir_all(&self.config).context("Failed to create 'config' directory")?;
+        fs::create_dir_all(&self.core).context("Failed to create 'core' directory")?;
+        fs::create_dir_all(&self.palettes).context("Failed to create palette path")?;
+        fs::create_dir_all(&self.generators).context("Failed to create 'gen' directory")?;
+        fs::create_dir_all(&self.bin).context("Failed to create 'bin' directory")?;
         Ok(())
     }
 
     /// Cleans only 'gen' folder, where all themes located (e.g bat.conf)
     pub fn clean_gen(&self) -> Result<()> {
         if self.generators.exists() {
-            fs::remove_dir_all(&self.generators)
-                .with_context(|| "Cannot remove the 'gen' folder")?;
+            fs::remove_dir_all(&self.generators).context("Cannot remove the 'gen' folder")?;
         }
         if self.bin.exists() {
-            fs::remove_dir_all(&self.bin).with_context(|| "Cannot remove the 'bin' folder")?;
+            fs::remove_dir_all(&self.bin).context("Cannot remove the 'bin' folder")?;
         }
 
-        fs::create_dir_all(&self.generators)
-            .with_context(|| "Failed to recreate 'gen' directory")?;
-        fs::create_dir_all(&self.bin).with_context(|| "Failed to recreate 'bin' directory")?;
+        fs::create_dir_all(&self.generators).context("Failed to recreate 'gen' directory")?;
+        fs::create_dir_all(&self.bin).context("Failed to recreate 'bin' directory")?;
         Ok(())
     }
 
     /// Clears the entire iris cache directory and recreates empty directories
     pub fn purge_all(&self) -> Result<()> {
         if self.cache.exists() {
-            fs::remove_dir_all(&self.cache)
-                .with_context(|| "Cannot remove the 'cache' directory")?;
+            fs::remove_dir_all(&self.cache).context("Cannot clear the 'cache' directory")?;
         }
 
         self.ensure_dirs()?;

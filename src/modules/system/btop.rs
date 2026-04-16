@@ -105,7 +105,7 @@ impl Generator for BtopGenerator {
 
     fn health_check(&self, ctx: &IrisContext) -> HealthStatus {
         if !self.is_installed() {
-            return HealthStatus::Warning("btop binary not found".into());
+            return HealthStatus::Warning("`btop` binary not found".into());
         }
 
         let themes_dir: PathBuf = self.resolve_config_directory(ctx);
@@ -114,7 +114,7 @@ impl Generator for BtopGenerator {
         if !conf_path.exists() {
             return HealthStatus::Error {
                 message: "btop.conf missing".into(),
-                fix_hint: Some("Run btop once to generate default config".into()),
+                fix_hint: Some("Run `btop` once to generate default config".into()),
             };
         }
 
@@ -135,7 +135,9 @@ impl Generator for BtopGenerator {
             if !link.exists() {
                 return HealthStatus::Error {
                     message: format!("Theme file {}.theme missing in btop themes folder", theme),
-                    fix_hint: Some("Run `iris sync` to restore the theme link".into()),
+                    fix_hint: Some(
+                        "Run `iris sync` or `iris health --fix` to restore the theme link".into(),
+                    ),
                 };
             }
         }
@@ -148,10 +150,7 @@ impl Generator for BtopGenerator {
             HealthStatus::Error { message, .. } => {
                 if message.contains("missing") {
                     ctx.log
-                        .step(
-                            &format!("Restoring {} theme symlink...", self.name().bold()),
-                            2,
-                        )
+                        .step("Restoring `btop` theme symlink...", 2)
                         .done(true);
 
                     let cache = self.cache_path(ctx, &p.name);
@@ -179,7 +178,7 @@ impl Generator for BtopGenerator {
             _ => {
                 ctx.log
                     .step(
-                        &format!("Refreshing {} configuration...", self.name().bold()),
+                        &format!("Re-applying `{}` configuration...", self.name().bold()),
                         2,
                     )
                     .done(true);
@@ -196,11 +195,12 @@ impl BtopGenerator {
             return Ok(());
         }
 
-        let content = fs::read_to_string(path)?;
-        let mut lines: Vec<String> = content.lines().map(|s| s.to_string()).collect();
-        let mut updated = false;
+        let content = fs::read_to_string(path)
+            .with_context(|| format!("Failed to read `btop` config: {}", path.display()))?;
 
-        let theme_line = format!("color_theme = \"{}\"", name);
+        let mut lines: Vec<String> = content.lines().map(|s| s.to_string()).collect();
+        let mut updated: bool = false;
+        let theme_line: String = format!("color_theme = \"{}\"", name);
 
         for line in lines.iter_mut() {
             if line.trim_start().starts_with("color_theme =") {
@@ -214,30 +214,63 @@ impl BtopGenerator {
             lines.push(theme_line);
         }
 
-        fs::write(path, lines.join("\n"))?;
+        fs::write(path, lines.join("\n"))
+            .with_context(|| format!("Failed to update `btop` config: {}", path.display()))?;
         Ok(())
     }
 
     fn ensure_cache_file(&self, p: &Palette, ctx: &IrisContext) -> Result<PathBuf> {
-        let cache_file = self.cache_path(ctx, &p.name);
+        let cache_file: PathBuf = self.cache_path(ctx, &p.name);
         let render_ctx = self.build_render_context(p);
-        let content = ctx.templater.render(&self.template_path(), &render_ctx)?;
+        let content: String = ctx.templater.render(&self.template_path(), &render_ctx)?;
 
-        fs::create_dir_all(cache_file.parent().unwrap())?;
-        fs::write(&cache_file, content)?;
+        if let Some(parent) = cache_file.parent() {
+            fs::create_dir_all(parent).with_context(|| {
+                format!(
+                    "Failed to create `btop` cache directory: {}",
+                    parent.display()
+                )
+            })?;
+        }
+
+        fs::write(&cache_file, content).with_context(|| {
+            format!(
+                "Failed to write `btop` theme file: {}",
+                cache_file.display()
+            )
+        })?;
         Ok(cache_file)
     }
 
     fn ensure_symlink(&self, target: &Path, link: &Path, _ctx: &IrisContext) -> Result<()> {
         if link.exists() || link.is_symlink() {
-            fs::remove_file(link)?;
+            fs::remove_file(link).with_context(|| {
+                format!(
+                    "Failed to remove existing `btop` theme link: {}",
+                    link.display()
+                )
+            })?;
         }
-        fs::create_dir_all(link.parent().unwrap())?;
+
+        if let Some(parent) = link.parent() {
+            fs::create_dir_all(parent).with_context(|| {
+                format!(
+                    "Failed to create parent directory for `btop` link: {}",
+                    parent.display()
+                )
+            })?;
+        }
+
         #[cfg(unix)]
         {
             use std::os::unix::fs::symlink;
-            symlink(target, link)
-                .with_context(|| format!("Failed to link {:?} -> {:?}", target, link))?;
+            symlink(target, link).with_context(|| {
+                format!(
+                    "Failed to create `btop` symlink: {} -> {}",
+                    target.display(),
+                    link.display()
+                )
+            })?;
         }
         Ok(())
     }

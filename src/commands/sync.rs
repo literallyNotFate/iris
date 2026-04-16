@@ -15,7 +15,7 @@ pub fn exec(ctx: &mut IrisContext) -> anyhow::Result<()> {
 
     let theme = {
         let mut t = ctx.log.step("Detecting Neovim theme", 1);
-        let name = Palette::current(&ctx.log)?;
+        let name = Palette::current()?;
         t.done(true);
         name
     };

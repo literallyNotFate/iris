@@ -79,7 +79,7 @@ impl Generator for GhosttyGenerator {
 
     fn health_check(&self, ctx: &IrisContext) -> HealthStatus {
         if !self.is_installed() {
-            return HealthStatus::Warning("Ghostty binary not found".into());
+            return HealthStatus::Warning("`ghostty` binary not found".into());
         }
 
         let ghostty_dir: PathBuf = self.resolve_config_directory(ctx);
@@ -90,13 +90,13 @@ impl Generator for GhosttyGenerator {
         if !link_path.exists() {
             return HealthStatus::Error {
                 message: "current_theme.conf missing".into(),
-                fix_hint: Some("run `iris sync` to create the link".into()),
+                fix_hint: Some("run `iris sync` or `iris health --fix` to create the link".into()),
             };
         }
 
         if !config_path.exists() {
             return HealthStatus::Error {
-                message: "Ghostty config file missing".into(),
+                message: "`ghostty` config file missing".into(),
                 fix_hint: Some(format!("Create {}", config_path.display())),
             };
         }
@@ -127,13 +127,7 @@ impl Generator for GhosttyGenerator {
                 let msg_low: String = message.to_lowercase();
                 if msg_low.contains("missing") || msg_low.contains("not found") {
                     ctx.log
-                        .step(
-                            &format!(
-                                "Repairing {} configuration and paths...",
-                                self.name().bold()
-                            ),
-                            2,
-                        )
+                        .step("Repairing `ghostty` configuration and paths...", 2)
                         .done(true);
 
                     let cache = self.cache_path(ctx, &p.name);
@@ -145,59 +139,124 @@ impl Generator for GhosttyGenerator {
             }
             HealthStatus::Warning(msg) if msg.contains("not imported") => {
                 ctx.log
-                    .step(
-                        &format!("Injecting import into {}...", self.name().bold()),
-                        2,
-                    )
+                    .step("Injecting import into `ghostty`...", 2)
                     .done(true);
                 self.inject_import_line(ctx)
             }
-            _ => self.apply(p, &ctx.silent()),
+            _ => {
+                ctx.log
+                    .step(
+                        &format!("Re-applying `{}` configuration...", self.name().bold()),
+                        2,
+                    )
+                    .done(true);
+                self.apply(p, &ctx.silent())
+            }
         }
     }
 }
 
 impl GhosttyGenerator {
     fn ensure_cache_file(&self, p: &Palette, ctx: &IrisContext) -> Result<PathBuf> {
-        let cache_file = self.cache_path(ctx, &p.name);
+        let cache_file: PathBuf = self.cache_path(ctx, &p.name);
         let render_ctx = self.build_render_context(p);
-        let content = ctx.templater.render(&self.template_path(), &render_ctx)?;
+        let content: String = ctx.templater.render(&self.template_path(), &render_ctx)?;
 
-        fs::create_dir_all(cache_file.parent().unwrap())?;
-        fs::write(&cache_file, content)?;
+        if let Some(parent) = cache_file.parent() {
+            fs::create_dir_all(parent).with_context(|| {
+                format!("Failed to create `ghostty` directory: {}", parent.display())
+            })?;
+        }
+
+        fs::write(&cache_file, content).with_context(|| {
+            format!(
+                "Failed to write `ghostty` cache file: {}",
+                cache_file.display()
+            )
+        })?;
         Ok(cache_file)
     }
 
-    fn ensure_symlink(&self, target: &Path, link: &Path, _ctx: &IrisContext) -> Result<()> {
+    fn ensure_symlink(&self, target: &Path, link: &Path, _ctx: &IrisContext) -> anyhow::Result<()> {
         if link.exists() || link.is_symlink() {
-            fs::remove_file(link)?;
+            fs::remove_file(link).with_context(|| {
+                format!(
+                    "Failed to remove existing `ghostty` file/link at {}",
+                    link.display()
+                )
+            })?;
         }
-        fs::create_dir_all(link.parent().unwrap())?;
+
+        if let Some(parent) = link.parent() {
+            fs::create_dir_all(parent).with_context(|| {
+                format!(
+                    "Failed to create parent directory for `ghostty` link: {}",
+                    parent.display()
+                )
+            })?;
+        }
+
         #[cfg(unix)]
         {
             use std::os::unix::fs::symlink;
-            symlink(target, link)
-                .with_context(|| format!("Failed to link {:?} -> {:?}", target, link))?;
+            symlink(target, link).with_context(|| {
+                format!(
+                    "Failed to create `ghostty` symlink: {} -> {}",
+                    target.display(),
+                    link.display()
+                )
+            })?;
         }
         Ok(())
     }
 
-    fn inject_import_line(&self, ctx: &IrisContext) -> Result<()> {
-        let config_path = self.resolve_config_directory(ctx).join("config");
-        let import_line = format!("config-file = {}", self.target_file_name(""));
+    fn inject_import_line(&self, ctx: &IrisContext) -> anyhow::Result<()> {
+        let config_path: PathBuf = self.resolve_config_directory(ctx).join("config");
+        let import_line: String = format!("config-file = {}", self.target_file_name(""));
 
         if !config_path.exists() {
-            fs::write(&config_path, format!("{}\n", import_line))?;
+            if let Some(parent) = config_path.parent() {
+                fs::create_dir_all(parent).with_context(|| {
+                    format!(
+                        "Failed to create parent `ghostty` directory: {}",
+                        parent.display()
+                    )
+                })?;
+            }
+
+            fs::write(&config_path, format!("{}\n", import_line)).with_context(|| {
+                format!(
+                    "Failed to create `ghostty` config file: {}",
+                    config_path.display()
+                )
+            })?;
             return Ok(());
         }
 
-        let content = fs::read_to_string(&config_path)?;
+        let content = fs::read_to_string(&config_path).with_context(|| {
+            format!("Failed to read `ghostty` config: {}", config_path.display())
+        })?;
+
         if !content.contains(&import_line) {
             use std::fs::OpenOptions;
             use std::io::Write;
 
-            let mut file = OpenOptions::new().append(true).open(&config_path)?;
-            writeln!(file, "\n{}", import_line)?;
+            let mut file = OpenOptions::new()
+                .append(true)
+                .open(&config_path)
+                .with_context(|| {
+                    format!(
+                        "Failed to open `ghostty` config for appending: {}",
+                        config_path.display()
+                    )
+                })?;
+
+            writeln!(file, "\n{}", import_line).with_context(|| {
+                format!(
+                    "Failed to write to `ghostty` config: {}",
+                    config_path.display()
+                )
+            })?;
         }
 
         Ok(())

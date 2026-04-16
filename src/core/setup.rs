@@ -4,7 +4,6 @@ use colored::Colorize;
 use std::{
     fs::{self, OpenOptions},
     io::Write,
-    path::PathBuf,
 };
 
 /// Struct for initializing state of application
@@ -55,8 +54,7 @@ impl IrisSetup {
         }
 
         task.info("Detecting active Neovim theme...");
-        let current_theme = Palette::current(&ctx.log)
-            .context("Neovim theme not detected. Please set a colorscheme in Neovim first.")?;
+        let current_theme = Palette::current()?;
 
         task.info("Scanning for compatible tools...");
         let installed = ctx.registry.installed();
@@ -73,7 +71,7 @@ impl IrisSetup {
         }
 
         ctx.state.set_theme(current_theme);
-        ctx.save()?;
+        ctx.save().context("Failed to save initial state.json")?;
 
         task.info(&format!(
             "Configuration persisted to {}",
@@ -82,9 +80,9 @@ impl IrisSetup {
         Ok(())
     }
 
-    pub fn setup_zsh_hook(ctx: &IrisContext, task: &Task) -> Result<()> {
-        let home: PathBuf = dirs::home_dir().context("Home dir not found")?;
-        let zshrc: PathBuf = home.join(".zshrc");
+    pub fn setup_zsh_hook(ctx: &IrisContext, task: &Task) -> anyhow::Result<()> {
+        let home = dirs::home_dir().context("Home directory not found")?;
+        let zshrc = home.join(".zshrc");
 
         if !zshrc.exists() {
             ctx.log
@@ -93,7 +91,8 @@ impl IrisSetup {
         }
 
         let hook_id: &str = "# --- Iris FZF Sync ---";
-        let content: String = fs::read_to_string(&zshrc)?;
+        let content: String = fs::read_to_string(&zshrc)
+            .with_context(|| format!("Failed to read {}", zshrc.display()))?;
 
         if content.contains(hook_id) {
             task.info("Zsh hook already present in .zshrc.");
@@ -123,10 +122,13 @@ add-zsh-hook precmd _iris_fzf_sync
             cache_file.display()
         );
 
-        let full_hook: String = format!("\n{}\n", hook);
+        let mut file = OpenOptions::new()
+            .append(true)
+            .open(&zshrc)
+            .with_context(|| format!("Failed to open {} for appending", zshrc.display()))?;
 
-        let mut file = OpenOptions::new().append(true).open(&zshrc)?;
-        writeln!(file, "{}", full_hook)?;
+        writeln!(file, "\n{}", hook.trim())
+            .with_context(|| format!("Failed to write to {}", zshrc.display()))?;
 
         task.info("Hook successfully appended.");
         Ok(())
@@ -144,7 +146,7 @@ mod tests {
     fn should_handle_setup_zsh_hook_injection() {
         let (tmp, ctx) = create_test_context();
         let fake_home = tmp.path();
-        let zshrc_path: PathBuf = fake_home.join(".zshrc");
+        let zshrc_path = fake_home.join(".zshrc");
 
         fs::write(&zshrc_path, "export PATH=$HOME/bin:$PATH\n").unwrap();
 

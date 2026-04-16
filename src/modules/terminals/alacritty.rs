@@ -78,7 +78,7 @@ impl Generator for AlacrittyGenerator {
 
     fn health_check(&self, ctx: &IrisContext) -> HealthStatus {
         if !self.is_installed() {
-            return HealthStatus::Warning("Alacritty binary not found".into());
+            return HealthStatus::Warning("`alacritty` binary not found".into());
         }
 
         let alacritty_dir: PathBuf = self.resolve_config_directory(ctx);
@@ -88,8 +88,8 @@ impl Generator for AlacrittyGenerator {
 
         if !link_path.exists() && !link_path.is_symlink() {
             return HealthStatus::Error {
-                message: "Theme link missing in config dir".into(),
-                fix_hint: Some("run `iris sync` to regenerate".into()),
+                message: "Theme link missing in `alacritty` config directory".into(),
+                fix_hint: Some("run `iris sync` or `iris health --fix` to regenerate".into()),
             };
         }
 
@@ -131,10 +131,7 @@ impl Generator for AlacrittyGenerator {
                 let message_low = message.to_lowercase();
                 if message_low.contains("link missing") {
                     ctx.log
-                        .step(
-                            &format!("Restoring {} theme symlink...", self.name().bold()),
-                            2,
-                        )
+                        .step("Restoring `alacritty` theme symlink...", 2)
                         .done(true);
 
                     let cache = self.cache_path(ctx, "");
@@ -144,10 +141,7 @@ impl Generator for AlacrittyGenerator {
 
                 if message_low.contains("import") {
                     ctx.log
-                        .step(
-                            &format!("Injecting theme import into {}...", "alacritty.toml".bold()),
-                            2,
-                        )
+                        .step("Injecting theme import into alacritty.toml...", 2)
                         .done(true);
 
                     self.inject_import_line(ctx)?;
@@ -161,17 +155,11 @@ impl Generator for AlacrittyGenerator {
 
                 if msg_low.contains("unexpected") || msg_low.contains("old") {
                     ctx.log
-                        .step(
-                            &format!("Updating {} symlink target...", self.name().bold()),
-                            2,
-                        )
+                        .step("Updating `alacritty` symlink target...", 2)
                         .done(true);
                 } else {
                     ctx.log
-                        .step(
-                            &format!("Fixing {} warning: {}...", self.name().bold(), msg),
-                            2,
-                        )
+                        .step(&format!("Fixing `alacritty` warning: {}...", msg), 2)
                         .done(true);
                 }
 
@@ -181,11 +169,10 @@ impl Generator for AlacrittyGenerator {
             _ => {
                 ctx.log
                     .step(
-                        &format!("Syncing {} configuration...", self.name().bold()),
+                        &format!("Re-applying `{}` configuration...", self.name().bold()),
                         2,
                     )
                     .done(true);
-
                 self.apply(p, &ctx.silent())
             }
         }
@@ -194,25 +181,57 @@ impl Generator for AlacrittyGenerator {
 
 impl AlacrittyGenerator {
     fn ensure_cache_file(&self, p: &Palette, ctx: &IrisContext) -> Result<PathBuf> {
-        let cache_file = self.cache_path(ctx, &p.name);
+        let cache_file: PathBuf = self.cache_path(ctx, &p.name);
         let render_ctx = self.build_render_context(p);
-        let content = ctx.templater.render(&self.template_path(), &render_ctx)?;
+        let content: String = ctx.templater.render(&self.template_path(), &render_ctx)?;
 
-        fs::create_dir_all(cache_file.parent().unwrap())?;
-        fs::write(&cache_file, content)?;
+        if let Some(parent) = cache_file.parent() {
+            fs::create_dir_all(parent).with_context(|| {
+                format!(
+                    "Failed to create `alacritty` directory: {}",
+                    parent.display()
+                )
+            })?;
+        }
+
+        fs::write(&cache_file, content).with_context(|| {
+            format!(
+                "Failed to write `alacritty` theme: {}",
+                cache_file.display()
+            )
+        })?;
         Ok(cache_file)
     }
 
     fn ensure_symlink(&self, target: &Path, link: &Path, _ctx: &IrisContext) -> Result<()> {
         if link.exists() || link.is_symlink() {
-            fs::remove_file(link)?;
+            fs::remove_file(link).with_context(|| {
+                format!(
+                    "Failed to remove old `alacritty` theme link: {}",
+                    link.display()
+                )
+            })?;
         }
-        fs::create_dir_all(link.parent().unwrap())?;
+
+        if let Some(parent) = link.parent() {
+            fs::create_dir_all(parent).with_context(|| {
+                format!(
+                    "Failed to create parent directory for `alacritty` link: {}",
+                    parent.display()
+                )
+            })?;
+        }
+
         #[cfg(unix)]
         {
             use std::os::unix::fs::symlink;
-            symlink(target, link)
-                .with_context(|| format!("Failed to link {:?} -> {:?}", target, link))?;
+            symlink(target, link).with_context(|| {
+                format!(
+                    "Failed to create `alacritty` symlink: {} -> {}",
+                    target.display(),
+                    link.display()
+                )
+            })?;
         }
         Ok(())
     }
@@ -222,18 +241,44 @@ impl AlacrittyGenerator {
         let import_line: &str = "import = [\"~/.config/alacritty/current_theme.toml\"]";
 
         if !config_path.exists() {
-            fs::create_dir_all(config_path.parent().unwrap())?;
+            if let Some(parent) = config_path.parent() {
+                fs::create_dir_all(parent).with_context(|| {
+                    format!(
+                        "Failed to create `alacritty` config directory: {}",
+                        parent.display()
+                    )
+                })?;
+            }
+
             fs::write(
                 &config_path,
                 format!("# Alacritty Config\n{}\n", import_line),
-            )?;
+            )
+            .with_context(|| {
+                format!(
+                    "Failed to create `alacritty` config: {}",
+                    config_path.display()
+                )
+            })?;
         } else {
-            let content: String = fs::read_to_string(&config_path)?;
+            let content: String = fs::read_to_string(&config_path).with_context(|| {
+                format!(
+                    "Failed to read `alacritty` config: {}",
+                    config_path.display()
+                )
+            })?;
+
             if !content.contains("current_theme.toml") {
                 let new_content: String = format!("{}\n\n{}", import_line, content);
-                fs::write(&config_path, new_content)?;
+                fs::write(&config_path, new_content).with_context(|| {
+                    format!(
+                        "Failed to update `alacritty` config: {}",
+                        config_path.display()
+                    )
+                })?;
             }
         }
+
         Ok(())
     }
 }

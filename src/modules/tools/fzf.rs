@@ -5,6 +5,7 @@ use crate::{
     modules::{Generator, GeneratorType},
     utils::{self},
 };
+use anyhow::{Context, Result};
 use colored::Colorize;
 use std::{fs, path::PathBuf};
 
@@ -37,7 +38,7 @@ impl Generator for FzfGenerator {
             .join(".zshrc")
     }
 
-    fn apply(&self, p: &Palette, ctx: &IrisContext) -> anyhow::Result<()> {
+    fn apply(&self, p: &Palette, ctx: &IrisContext) -> Result<()> {
         ctx.log.info(&format!(
             "Generating {} script in: {}",
             self.name().bold().cyan(),
@@ -69,7 +70,7 @@ impl Generator for FzfGenerator {
 
     fn health_check(&self, ctx: &IrisContext) -> HealthStatus {
         if !self.is_installed() {
-            return HealthStatus::Warning("fzf binary not found".into());
+            return HealthStatus::Warning("`fzf` binary not found".into());
         }
 
         let zshrc: PathBuf = self.link_path(ctx, "");
@@ -78,7 +79,7 @@ impl Generator for FzfGenerator {
         if !zshrc.exists() {
             return HealthStatus::Error {
                 message: ".zshrc not found".into(),
-                fix_hint: Some("fzf theme requires a shell config to source the colors".into()),
+                fix_hint: Some("`fzf` theme requires a shell config to source the colors".into()),
             };
         }
 
@@ -95,23 +96,20 @@ impl Generator for FzfGenerator {
 
         if !cache_file.exists() {
             return HealthStatus::Error {
-                message: "fzf theme file missing from cache".into(),
-                fix_hint: Some("Run `iris sync` to regenerate it".into()),
+                message: "`fzf` theme file missing from cache".into(),
+                fix_hint: Some("Run `iris sync` or `iris health --fix` to regenerate it".into()),
             };
         }
 
         HealthStatus::Ok
     }
 
-    fn fix(&self, status: &HealthStatus, p: &Palette, ctx: &IrisContext) -> anyhow::Result<()> {
+    fn fix(&self, status: &HealthStatus, p: &Palette, ctx: &IrisContext) -> Result<()> {
         match status {
             HealthStatus::Error { message, .. } => {
                 if message.contains("missing from cache") {
                     ctx.log
-                        .step(
-                            &format!("Restoring missing {} theme file...", self.name().bold()),
-                            2,
-                        )
+                        .step(&format!("Restoring missing `fzf` theme file..."), 2)
                         .done(true);
                     return self.apply(p, &ctx.silent());
                 }
@@ -132,7 +130,7 @@ impl Generator for FzfGenerator {
             _ => {
                 ctx.log
                     .step(
-                        &format!("Re-applying {} configuration...", self.name().bold()),
+                        &format!("Re-applying `{}` configuration...", self.name().bold()),
                         2,
                     )
                     .done(true);
@@ -143,17 +141,24 @@ impl Generator for FzfGenerator {
 }
 
 impl FzfGenerator {
-    fn ensure_cache_file(&self, p: &Palette, ctx: &IrisContext) -> anyhow::Result<PathBuf> {
+    fn ensure_cache_file(&self, p: &Palette, ctx: &IrisContext) -> Result<PathBuf> {
         let cache_file: PathBuf = self.cache_path(ctx, &p.name);
         let render_ctx = self.build_render_context(p);
         let content: String = ctx.templater.render(&self.template_path(), &render_ctx)?;
 
-        fs::create_dir_all(cache_file.parent().unwrap())?;
-        fs::write(&cache_file, content)?;
+        if let Some(parent) = cache_file.parent() {
+            fs::create_dir_all(parent).with_context(|| {
+                format!("Failed to create fzf cache directory: {}", parent.display())
+            })?;
+        }
+
+        fs::write(&cache_file, content)
+            .with_context(|| format!("Failed to write fzf cache: {}", cache_file.display()))?;
+
         Ok(cache_file)
     }
 
-    fn inject_source_line(&self, ctx: &IrisContext) -> anyhow::Result<()> {
+    fn inject_source_line(&self, ctx: &IrisContext) -> Result<()> {
         let zshrc: PathBuf = self.link_path(ctx, "");
         let cache_file: PathBuf = self.cache_path(ctx, "");
         let source_line: String = format!(
@@ -171,7 +176,9 @@ impl FzfGenerator {
         new_content.push_str(&source_line);
         new_content.push('\n');
 
-        fs::write(&zshrc, new_content)?;
+        fs::write(&zshrc, new_content)
+            .with_context(|| format!("Failed to update configuration file: {}", zshrc.display()))?;
+
         Ok(())
     }
 }
