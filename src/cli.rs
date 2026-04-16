@@ -59,6 +59,12 @@ pub enum Commands {
         #[command(subcommand)]
         action: GenAction,
     },
+
+    /// Manage application cache command
+    Cache {
+        #[command(subcommand)]
+        action: CacheAction,
+    },
 }
 
 #[derive(ValueEnum, Clone, Copy, PartialEq, Eq)]
@@ -92,5 +98,15 @@ pub enum GenAction {
         /// Filter by state (active, ready, broken, missing)
         #[arg(short = 's', long = "status")]
         status: Option<StatusFilter>,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum CacheAction {
+    /// Clean generated configurations cache
+    Clean {
+        /// Clean all (including themes and history), not only the configs
+        #[arg(short, long)]
+        all: bool,
     },
 }

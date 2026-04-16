@@ -2,6 +2,7 @@ use crate::{cli::Commands, core::IrisContext, utils};
 use anyhow::{Context, Result};
 
 pub mod apply;
+pub mod cache;
 pub mod generators;
 pub mod health;
 pub mod setup;
@@ -23,6 +24,7 @@ pub fn handle(command: Commands, ctx: &mut IrisContext) -> Result<()> {
         Commands::Watch { interval } => watch::exec(interval, ctx)?,
         Commands::Health { fix } => health::exec(fix, ctx)?,
         Commands::Gen { action } => generators::exec(action, ctx)?,
+        Commands::Cache { action } => cache::exec(action, ctx)?,
     }
 
     Ok(())
