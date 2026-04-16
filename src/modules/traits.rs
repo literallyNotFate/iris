@@ -1,5 +1,5 @@
 use crate::{commands::HealthStatus, core::IrisContext, models::Palette, modules::GeneratorType};
-use std::path::PathBuf;
+use std::{fs, path::PathBuf};
 
 /// Main trait for all generators
 pub trait Generator: Send + Sync {
@@ -79,4 +79,20 @@ pub trait Generator: Send + Sync {
     /// Basic template context builder
     /// Basically passes all palette colors to templater
     fn build_render_context(&self, p: &Palette) -> tera::Context;
+
+    /// Clear generator cached files
+    fn clear(&self, ctx: &IrisContext) -> anyhow::Result<()> {
+        let name: &str = self.name();
+        let gen_cache_dir: PathBuf = ctx.paths.generators.join(name);
+        if gen_cache_dir.exists() {
+            fs::remove_dir_all(&gen_cache_dir)?;
+        }
+
+        let bin_file: PathBuf = self.cache_path(ctx, "");
+        if bin_file.exists() {
+            fs::remove_file(bin_file)?;
+        }
+
+        Ok(())
+    }
 }
