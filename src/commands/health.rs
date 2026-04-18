@@ -1,4 +1,4 @@
-use crate::{core::IrisContext, models::Palette, ui::Logger};
+use crate::{core::IrisContext, models::Palette};
 use colored::Colorize;
 
 /// Module health status
@@ -24,10 +24,7 @@ pub fn exec(fix: bool, ctx: &IrisContext) -> anyhow::Result<()> {
 
     let mut issues_found: bool = false;
     let palette: Option<Palette> = if fix {
-        Some(Palette::fetch(
-            &ctx.state.current_theme,
-            &Logger::new(true),
-        )?)
+        Some(Palette::fetch(&ctx.state.current_theme, &ctx.silent())?)
     } else {
         None
     };
@@ -82,7 +79,7 @@ pub fn exec(fix: bool, ctx: &IrisContext) -> anyhow::Result<()> {
     println!("\n  {}  {}", "󰚥".dimmed(), "Check complete".dimmed());
     if issues_found && !fix {
         println!(
-            "  {}  Run {} to resolve issues automatically.",
+            "  {}  Run `{}` to resolve issues automatically.",
             "󰋽".blue(),
             "iris health --fix".cyan().bold()
         );

@@ -14,7 +14,7 @@ pub fn exec(name: String, ctx: &mut IrisContext) -> anyhow::Result<()> {
         "Manual theme switch".bold()
     );
 
-    if !Palette::exists(&name) {
+    if !Palette::exists(&name, ctx) {
         anyhow::bail!(
             "Theme '{}' not found in cache or Neovim.\n{}  Run `:colorscheme <Tab>` in Neovim to see all available themes.",
             utils::capitalize(&name).yellow().bold(),

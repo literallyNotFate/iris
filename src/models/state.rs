@@ -1,3 +1,4 @@
+use crate::models::NvimStrategy;
 use anyhow::{Context, Result};
 pub use serde::{Deserialize, Serialize};
 use std::{collections::BTreeSet, fs, path::PathBuf};
@@ -7,6 +8,9 @@ use std::{collections::BTreeSet, fs, path::PathBuf};
 pub struct State {
     pub current_theme: String,
     pub enabled_generators: BTreeSet<String>,
+
+    #[serde(default)]
+    pub nvim: NvimStrategy,
 }
 
 impl State {
@@ -14,6 +18,7 @@ impl State {
         Self {
             current_theme,
             enabled_generators,
+            nvim: NvimStrategy::default(),
         }
     }
 
@@ -56,6 +61,16 @@ impl State {
     /// Check if generator is enabled
     pub fn is_enabled(&self, name: &str) -> bool {
         self.enabled_generators.contains(name)
+    }
+
+    /// Wrapper to get rtp command
+    pub fn get_rtp_command(&self) -> Option<String> {
+        self.nvim.get_rtp_command()
+    }
+
+    /// Wrapper to path resolve for strategy
+    pub fn nvim_plugins_path(&self) -> Option<PathBuf> {
+        NvimStrategy::resolve_path(&self.nvim)
     }
 
     /// Save state to disk
@@ -130,6 +145,22 @@ mod tests {
     }
 
     #[test]
+    fn should_handle_missing_nvim_field_gracefully() {
+        let temp_dir: TempDir = TempDir::new("iris_compat_test").unwrap();
+        let file_path: PathBuf = temp_dir.path().join("old_state.json");
+
+        let old_raw_json = r#"{
+            "current_theme": "melange",
+            "enabled_generators": ["alacritty"]
+        }"#;
+        fs::write(&file_path, old_raw_json).unwrap();
+
+        let loaded = State::load_from(&file_path).expect("Should parse even without nvim field");
+        assert_eq!(loaded.current_theme, "melange");
+        assert_eq!(loaded.nvim, NvimStrategy::Default);
+    }
+
+    #[test]
     fn should_handle_load_or_default_logic() {
         let temp_dir: TempDir = TempDir::new("iris_non_existent").unwrap();
         let file_path: PathBuf = temp_dir.path().join("not_found.json");
@@ -150,5 +181,21 @@ mod tests {
 
         let json = state.to_json().unwrap();
         assert!(json.contains('\n'));
+    }
+
+    #[test]
+    fn should_persist_nvim_strategy() {
+        let temp_dir: TempDir = TempDir::new("iris_enum_test").unwrap();
+        let file_path: PathBuf = temp_dir.path().join("state.json");
+
+        let mut state = State::default();
+        state.nvim = NvimStrategy::Lazy;
+        state.save_to(&file_path).unwrap();
+
+        let content = fs::read_to_string(&file_path).unwrap();
+        assert!(content.contains("lazy"));
+
+        let loaded = State::load_from(&file_path).unwrap();
+        assert_eq!(loaded.nvim, NvimStrategy::Lazy);
     }
 }

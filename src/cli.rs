@@ -1,4 +1,4 @@
-use crate::modules::GeneratorType;
+use crate::{models::NvimStrategy, modules::GeneratorType};
 use clap::{Parser, Subcommand, ValueEnum};
 
 #[derive(Parser)]
@@ -75,18 +75,12 @@ pub enum Commands {
         #[command(subcommand)]
         action: CacheAction,
     },
-}
 
-#[derive(ValueEnum, Clone, Copy, PartialEq, Eq)]
-pub enum StatusFilter {
-    /// Enabled and installed
-    Active,
-    /// Installed but disabled
-    Ready,
-    /// Enabled but program not found in system
-    Broken,
-    /// Disabled and not found
-    Missing,
+    /// Global configuration management
+    Config {
+        #[command(subcommand)]
+        action: ConfigAction,
+    },
 }
 
 #[derive(Subcommand)]
@@ -133,5 +127,31 @@ pub enum CacheAction {
         /// Nuclear option: clear everything (history, downloaded themes, and configs)
         #[arg(short, long)]
         all: bool,
+    },
+}
+
+#[derive(ValueEnum, Clone, Copy, PartialEq, Eq)]
+pub enum StatusFilter {
+    /// Enabled and installed
+    Active,
+    /// Installed but disabled
+    Ready,
+    /// Enabled but program not found in system
+    Broken,
+    /// Disabled and not found
+    Missing,
+}
+
+#[derive(Subcommand)]
+pub enum ConfigAction {
+    /// Configure Neovim integration
+    Nvim {
+        /// Force a specific strategy (lazy, packer, default)
+        #[clap(long, short)]
+        strategy: Option<NvimStrategy>,
+
+        /// Run auto-detection and update state
+        #[clap(long, short)]
+        detect: bool,
     },
 }

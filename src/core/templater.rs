@@ -142,7 +142,7 @@ mod tests {
             result
                 .unwrap_err()
                 .to_string()
-                .contains("Template error [error]")
+                .contains("Failed to render template")
         );
     }
 

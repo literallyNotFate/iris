@@ -43,11 +43,11 @@ pub fn exec(generator: String, theme: Option<String>, ctx: &IrisContext) -> anyh
             ),
             1,
         );
-        let p = Palette::fetch(theme_to_apply, &ctx.log)?;
+        let p = Palette::fetch(theme_to_apply, &ctx)?;
         t.done(true);
         p
     } else {
-        Palette::fetch(theme_to_apply, &ctx.log.as_quiet())?
+        Palette::fetch(theme_to_apply, &ctx.silent())?
     };
 
     let g = ctx.registry.get(&generator).ok_or_else(|| {

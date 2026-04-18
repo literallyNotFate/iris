@@ -3,6 +3,7 @@ use anyhow::{Context, Result};
 
 pub mod apply;
 pub mod cache;
+pub mod config;
 pub mod generators;
 pub mod health;
 pub mod setup;
@@ -25,6 +26,7 @@ pub fn handle(command: Commands, ctx: &mut IrisContext) -> Result<()> {
         Commands::Health { fix } => health::exec(fix, ctx)?,
         Commands::Gen { action } => generators::exec(action, ctx)?,
         Commands::Cache { action } => cache::exec(action, ctx)?,
+        Commands::Config { action } => config::exec(action, ctx)?,
     }
 
     Ok(())
@@ -46,7 +48,7 @@ pub(crate) fn apply_theme(theme: &str, ctx: &mut IrisContext) -> Result<()> {
 
     let palette = {
         let mut t = ctx.log.step(&format!("Fetching colors: {}", theme), 1);
-        let p = Palette::fetch(theme, &ctx.log)
+        let p = Palette::fetch(theme, &ctx)
             .with_context(|| format!("Failed to fetch colors for '{}'", theme))?;
         t.done(true);
         p

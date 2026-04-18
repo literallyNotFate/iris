@@ -1,4 +1,4 @@
-use crate::ui::Logger;
+use crate::core::IrisContext;
 use anyhow::{Context, Result};
 use colored::Colorize;
 use serde::{Deserialize, Serialize};
@@ -52,7 +52,7 @@ impl Palette {
     }
 
     /// Fetch palette from nvim using lua script
-    pub fn fetch(theme: &str, log: &Logger) -> Result<Self> {
+    pub fn fetch(theme: &str, ctx: &IrisContext) -> Result<Self> {
         let theme_lower: String = theme.to_lowercase();
         let cache_dir = dirs::home_dir()
             .context("Failed to determine home directory")?
@@ -63,7 +63,7 @@ impl Palette {
         if cache_path.exists() {
             if let Ok(content) = fs::read_to_string(&cache_path) {
                 if let Ok(cached) = serde_json::from_str::<Self>(&content) {
-                    log.info(&format!(
+                    ctx.log.info(&format!(
                         "Using cached palette for {}...",
                         theme.yellow().bold()
                     ));
@@ -72,10 +72,11 @@ impl Palette {
             }
         }
 
-        log.info("Cache miss. Loading Neovim runtime and plugins...");
-        let args: Vec<String> = Self::build_fetch_args(theme);
+        ctx.log
+            .info("Cache miss. Loading Neovim runtime and plugins...");
+        let args: Vec<String> = Self::build_fetch_args(theme, &ctx);
 
-        log.info("Executing Lua bridge in headless mode...");
+        ctx.log.info("Executing Lua bridge in headless mode...");
         let output: Output = Command::new("nvim")
             .args(&args)
             .output()
@@ -86,21 +87,21 @@ impl Palette {
             anyhow::bail!("Neovim failed to export palette: {}", error_msg.trim());
         }
 
-        log.info("Parsing palette data...");
+        ctx.log.info("Parsing palette data...");
         let stdout = String::from_utf8_lossy(&output.stdout);
 
         let mut palette: Palette = Self::parse_nvim_json(&stdout)?;
         palette.name = theme.to_string();
 
         if let Err(e) = Self::save_to_cache(&cache_path, &palette) {
-            log.warn(&format!("Failed to cache palette: {}", e), 1);
+            ctx.log.warn(&format!("Failed to cache palette: {}", e), 1);
         }
 
         Ok(palette)
     }
 
     /// Checks whether this theme exists in nvim colorscheme
-    pub fn exists(theme: &str) -> bool {
+    pub fn exists(theme: &str, ctx: &IrisContext) -> bool {
         let theme_lower: String = theme.to_lowercase();
         let cache_dir = dirs::home_dir().map(|h| h.join(".cache/iris/core/palettes"));
 
@@ -114,7 +115,7 @@ impl Palette {
             return false;
         }
 
-        let args: Vec<String> = Self::build_exists_args(theme);
+        let args: Vec<String> = Self::build_exists_args(theme, ctx);
         let output = Command::new("nvim").args(&args).output();
 
         match output {
@@ -155,40 +156,46 @@ impl Palette {
         })
     }
 
-    /// Helper function to build command args for nvim (palette fetch command)
-    fn build_fetch_args(theme: &str) -> Vec<String> {
-        let lua_script: &str = Self::fetch_lua_script();
-        vec![
+    /// Helper function to build base nvim arguments for fetch and exists
+    fn build_base_args(ctx: &IrisContext) -> Vec<String> {
+        let mut args: Vec<String> = vec![
             "--headless".to_string(),
             "-u".to_string(),
             "NONE".to_string(),
-            "-c".to_string(),
-            "lua vim.opt.rtp:append(vim.fn.stdpath('data') .. '/lazy/*')".to_string(),
-            "-c".to_string(),
+        ];
+
+        if let Some(rtp_cmd) = ctx.state.get_rtp_command() {
+            args.push("-c".into());
+            args.push(rtp_cmd);
+        }
+        args
+    }
+
+    /// Helper function to build command args for nvim (palette fetch command)
+    fn build_fetch_args(theme: &str, ctx: &IrisContext) -> Vec<String> {
+        let mut args: Vec<String> = Self::build_base_args(ctx);
+        args.extend([
+            "-c".into(),
             format!("colorscheme {}", theme.to_lowercase()),
-            "-c".to_string(),
-            format!("lua {}", lua_script),
-            "-c".to_string(),
-            "qa!".to_string(),
-        ]
+            "-c".into(),
+            format!("lua {}", Self::fetch_lua_script()),
+            "-c".into(),
+            "qa!".into(),
+        ]);
+        args
     }
 
     /// Helper function to build command args for nvim (exists palette command)
-    fn build_exists_args(theme: &str) -> Vec<String> {
-        let init_plugins: &str = "lua vim.opt.rtp:append(vim.fn.stdpath('data') .. '/lazy/*')";
-        let check_cmd: String = format!(
-            "try | colorscheme {} | qa! | catch | cquit 1 | endtry",
-            theme.to_lowercase()
-        );
-        vec![
-            "--headless".to_string(),
-            "-u".to_string(),
-            "NONE".to_string(),
-            "-c".to_string(),
-            init_plugins.to_string(),
-            "-c".to_string(),
-            check_cmd,
-        ]
+    fn build_exists_args(theme: &str, ctx: &IrisContext) -> Vec<String> {
+        let mut args: Vec<String> = Self::build_base_args(ctx);
+        args.extend([
+            "-c".into(),
+            format!(
+                "try | colorscheme {} | qa! | catch | cquit 1 | endtry",
+                theme.to_lowercase()
+            ),
+        ]);
+        args
     }
 
     /// Helper function to parse returned from nvim json file with palette info
@@ -202,66 +209,167 @@ impl Palette {
     fn fetch_lua_script() -> &'static str {
         r##"
         local function g(name, attr)
-            local max_depth = 10
+            local max_depth = 15
             local current = name
+            local visited = {}
 
             for _ = 1, max_depth do
-                local hl = vim.api.nvim_get_hl(0, { name = current, link = false })
-                local color = hl[attr or 'fg'] or hl.bg
+                if visited[current] then break end
+                visited[current] = true
 
-                if color then
+                local hl = vim.api.nvim_get_hl(0, { name = current, link = false })
+
+                local color = nil
+                if attr == 'bg' then
+                    color = hl.bg
+                else
+                    color = hl.fg
+                end
+
+                if color ~= nil then
                     return string.format('#%06x', color)
                 end
 
                 local linked = vim.api.nvim_get_hl(0, { name = current, link = true })
-                if not linked.link then
+                if not linked.link or linked.link == current then
                     break
                 end
-
                 current = linked.link
             end
 
-            return '#cccccc'
+            return nil
         end
 
         local function first(attr, names)
             for _, name in ipairs(names) do
                 local c = g(name, attr)
-                if c ~= '#cccccc' then
-                    return c
-                end
+                if c then return c end
+            end
+            return nil
+        end
+
+        local function chain(attr, ...)
+            for _, names in ipairs({...}) do
+                local c = first(attr, names)
+                if c then return c end
             end
             return '#cccccc'
         end
 
         local ansi = {}
         for i = 0, 15 do
-            table.insert(ansi, vim.g['terminal_color_' .. i] or '#000000')
+            local color = vim.g['terminal_color_' .. i]
+            if type(color) == 'string' then
+                table.insert(ansi, color)
+            elseif type(color) == 'number' then
+                table.insert(ansi, string.format('#%06x', color))
+            else
+                table.insert(ansi, i < 8 and '#000000' or '#ffffff')
+            end
         end
 
+        local fg = g('Normal', 'fg') or '#cccccc'
+        local bg = g('Normal', 'bg') or '#101010'
+
         local res = {
-            bg         = g('Normal', 'bg'),
-            fg         = g('Normal', 'fg'),
-            caret      = first('bg', { 'Cursor', 'TermCursor' }),
-            line_hl    = first('bg', { 'CursorLine', 'CursorLineBg' }),
-            sel        = first('bg', { 'Visual', 'Selection' }),
-            gutter_fg  = first('fg', { 'LineNr', 'SignColumn' }),
-            comment    = first('fg', { 'Comment', '@comment' }),
-            variable   = first('fg', { '@variable', 'Identifier' }),
-            constant   = first('fg', { 'Constant', '@constant' }),
-            number     = first('fg', { 'Number', '@number', 'Constant' }),
-            string     = first('fg', { 'String', '@string' }),
-            keyword    = first('fg', { 'Keyword', '@keyword', 'Statement' }),
-            operator   = first('fg', { 'Operator', '@operator' }),
-            func       = first('fg', { 'Function', '@function' }),
-            type_name  = first('fg', { 'Type', '@type' }),
-            tag        = first('fg', { 'Tag', '@tag' }),
-            attribute  = first('fg', { '@attribute', '@property' }),
-            added      = first('fg', { 'DiffAdd', 'GitSignsAdd', '@diff.plus' }),
-            deleted    = first('fg', { 'DiffDelete', 'GitSignsDelete', '@diff.minus' }),
-            changed    = first('fg', { 'DiffChange', 'GitSignsChange', '@diff.delta' }),
-            white      = vim.g.terminal_color_15 or '#ffffff',
-            ansi       = ansi,
+            bg        = bg,
+            fg        = fg,
+
+            caret     = chain('bg',
+                { 'Cursor', 'TermCursor' },
+                { 'CursorLine' }
+            ),
+
+            line_hl   = chain('bg',
+                { 'CursorLine', 'CursorLineBg' },
+                { 'ColorColumn' }
+            ),
+
+            sel       = chain('bg',
+                { 'Visual', 'Selection', 'PmenuSel' }
+            ),
+
+            gutter_fg = chain('fg',
+                { 'LineNr', 'SignColumn', 'FoldColumn' },
+                { 'Comment' }
+            ),
+
+            comment   = chain('fg',
+                { 'Comment', '@comment', '@comment.line', '@comment.block' }
+            ),
+
+            variable  = chain('fg',
+                { '@variable', '@variable.member', '@variable.parameter' },
+                { 'Identifier' },
+                { 'Normal' }
+            ),
+
+            constant  = chain('fg',
+                { '@constant', '@constant.builtin', '@constant.macro' },
+                { 'Constant', 'Special' }
+            ),
+
+            number    = chain('fg',
+                { '@number', '@number.float', '@number.integer' },
+                { 'Number', 'Float' },
+                { 'Constant' }
+            ),
+
+            string    = chain('fg',
+                { '@string', '@string.special', '@string.escape' },
+                { 'String', 'Character' }
+            ),
+
+            keyword   = chain('fg',
+                { '@keyword', '@keyword.function', '@keyword.operator', '@keyword.import', '@keyword.return' },
+                { 'Keyword', 'Statement', 'Conditional', 'Repeat' }
+            ),
+
+            operator  = chain('fg',
+                { '@operator', '@keyword.operator' },
+                { 'Operator' },
+                { 'Normal' }
+            ),
+
+            func      = chain('fg',
+                { '@function', '@function.call', '@function.builtin', '@function.method', '@function.method.call' },
+                { 'Function' }
+            ),
+
+            type_name = chain('fg',
+                { '@type', '@type.builtin', '@type.definition' },
+                { 'Type', 'Typedef' }
+            ),
+
+            tag       = chain('fg',
+                { '@tag', '@tag.builtin' },
+                { 'Tag', 'Special' }
+            ),
+
+            attribute = chain('fg',
+                { '@attribute', '@property', '@tag.attribute' },
+                { 'Identifier' }
+            ),
+
+            added     = chain('fg',
+                { 'DiffAdd', 'GitSignsAdd', '@diff.plus', 'Added' }
+            ),
+
+            deleted   = chain('fg',
+                { 'DiffDelete', 'GitSignsDelete', '@diff.minus', 'Removed' }
+            ),
+
+            changed   = chain('fg',
+                { 'DiffChange', 'GitSignsChange', '@diff.delta', 'Changed' }
+            ),
+
+            white     = (vim.g.terminal_color_15 ~= nil
+                and (type(vim.g.terminal_color_15) == 'string'
+                    and vim.g.terminal_color_15
+                    or string.format('#%06x', vim.g.terminal_color_15))
+                or '#ffffff'),
+
+            ansi      = ansi,
         }
 
         io.write(vim.fn.json_encode(res))
@@ -300,6 +408,7 @@ impl Palette {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{core::tests::create_test_context, models::NvimStrategy};
     use tempdir::TempDir;
 
     #[test]
@@ -420,22 +529,41 @@ mod tests {
 
     #[test]
     fn should_test_build_fetch_args_case() {
+        let (_temp, ctx) = create_test_context();
         let theme = "Tokyonight";
-        let args = Palette::build_fetch_args(theme);
+        let args = Palette::build_fetch_args(theme, &ctx);
 
-        let has_lowercase = args.iter().any(|a| a.contains("colorscheme tokyonight"));
+        assert!(args.contains(&"--headless".to_string()));
+        assert!(args.contains(&"NONE".to_string()));
+
+        let has_lowercase = args.iter().any(|a| a == "colorscheme tokyonight");
         assert!(
             has_lowercase,
-            "Arguments should contain lowercase colorscheme command"
+            "Arguments should contain 'colorscheme tokyonight'"
         );
     }
 
     #[test]
     fn should_test_build_exists_args_case() {
-        let args = Palette::build_exists_args("gruvbox");
+        let (_temp, mut ctx) = create_test_context();
+        ctx.state.nvim = NvimStrategy::Lazy;
+        let args = Palette::build_exists_args("gruvbox", &ctx);
 
         assert!(args.contains(&"--headless".to_string()));
         assert!(args.contains(&"NONE".to_string()));
         assert!(args.iter().any(|a| a.contains("cquit 1")));
+
+        let has_rtp = args.iter().any(|a| a.contains("vim.opt.rtp:append"));
+        assert!(has_rtp, "Lazy strategy must include RTP setup in arguments");
+    }
+
+    #[test]
+    fn should_test_build_args_without_rtp_for_default_strategy() {
+        let (_temp, mut ctx) = create_test_context();
+        ctx.state.nvim = NvimStrategy::Default;
+        let args = Palette::build_exists_args("default_theme", &ctx);
+
+        let has_rtp = args.iter().any(|a| a.contains("vim.opt.rtp:append"));
+        assert!(!has_rtp, "Default strategy should NOT include RTP setup");
     }
 }

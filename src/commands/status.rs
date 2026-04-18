@@ -1,6 +1,6 @@
 use crate::{
     core::IrisContext,
-    models::Palette,
+    models::{NvimStrategy, Palette},
     utils::{self, CustomColor, hex_to_rgb},
 };
 use colored::*;
@@ -10,6 +10,7 @@ pub fn exec(ctx: &IrisContext) -> anyhow::Result<()> {
     let current = &ctx.state.current_theme;
     let enabled = &ctx.state.enabled_generators;
 
+    let strategy: NvimStrategy = ctx.state.nvim;
     let nvim_theme: String = Palette::current().unwrap_or_else(|_| "".to_string());
     let is_sync: bool = nvim_theme.to_lowercase() == current.to_lowercase();
 
@@ -38,9 +39,10 @@ pub fn exec(ctx: &IrisContext) -> anyhow::Result<()> {
         };
 
         println!(
-            "\n{} Theme: {} | Gens: {}",
+            "\n{} Theme: {}\nPlugin manager: {}\nGenerators: {}",
             sync_status,
             current.cyan().bold(),
+            strategy,
             gens
         );
 
@@ -58,6 +60,7 @@ pub fn exec(ctx: &IrisContext) -> anyhow::Result<()> {
         "󰏘".red(),
         current.bold().blue()
     );
+    println!("  {}  Plugin Manager:  {}", "⚙".magenta(), strategy);
     println!(
         "  {}  Config path:   {}",
         "󰉖".white(),
@@ -102,7 +105,7 @@ pub fn exec(ctx: &IrisContext) -> anyhow::Result<()> {
         println!("  {}  {}", "󰄬".green(), "Sync with Neovim: OK".green());
     }
 
-    if let Ok(palette) = Palette::fetch(current, &ctx.log.as_quiet()) {
+    if let Ok(palette) = Palette::fetch(current, &ctx.silent()) {
         display_palette(&palette, current);
     }
 
