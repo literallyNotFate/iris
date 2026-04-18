@@ -7,7 +7,7 @@ use crate::{
 use colored::Colorize;
 
 /// Handle application switch command
-pub fn exec(name: String, ctx: &mut IrisContext) -> anyhow::Result<()> {
+pub fn exec(name: String, force: bool, ctx: &mut IrisContext) -> anyhow::Result<()> {
     println!(
         "\n {}  {}",
         "󰚔".yellow().bold(),
@@ -23,10 +23,10 @@ pub fn exec(name: String, ctx: &mut IrisContext) -> anyhow::Result<()> {
     }
 
     println!(
-        "\n {}  Theme {} found!",
+        "\n {}  Palette for {} loaded!",
         "󰄬".green().bold(),
         utils::capitalize(&name).yellow().bold()
     );
 
-    apply_theme(&name, ctx)
+    apply_theme(&name, force, ctx)
 }

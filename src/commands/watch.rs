@@ -68,7 +68,7 @@ pub fn exec(interval_ms: u64, ctx: &mut IrisContext) -> Result<()> {
                     let original_quiet: bool = ctx.log.quiet;
                     ctx.log.quiet = true;
 
-                    let res = super::apply_theme(&theme, ctx);
+                    let res = super::apply_theme(&theme, false, ctx);
                     ctx.log.quiet = original_quiet;
 
                     print_header(&utils::pretty_path(&cache_path));

@@ -24,7 +24,11 @@ pub fn exec(fix: bool, ctx: &IrisContext) -> anyhow::Result<()> {
 
     let mut issues_found: bool = false;
     let palette: Option<Palette> = if fix {
-        Some(Palette::fetch(&ctx.state.current_theme, &ctx.silent())?)
+        Some(Palette::fetch(
+            &ctx.state.current_theme,
+            false,
+            &ctx.silent(),
+        )?)
     } else {
         None
     };

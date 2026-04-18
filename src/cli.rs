@@ -27,10 +27,18 @@ pub enum Commands {
         /// Name of the theme to apply (e.g., 'melange', 'gruvbox')
         #[arg(value_name = "THEME")]
         name: String,
+
+        /// Force fetch palette from Neovim, ignoring cache
+        #[arg(short, long)]
+        force: bool,
     },
 
     /// Sync all applications with the current active theme
-    Sync,
+    Sync {
+        /// Force fetch palette from Neovim, ignoring cache
+        #[arg(short, long)]
+        force: bool,
+    },
 
     /// Apply theme to a specific generator only
     #[command(arg_required_else_help = true)]

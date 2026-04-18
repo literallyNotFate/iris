@@ -105,7 +105,7 @@ pub fn exec(ctx: &IrisContext) -> anyhow::Result<()> {
         println!("  {}  {}", "󰄬".green(), "Sync with Neovim: OK".green());
     }
 
-    if let Ok(palette) = Palette::fetch(current, &ctx.silent()) {
+    if let Ok(palette) = Palette::fetch(current, false, &ctx.silent()) {
         display_palette(&palette, current);
     }
 

@@ -46,21 +46,17 @@ impl Palette {
                 "No active theme detected.\n\
                  {}: Make sure to switch theme in Neovim or pass the name manually: `{}`",
                 "Tip".bold().cyan(),
-                "iris switch <name>".italic().cyan()
+                "iris switch <name>".bold().cyan()
             ))
         })
     }
 
     /// Fetch palette from nvim using lua script
-    pub fn fetch(theme: &str, ctx: &IrisContext) -> Result<Self> {
+    pub fn fetch(theme: &str, force: bool, ctx: &IrisContext) -> Result<Self> {
         let theme_lower: String = theme.to_lowercase();
-        let cache_dir = dirs::home_dir()
-            .context("Failed to determine home directory")?
-            .join(".cache/iris/core/palettes");
+        let cache_path: PathBuf = ctx.paths.palettes.join(format!("{}.json", theme_lower));
 
-        let cache_path: PathBuf = cache_dir.join(format!("{}.json", theme_lower));
-
-        if cache_path.exists() {
+        if !force && cache_path.exists() {
             if let Ok(content) = fs::read_to_string(&cache_path) {
                 if let Ok(cached) = serde_json::from_str::<Self>(&content) {
                     ctx.log.info(&format!(
@@ -72,8 +68,15 @@ impl Palette {
             }
         }
 
-        ctx.log
-            .info("Cache miss. Loading Neovim runtime and plugins...");
+        if force {
+            ctx.log.info(&format!(
+                "`{}` flag detected. Bypassing cache...",
+                "--force".cyan().bold()
+            ));
+        } else {
+            ctx.log
+                .info("Cache miss. Loading Neovim runtime and plugins...");
+        }
         let args: Vec<String> = Self::build_fetch_args(theme, &ctx);
 
         ctx.log.info("Executing Lua bridge in headless mode...");
@@ -565,5 +568,36 @@ mod tests {
 
         let has_rtp = args.iter().any(|a| a.contains("vim.opt.rtp:append"));
         assert!(!has_rtp, "Default strategy should NOT include RTP setup");
+    }
+
+    #[test]
+    fn should_ignore_cache_when_force_is_true() {
+        let (_temp, ctx) = create_test_context();
+        let theme = "test";
+        let cache_path = ctx.paths.palettes.join(format!("{}.json", theme));
+
+        let old_palette = Palette {
+            name: "old".to_string(),
+            bg: "#000000".to_string(),
+            ..serde_json::from_str(r##"{"bg":"#000000","fg":"","caret":"","line_hl":"","sel":"","gutter_fg":"","comment":"","variable":"","constant":"","number":"","string":"","keyword":"","operator":"","func":"","type_name":"","tag":"","attribute":"","white":"","ansi":[]}"##).unwrap()
+        };
+        Palette::save_to_cache(&cache_path, &old_palette).unwrap();
+
+        let cached_res = Palette::fetch(theme, false, &ctx).unwrap();
+        assert_eq!(cached_res.name, "old");
+        assert_eq!(cached_res.bg, "#000000");
+
+        let forced_res = Palette::fetch(theme, true, &ctx);
+
+        match forced_res {
+            Ok(p) => assert_ne!(
+                p.name, "old",
+                "Should have fetched fresh data, not the old cache"
+            ),
+            Err(_) => {
+                ctx.log
+                    .info("Force successfully bypassed cache and tried to reach Neovim.");
+            }
+        }
     }
 }

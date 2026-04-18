@@ -1,5 +1,5 @@
-use crate::{cli::Commands, core::IrisContext, utils};
-use anyhow::{Context, Result};
+use crate::{cli::Commands, core::IrisContext, models::Palette, utils};
+use colored::Colorize;
 
 pub mod apply;
 pub mod cache;
@@ -15,11 +15,11 @@ pub mod watch;
 pub use health::HealthStatus;
 
 /// Handles all commands
-pub fn handle(command: Commands, ctx: &mut IrisContext) -> Result<()> {
+pub fn handle(command: Commands, ctx: &mut IrisContext) -> anyhow::Result<()> {
     match command {
         Commands::Init => setup::exec(ctx)?,
-        Commands::Switch { name } => switch::exec(name, ctx)?,
-        Commands::Sync => sync::exec(ctx)?,
+        Commands::Switch { name, force } => switch::exec(name, force, ctx)?,
+        Commands::Sync { force } => sync::exec(force, ctx)?,
         Commands::Apply { generator, theme } => apply::exec(generator, theme, ctx)?,
         Commands::Status => status::exec(ctx)?,
         Commands::Watch { interval } => watch::exec(interval, ctx)?,
@@ -32,11 +32,8 @@ pub fn handle(command: Commands, ctx: &mut IrisContext) -> Result<()> {
     Ok(())
 }
 
-use crate::models::Palette;
-use colored::Colorize;
-
 /// Helper function to apply theme
-pub(crate) fn apply_theme(theme: &str, ctx: &mut IrisContext) -> Result<()> {
+pub(crate) fn apply_theme(theme: &str, force: bool, ctx: &mut IrisContext) -> anyhow::Result<()> {
     if !ctx.log.quiet {
         println!(
             "\n {}  {}",
@@ -48,8 +45,7 @@ pub(crate) fn apply_theme(theme: &str, ctx: &mut IrisContext) -> Result<()> {
 
     let palette = {
         let mut t = ctx.log.step(&format!("Fetching colors: {}", theme), 1);
-        let p = Palette::fetch(theme, &ctx)
-            .with_context(|| format!("Failed to fetch colors for '{}'", theme))?;
+        let p = Palette::fetch(theme, force, &ctx)?;
         t.done(true);
         p
     };

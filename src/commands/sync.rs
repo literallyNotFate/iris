@@ -6,7 +6,7 @@ use crate::{
 use colored::Colorize;
 
 /// Handle application sync command
-pub fn exec(ctx: &mut IrisContext) -> anyhow::Result<()> {
+pub fn exec(force: bool, ctx: &mut IrisContext) -> anyhow::Result<()> {
     println!(
         "\n {}  {}",
         "󰓦".cyan().bold(),
@@ -39,7 +39,7 @@ pub fn exec(ctx: &mut IrisContext) -> anyhow::Result<()> {
         ctx.log.warn("Found broken configs, restoring...", 0);
     }
 
-    apply_theme(&theme, ctx)?;
+    apply_theme(&theme, force, ctx)?;
 
     ctx.log.success("All apps are now in sync!", 0);
     Ok(())
