@@ -6,6 +6,7 @@ cursor-color = {{ cursor }}
 selection-background = {{ sel_bg }}
 selection-foreground = {{ sel_fg }}
 
-{% for color in ansi %}
+# Palette
+{%- for color in ansi %}
 palette = {{ loop.index0 }}={{ color }}
-{% endfor %}
+{%- endfor %}
