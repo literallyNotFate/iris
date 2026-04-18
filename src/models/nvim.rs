@@ -103,16 +103,16 @@ impl NvimStrategy {
             return None;
         }
 
-        match self {
-            NvimStrategy::Default => None,
-            NvimStrategy::Lazy => {
-                Some("lua vim.opt.rtp:append(vim.fn.stdpath('data') .. '/lazy/*')".into())
-            }
-            NvimStrategy::Packer => Some(
-                "lua vim.opt.rtp:append(vim.fn.stdpath('data') .. '/site/pack/packer/start/*')"
-                    .into(),
-            ),
-        }
+        let folder = match self {
+            NvimStrategy::Default => return None,
+            NvimStrategy::Lazy => "lazy",
+            NvimStrategy::Packer => "site/pack/packer/start",
+        };
+
+        Some(format!(
+            "lua local p = vim.fn.stdpath('data') .. '/{}' for _, dir in ipairs(vim.fn.expand(p .. '/*', false, true)) do vim.opt.rtp:append(dir) end",
+            folder
+        ))
     }
 
     /// Validates if strategy can be applied

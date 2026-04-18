@@ -144,10 +144,10 @@ impl Palette {
 
     /// Helper function to read theme from given path (easy to test)
     fn read_theme_from_path(path: &PathBuf) -> Result<String> {
-        let content = std::fs::read_to_string(path)
+        let content: String = fs::read_to_string(path)
             .with_context(|| format!("Failed to read theme cache at {:?}", path))?;
 
-        let trimmed = content.trim();
+        let trimmed: &str = content.trim();
         if trimmed.is_empty() {
             anyhow::bail!("Theme cache is empty");
         }

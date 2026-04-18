@@ -29,7 +29,7 @@ impl State {
 
     /// Set current theme to specific one
     pub fn set_theme<S: Into<String>>(&mut self, name: S) {
-        self.current_theme = name.into();
+        self.current_theme = name.into().trim().to_lowercase();
     }
 
     /// Enable generator

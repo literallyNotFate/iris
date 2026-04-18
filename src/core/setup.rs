@@ -1,4 +1,9 @@
-use crate::{core::IrisContext, models::Palette, ui::Task};
+use crate::{
+    core::IrisContext,
+    models::{NvimStrategy, Palette},
+    ui::Task,
+    utils,
+};
 use anyhow::{Context as _, Result};
 use colored::Colorize;
 use std::{
@@ -53,8 +58,23 @@ impl IrisSetup {
             return Ok(());
         }
 
+        task.info("Detecting Neovim configuration style...");
+        let strategy: NvimStrategy = NvimStrategy::detect_strategy();
+
+        if strategy != NvimStrategy::Default {
+            let count: usize = strategy.count_plugins();
+            task.info(&format!(
+                "Found {} with {} plugins installed.",
+                strategy,
+                count.to_string().yellow().bold()
+            ));
+        } else {
+            task.info("No specific plugin manager detected. Using built-in strategy.");
+        }
+
+        ctx.state.nvim = strategy;
         task.info("Detecting active Neovim theme...");
-        let current_theme = Palette::current()?;
+        let current_theme: String = Palette::current().unwrap_or_else(|_| "".to_string());
 
         task.info("Scanning for compatible tools...");
         let installed = ctx.registry.installed();
@@ -71,11 +91,11 @@ impl IrisSetup {
         }
 
         ctx.state.set_theme(current_theme);
-        ctx.save().context("Failed to save initial state.json")?;
+        ctx.save()?;
 
         task.info(&format!(
             "Configuration persisted to {}",
-            ctx.paths.state_file.display().to_string().dimmed()
+            utils::pretty_path(&ctx.paths.state_file).dimmed()
         ));
         Ok(())
     }
@@ -92,10 +112,10 @@ impl IrisSetup {
 
         let hook_id: &str = "# --- Iris FZF Sync ---";
         let content: String = fs::read_to_string(&zshrc)
-            .with_context(|| format!("Failed to read {}", zshrc.display()))?;
+            .with_context(|| format!("Failed to read {}", utils::pretty_path(&zshrc)))?;
 
         if content.contains(hook_id) {
-            task.info("Zsh hook already present in .zshrc.");
+            task.info("`zsh` hook already present in .zshrc.");
             return Ok(());
         }
 
@@ -125,10 +145,15 @@ add-zsh-hook precmd _iris_fzf_sync
         let mut file = OpenOptions::new()
             .append(true)
             .open(&zshrc)
-            .with_context(|| format!("Failed to open {} for appending", zshrc.display()))?;
+            .with_context(|| {
+                format!(
+                    "Failed to open {} for appending",
+                    utils::pretty_path(&zshrc)
+                )
+            })?;
 
         writeln!(file, "\n{}", hook.trim())
-            .with_context(|| format!("Failed to write to {}", zshrc.display()))?;
+            .with_context(|| format!("Failed to write to {}", utils::pretty_path(&zshrc)))?;
 
         task.info("Hook successfully appended.");
         Ok(())
@@ -193,11 +218,32 @@ mod tests {
 
         fs::write(fake_home.join(".zshrc"), "").unwrap();
 
-        temp_env::with_var("HOME", Some(fake_home), || {
-            let _ = IrisSetup::run(&mut ctx);
+        temp_env::with_vars(
+            [
+                ("HOME", Some(fake_home.to_str().unwrap())),
+                (
+                    "XDG_CONFIG_HOME",
+                    Some(fake_home.join(".config").to_str().unwrap()),
+                ),
+                (
+                    "XDG_DATA_HOME",
+                    Some(fake_home.join(".local/share").to_str().unwrap()),
+                ),
+            ],
+            || {
+                let result = IrisSetup::run(&mut ctx);
+                assert!(result.is_ok(), "Setup run failed: {:?}", result.err());
+                assert!(ctx.paths.config.exists(), "Config dir should be created");
+                assert!(ctx.paths.cache.exists(), "Cache dir should be created");
+                assert!(
+                    ctx.paths.state_file.exists(),
+                    "state.json should be created"
+                );
+                assert!(matches!(ctx.state.nvim, NvimStrategy::Default));
 
-            assert!(ctx.paths.config.exists(), "Config dir should be created");
-            assert!(ctx.paths.cache.exists(), "Cache dir should be created");
-        });
+                let zshrc_content = fs::read_to_string(fake_home.join(".zshrc")).unwrap();
+                assert!(zshrc_content.contains("Iris FZF Sync"));
+            },
+        );
     }
 }
