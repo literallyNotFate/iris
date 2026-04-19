@@ -31,6 +31,10 @@ pub enum Commands {
         /// Force fetch palette from Neovim, ignoring cache
         #[arg(short, long)]
         force: bool,
+
+        /// Use fallback theme if the requested one is unavailable
+        #[arg(short = 'b', long)]
+        fallback: bool,
     },
 
     /// Sync all applications with the current active theme
@@ -50,6 +54,10 @@ pub enum Commands {
         /// Override the active theme for this specific application
         #[arg(short, long, value_name = "THEME")]
         theme: Option<String>,
+
+        /// Use fallback theme if the requested one is unavailable
+        #[arg(short = 'b', long)]
+        fallback: bool,
     },
 
     /// Display current status, active theme, and enabled applications
@@ -161,5 +169,12 @@ pub enum ConfigAction {
         /// Run auto-detection and update state
         #[clap(long, short)]
         detect: bool,
+    },
+
+    /// Set a fallback theme to use when the requested theme is unavailable
+    Fallback {
+        /// Name of the fallback theme (e.g., 'retrobox')
+        #[arg(value_name = "THEME")]
+        name: String,
     },
 }

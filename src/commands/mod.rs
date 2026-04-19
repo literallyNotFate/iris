@@ -18,9 +18,17 @@ pub use health::HealthStatus;
 pub fn handle(command: Commands, ctx: &mut IrisContext) -> anyhow::Result<()> {
     match command {
         Commands::Init => setup::exec(ctx)?,
-        Commands::Switch { name, force } => switch::exec(name, force, ctx)?,
+        Commands::Switch {
+            name,
+            force,
+            fallback,
+        } => switch::exec(name, force, fallback, ctx)?,
         Commands::Sync { force } => sync::exec(force, ctx)?,
-        Commands::Apply { generator, theme } => apply::exec(generator, theme, ctx)?,
+        Commands::Apply {
+            generator,
+            theme,
+            fallback,
+        } => apply::exec(generator, theme, fallback, ctx)?,
         Commands::Status => status::exec(ctx)?,
         Commands::Watch { interval } => watch::exec(interval, ctx)?,
         Commands::Health { fix } => health::exec(fix, ctx)?,

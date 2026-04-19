@@ -2,71 +2,72 @@ use crate::{
     commands::apply_theme,
     core::IrisContext,
     models::{NvimStrategy, Palette},
-    utils::{self},
 };
 use colored::Colorize;
 
 /// Handle application switch command
-pub fn exec(name: String, force: bool, ctx: &mut IrisContext) -> anyhow::Result<()> {
-    let original_name: String = name.clone();
+pub fn exec(
+    name: String,
+    force: bool,
+    fallback: bool,
+    ctx: &mut IrisContext,
+) -> anyhow::Result<()> {
     let mut target_name: String = name.to_lowercase();
-    let mut is_fallback: bool = false;
+    let mut is_fallback_applied: bool = false;
 
     if !Palette::exists(&target_name, ctx) {
-        anyhow::bail!(
-            "Theme `{}` not found.\n{}  Run `:colorscheme <Tab>` in Neovim to see all available themes.",
-            utils::capitalize(&target_name).yellow().bold(),
-            "󰋗".blue()
-        );
+        if force {
+            println!(
+                "\n {} Theme not found in known sources. {} will attempt a deep fetch via Neovim.",
+                "󰚔 ".cyan(),
+                "--force".yellow()
+            );
+        } else if fallback {
+            target_name = ctx.state.fallback_theme.clone();
+            is_fallback_applied = true;
+        } else {
+            anyhow::bail!(
+                "Theme `{}` not found. Use `--fallback` or `--force`.",
+                name.yellow().bold()
+            );
+        }
     }
 
-    println!();
     if matches!(ctx.state.nvim, NvimStrategy::Default) {
         let builtins: Vec<String> = NvimStrategy::get_builtin_themes();
 
-        if !builtins.contains(&target_name) {
-            if force
-                && ctx
-                    .paths
-                    .palettes
-                    .join(format!("{}.json", target_name))
-                    .exists()
-            {
-                println!(
-                    " {}  {} Using cached `{}` despite Built-in strategy due to {} flag.",
-                    "󰚔".cyan(),
-                    "Force:".cyan().bold(),
-                    target_name.white().bold(),
-                    "--force".yellow()
-                );
+        let has_cache: bool = ctx
+            .paths
+            .palettes
+            .join(format!("{}.json", target_name))
+            .exists();
+
+        if !builtins.contains(&target_name) && !has_cache && !force {
+            if fallback {
+                target_name = ctx.state.fallback_theme.clone();
+                is_fallback_applied = true;
             } else {
-                is_fallback = true;
-                target_name = builtins
-                    .iter()
-                    .find(|&&ref s| s == "retrobox")
-                    .cloned()
-                    .unwrap_or_else(|| "default".into());
+                anyhow::bail!(
+                    "Theme `{}` is external and not cached. Strategy is set to Built-in.",
+                    target_name.yellow()
+                );
             }
         }
     }
 
-    if is_fallback {
+    if is_fallback_applied {
+        if !Palette::exists(&target_name, ctx) {
+            anyhow::bail!(
+                "Primary theme and fallback theme `{}` are both unavailable.",
+                target_name.red().bold()
+            );
+        }
+
         println!(
-            " {}  {} `{}` is a plugin-based theme, but you are using the Built-in strategy.",
-            "".yellow(),
-            "Notice:".yellow().bold(),
-            original_name.white().bold()
-        );
-        println!(
-            " {}  Falling back to stable theme: {}",
-            "󰋽".blue(),
-            utils::capitalize(&target_name).green().bold()
-        );
-    } else {
-        println!(
-            "\n {}  Palette for {} loaded!",
-            "󰄬".green().bold(),
-            utils::capitalize(&target_name).yellow().bold()
+            "\n {}  Theme `{}` unavailable or restricted. Using fallback: {}",
+            "󰁯".blue(),
+            name.dimmed(),
+            target_name.green().bold()
         );
     }
 

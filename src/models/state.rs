@@ -4,10 +4,13 @@ pub use serde::{Deserialize, Serialize};
 use std::{collections::BTreeSet, fs, path::PathBuf};
 
 /// UI State of app which is being saved
-#[derive(Default, Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct State {
     pub current_theme: String,
     pub enabled_generators: BTreeSet<String>,
+
+    #[serde(default = "retrobox")]
+    pub fallback_theme: String,
 
     #[serde(default)]
     pub nvim: NvimStrategy,
@@ -18,7 +21,7 @@ impl State {
         Self {
             current_theme,
             enabled_generators,
-            nvim: NvimStrategy::default(),
+            ..Self::default()
         }
     }
 
@@ -104,6 +107,22 @@ impl State {
     }
 }
 
+impl Default for State {
+    fn default() -> Self {
+        Self {
+            current_theme: String::new(),
+            enabled_generators: BTreeSet::new(),
+            fallback_theme: retrobox(),
+            nvim: NvimStrategy::default(),
+        }
+    }
+}
+
+/// Function to apply default fallback theme (for serde)
+fn retrobox() -> String {
+    "retrobox".to_string()
+}
+
 /// Unit-tests for application state
 #[cfg(test)]
 mod tests {
@@ -130,34 +149,45 @@ mod tests {
     fn should_handle_state_save_and_load() {
         let temp_dir: TempDir = TempDir::new("iris_state_test").unwrap();
         let file_path: PathBuf = temp_dir.path().join("state.json");
+        let mut state: State = State {
+            current_theme: "melange".into(),
+            enabled_generators: BTreeSet::new(),
+            fallback_theme: "retrobox".into(),
+            nvim: NvimStrategy::Default,
+        };
 
-        let mut state = State::new("melange".into(), BTreeSet::new());
         state.enable_generator("kitty");
         state.save_to(&file_path).expect("Failed to save");
 
-        let content = fs::read_to_string(&file_path).unwrap();
-        assert!(content.contains("melange"));
-        assert!(content.contains("kitty"));
-
         let loaded = State::load_from(&file_path).expect("Failed to load");
         assert_eq!(loaded.current_theme, "melange");
+        assert_eq!(loaded.fallback_theme, "retrobox");
         assert!(loaded.is_enabled("kitty"));
     }
 
     #[test]
-    fn should_handle_missing_nvim_field_gracefully() {
+    fn should_handle_missing_fields_gracefully() {
         let temp_dir: TempDir = TempDir::new("iris_compat_test").unwrap();
         let file_path: PathBuf = temp_dir.path().join("old_state.json");
 
         let old_raw_json = r#"{
-            "current_theme": "melange",
-            "enabled_generators": ["alacritty"]
-        }"#;
+                "current_theme": "melange",
+                "enabled_generators": ["alacritty"]
+            }"#;
         fs::write(&file_path, old_raw_json).unwrap();
+        let loaded: State =
+            State::load_from(&file_path).expect("Should parse even without new fields");
 
-        let loaded = State::load_from(&file_path).expect("Should parse even without nvim field");
         assert_eq!(loaded.current_theme, "melange");
         assert_eq!(loaded.nvim, NvimStrategy::Default);
+        assert_eq!(loaded.fallback_theme, "retrobox");
+    }
+
+    #[test]
+    fn should_use_correct_defaults_on_manual_default_call() {
+        let state: State = State::default();
+        assert_eq!(state.fallback_theme, "retrobox");
+        assert_eq!(state.current_theme, "");
     }
 
     #[test]
@@ -166,12 +196,25 @@ mod tests {
         let file_path: PathBuf = temp_dir.path().join("not_found.json");
 
         let state = State::load_or_default(&file_path);
-        assert_eq!(state.current_theme, "");
+        assert_eq!(state.fallback_theme, "retrobox");
         assert!(state.enabled_generators.is_empty());
 
         fs::write(&file_path, "invalid json").unwrap();
         let state_err = State::load_or_default(&file_path);
-        assert_eq!(state_err.current_theme, "");
+        assert_eq!(state_err.fallback_theme, "retrobox");
+    }
+
+    #[test]
+    fn should_persist_custom_fallback_theme() {
+        let temp_dir: TempDir = TempDir::new("iris_fallback_test").unwrap();
+        let file_path: PathBuf = temp_dir.path().join("state.json");
+
+        let mut state: State = State::default();
+        state.fallback_theme = "tokyonight".to_string();
+        state.save_to(&file_path).unwrap();
+
+        let loaded: State = State::load_from(&file_path).unwrap();
+        assert_eq!(loaded.fallback_theme, "tokyonight");
     }
 
     #[test]

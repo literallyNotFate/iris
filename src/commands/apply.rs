@@ -1,101 +1,92 @@
-use crate::{commands::HealthStatus, core::IrisContext, models::Palette, utils};
+use crate::{
+    commands::HealthStatus,
+    core::IrisContext,
+    models::{NvimStrategy, Palette},
+    utils,
+};
 use colored::Colorize;
 
-/// Handle application health command
-pub fn exec(generator: String, theme: Option<String>, ctx: &IrisContext) -> anyhow::Result<()> {
-    let theme_to_apply: &str = theme.as_deref().unwrap_or_else(|| {
-        if ctx.state.current_theme.is_empty() {
-            ""
-        } else {
-            &ctx.state.current_theme
-        }
-    });
+/// Handle application apply command
+pub fn exec(
+    generator: String,
+    theme: Option<String>,
+    fallback: bool,
+    ctx: &mut IrisContext,
+) -> anyhow::Result<()> {
+    let mut theme_to_apply: String = theme
+        .clone()
+        .map(|s| s.to_lowercase())
+        .unwrap_or_else(|| ctx.state.current_theme.clone());
 
+    let mut is_fallback_applied: bool = false;
     if theme_to_apply.is_empty() {
-        anyhow::bail!(
-            "No theme specified and no global theme active. Use `iris switch <name>` first."
-        );
+        if fallback && !ctx.state.fallback_theme.is_empty() {
+            theme_to_apply = ctx.state.fallback_theme.clone();
+            is_fallback_applied = true;
+        } else {
+            anyhow::bail!(
+                "No theme specified and no global theme active. Use `iris switch <name>` or `--fallback`."
+            );
+        }
     }
 
-    if !Palette::exists(theme_to_apply, ctx) {
-        anyhow::bail!(
-            "Theme `{}` not found in cache or Neovim.",
-            theme_to_apply.yellow().bold()
-        );
+    let exists: bool = Palette::exists(&theme_to_apply, ctx);
+    let is_default_strat: bool = matches!(ctx.state.nvim, NvimStrategy::Default);
+
+    if !exists
+        || (is_default_strat
+            && !NvimStrategy::get_builtin_themes().contains(&theme_to_apply)
+            && !ctx
+                .paths
+                .palettes
+                .join(format!("{}.json", theme_to_apply))
+                .exists())
+    {
+        if fallback {
+            theme_to_apply = ctx.state.fallback_theme.clone();
+            is_fallback_applied = true;
+
+            if !Palette::exists(&theme_to_apply, ctx) {
+                anyhow::bail!(
+                    "Both requested theme and fallback `{}` are unavailable.",
+                    theme_to_apply
+                );
+            }
+        } else {
+            anyhow::bail!(
+                "Theme `{}` is unavailable (not found or restricted by strategy). Use `--fallback`.",
+                theme_to_apply.yellow().bold()
+            );
+        }
     }
 
-    let is_different: bool = Some(theme_to_apply) != Some(&ctx.state.current_theme);
     println!(
         "\n {}  {} {}",
         "󰷉".yellow().bold(),
         "Standalone apply:".bold(),
         theme_to_apply.magenta()
     );
-    println!();
 
-    if is_different && theme.is_some() {
+    if is_fallback_applied {
         println!(
-            "   Temporary override: using {} instead of system {}\n",
-            theme_to_apply.yellow(),
-            ctx.state.current_theme.dimmed()
+            "    {} Using fallback: {} because `{}` was unavailable",
+            "󰁯".blue(),
+            theme_to_apply.green().bold(),
+            theme.unwrap_or_else(|| "current".to_string()).dimmed()
         );
     }
 
-    let palette: Palette = if is_different {
-        let mut t = ctx.log.step(
-            &format!(
-                "{} Fetching palette {}...",
-                "󰟶".cyan().bold(),
-                theme_to_apply.yellow().bold()
-            ),
-            1,
-        );
-        let p = Palette::fetch(theme_to_apply, false, &ctx)?;
-        t.done(true);
-        p
-    } else {
-        Palette::fetch(theme_to_apply, false, &ctx.silent())?
-    };
-
-    let g = ctx.registry.get(&generator).ok_or_else(|| {
-        anyhow::anyhow!(
-            "Unknown generator: `{}`. Run `iris gen list` for available tools.",
-            generator.red()
-        )
-    })?;
-
-    if !ctx.registry.is_installed(g.name()) {
-        ctx.log.warn(
-            &format!(
-                "Generator `{}` binary not found in PATH. Operation might fail.",
-                g.name().bold().cyan()
-            ),
-            0,
-        );
-    }
-
-    let mut t = ctx.log.step(
-        &format!(
-            "{} Checking health for {}...",
-            "󰚚 ".green().bold(),
-            g.name().cyan()
-        ),
-        1,
-    );
+    let palette: Palette = Palette::fetch(&theme_to_apply, false, ctx)?;
+    let g = ctx
+        .registry
+        .get(&generator)
+        .ok_or_else(|| anyhow::anyhow!("Unknown generator: `{}`", generator.red()))?;
 
     let status = g.health_check(ctx);
-    if matches!(status, HealthStatus::Ok) {
-        t.done(true);
-    } else {
-        t.done(false);
-
+    if !matches!(status, HealthStatus::Ok) {
         let mut t_fix = ctx.log.step(
-            &format!(
-                "{} Repairing {} configuration...",
-                "󰒓".green().bold(),
-                g.name().cyan()
-            ),
-            2,
+            &format!("{} Repairing {}...", "󰒓".green(), g.name().cyan()),
+            1,
         );
 
         g.fix(&status, &palette, ctx)?;
@@ -106,7 +97,7 @@ pub fn exec(generator: String, theme: Option<String>, ctx: &IrisContext) -> anyh
         &format!(
             "{} Applying {} to {}...",
             "󱓞".magenta().bold(),
-            utils::capitalize(theme_to_apply).yellow().bold(),
+            utils::capitalize(&theme_to_apply).yellow().bold(),
             g.name().cyan().bold()
         ),
         1,
