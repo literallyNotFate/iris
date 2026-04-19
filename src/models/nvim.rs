@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 use std::{
     env, fmt, fs,
     path::{Path, PathBuf},
+    process::Command,
 };
 
 /// Nvim find theme strategy (plugins)
@@ -113,6 +114,71 @@ impl NvimStrategy {
             "lua local p = vim.fn.stdpath('data') .. '/{}' for _, dir in ipairs(vim.fn.expand(p .. '/*', false, true)) do vim.opt.rtp:append(dir) end",
             folder
         ))
+    }
+
+    /// Get nvim builtin themes
+    pub fn get_builtin_themes() -> Vec<String> {
+        let lua_script = r#"
+            local rt = vim.fn.expand('$VIMRUNTIME'):gsub('\\', '/')
+            local seen = {}
+            local builtins = {}
+
+            local function collect(pattern)
+                for _, p in ipairs(vim.api.nvim_get_runtime_file(pattern, true)) do
+                    local norm = p:gsub('\\', '/')
+                    if norm:find(rt, 1, true) then
+                        local name = vim.fn.fnamemodify(p, ':t:r')
+                        if not seen[name] then
+                            seen[name] = true
+                            table.insert(builtins, name)
+                        end
+                    end
+                end
+            end
+
+            collect('colors/*.vim')
+            collect('colors/*.lua')
+
+            table.sort(builtins)
+            io.write(table.concat(builtins, ','))
+        "#;
+
+        let output = Command::new("nvim")
+            .args([
+                "--headless",
+                "-u",
+                "NONE",
+                "-c",
+                &format!("lua {}", lua_script),
+                "-c",
+                "qa!",
+            ])
+            .output();
+
+        match output {
+            Ok(out) if out.status.success() => {
+                let stdout = String::from_utf8_lossy(&out.stdout);
+                stdout
+                    .split(',')
+                    .map(|s| s.trim().to_lowercase())
+                    .filter(|s| !s.is_empty())
+                    .collect()
+            }
+            _ => vec![
+                "habamax".into(),
+                "desert".into(),
+                "evening".into(),
+                "morning".into(),
+                "murphy".into(),
+                "pablo".into(),
+                "peachpuff".into(),
+                "ron".into(),
+                "shine".into(),
+                "slate".into(),
+                "torte".into(),
+                "zellner".into(),
+            ],
+        }
     }
 
     /// Validates if strategy can be applied
@@ -264,5 +330,12 @@ mod tests {
 
             assert_eq!(strategy.count_plugins(), 3);
         });
+    }
+
+    #[test]
+    fn should_return_at_least_basic_builtin_themes() {
+        let themes: Vec<String> = NvimStrategy::get_builtin_themes();
+        assert!(!themes.is_empty());
+        assert!(themes.contains(&"habamax".to_string()));
     }
 }

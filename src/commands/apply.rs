@@ -17,6 +17,13 @@ pub fn exec(generator: String, theme: Option<String>, ctx: &IrisContext) -> anyh
         );
     }
 
+    if !Palette::exists(theme_to_apply, ctx) {
+        anyhow::bail!(
+            "Theme `{}` not found in cache or Neovim.",
+            theme_to_apply.yellow().bold()
+        );
+    }
+
     let is_different: bool = Some(theme_to_apply) != Some(&ctx.state.current_theme);
     println!(
         "\n {}  {} {}",

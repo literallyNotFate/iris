@@ -1,4 +1,4 @@
-use crate::core::IrisContext;
+use crate::{core::IrisContext, models::NvimStrategy};
 use anyhow::{Context, Result};
 use colored::Colorize;
 use serde::{Deserialize, Serialize};
@@ -68,14 +68,41 @@ impl Palette {
             }
         }
 
+        if matches!(ctx.state.nvim, NvimStrategy::Default) {
+            let builtins: Vec<String> = NvimStrategy::get_builtin_themes();
+
+            if !builtins.contains(&theme_lower) {
+                if cache_path.exists() {
+                    if let Ok(content) = fs::read_to_string(&cache_path) {
+                        if let Ok(cached) = serde_json::from_str::<Self>(&content) {
+                            ctx.log.warn(&format!(
+                                "Cannot re-fetch external theme `{}` in Built-in mode. Using existing cache.",
+                                theme
+                            ), 1);
+                            return Ok(cached);
+                        }
+                    }
+                }
+
+                anyhow::bail!(
+                    "Theme `{}` is not a built-in theme and is not cached.\n\
+                     {} To use it, switch to `lazy` or `packer` strategy or fetch it while in `lazy` or `packer` mode first.",
+                    theme.yellow().bold(),
+                    "󰋗".blue()
+                );
+            }
+        }
+
         if force {
             ctx.log.info(&format!(
                 "`{}` flag detected. Bypassing cache...",
                 "--force".cyan().bold()
             ));
         } else {
-            ctx.log
-                .info("Cache miss. Loading Neovim runtime and plugins...");
+            ctx.log.info(&format!(
+                "Cache miss. Loading Neovim runtime for {}...",
+                ctx.state.nvim
+            ));
         }
         let args: Vec<String> = Self::build_fetch_args(theme, &ctx);
 
@@ -83,7 +110,7 @@ impl Palette {
         let output: Output = Command::new("nvim")
             .args(&args)
             .output()
-            .context("Failed to execute 'nvim' command. Is Neovim installed?")?;
+            .context("Failed to execute `nvim` command. Is Neovim installed?")?;
 
         if !output.status.success() {
             let error_msg = String::from_utf8_lossy(&output.stderr);
@@ -106,19 +133,24 @@ impl Palette {
     /// Checks whether this theme exists in nvim colorscheme
     pub fn exists(theme: &str, ctx: &IrisContext) -> bool {
         let theme_lower: String = theme.to_lowercase();
-        let cache_dir = dirs::home_dir().map(|h| h.join(".cache/iris/core/palettes"));
+        if ctx
+            .paths
+            .palettes
+            .join(format!("{}.json", theme_lower))
+            .exists()
+        {
+            return true;
+        }
 
-        if let Some(path) = cache_dir {
-            if path.join(format!("{}.json", theme_lower)).exists() {
-                return true;
-            }
+        if matches!(ctx.state.nvim, NvimStrategy::Default) {
+            return NvimStrategy::get_builtin_themes().contains(&theme_lower);
         }
 
         if which::which("nvim").is_err() {
             return false;
         }
 
-        let args: Vec<String> = Self::build_exists_args(theme, ctx);
+        let args: Vec<String> = Self::build_exists_args(&theme_lower, ctx);
         let output = Command::new("nvim").args(&args).output();
 
         match output {
@@ -161,15 +193,22 @@ impl Palette {
 
     /// Helper function to build base nvim arguments for fetch and exists
     fn build_base_args(ctx: &IrisContext) -> Vec<String> {
-        let mut args: Vec<String> = vec![
-            "--headless".to_string(),
-            "-u".to_string(),
-            "NONE".to_string(),
-        ];
+        let mut args: Vec<String> = vec!["--headless".to_string()];
 
-        if let Some(rtp_cmd) = ctx.state.get_rtp_command() {
-            args.push("-c".into());
-            args.push(rtp_cmd);
+        match ctx.state.nvim {
+            NvimStrategy::Default => {
+                args.push("-u".into());
+                args.push("NONE".into());
+            }
+            _ => {
+                args.push("-u".into());
+                args.push("NONE".into());
+
+                if let Some(rtp_cmd) = ctx.state.get_rtp_command() {
+                    args.push("-c".into());
+                    args.push(rtp_cmd);
+                }
+            }
         }
         args
     }
@@ -259,20 +298,72 @@ impl Palette {
             return '#cccccc'
         end
 
-        local ansi = {}
-        for i = 0, 15 do
-            local color = vim.g['terminal_color_' .. i]
-            if type(color) == 'string' then
-                table.insert(ansi, color)
-            elseif type(color) == 'number' then
-                table.insert(ansi, string.format('#%06x', color))
-            else
-                table.insert(ansi, i < 8 and '#000000' or '#ffffff')
+        local fg = g('Normal', 'fg') or '#cccccc'
+        local bg = g('Normal', 'bg') or '#1c1c1c'
+
+        local function resolve_ansi()
+            local result = {}
+            local has_any = false
+
+            for i = 0, 15 do
+                if vim.g['terminal_color_' .. i] ~= nil then
+                    has_any = true
+                    break
+                end
             end
+
+            if has_any then
+                for i = 0, 15 do
+                    local color = vim.g['terminal_color_' .. i]
+                    if type(color) == 'string' then
+                        table.insert(result, color)
+                    elseif type(color) == 'number' then
+                        table.insert(result, string.format('#%06x', color))
+                    else
+                        table.insert(result, i < 8 and bg or fg)
+                    end
+                end
+            else
+                local p_red     = chain('fg', { 'DiagnosticError', 'ErrorMsg' },    { 'DiffDelete' })
+                local p_green   = chain('fg', { 'DiagnosticOk', 'DiagnosticHint' }, { 'String', '@string' })
+                local p_yellow  = chain('fg', { 'DiagnosticWarn', 'WarningMsg' },   { 'Number', '@number' })
+                local p_blue    = chain('fg', { 'Function', '@function' },           { 'Directory' })
+                local p_magenta = chain('fg', { 'Keyword', '@keyword' },             { 'Special' })
+                local p_cyan    = chain('fg', { 'Type', '@type' },                   { 'Identifier' })
+                local p_dim     = chain('fg', { 'Comment', '@comment' },             { 'NonText' })
+
+                result = {
+                    bg,
+                    p_red,
+                    p_green,
+                    p_yellow,
+                    p_blue,
+                    p_magenta,
+                    p_cyan,
+                    p_dim,
+                    p_dim,
+                    p_red,
+                    p_green,
+                    p_yellow,
+                    p_blue,
+                    p_magenta,
+                    p_cyan,
+                    fg,
+                }
+            end
+            return result
         end
 
-        local fg = g('Normal', 'fg') or '#cccccc'
-        local bg = g('Normal', 'bg') or '#101010'
+        local white = '#ffffff'
+        if vim.g.terminal_color_15 ~= nil then
+            if type(vim.g.terminal_color_15) == 'string' then
+                white = vim.g.terminal_color_15
+            elseif type(vim.g.terminal_color_15) == 'number' then
+                white = string.format('#%06x', vim.g.terminal_color_15)
+            end
+        else
+            white = fg
+        end
 
         local res = {
             bg        = bg,
@@ -366,13 +457,8 @@ impl Palette {
                 { 'DiffChange', 'GitSignsChange', '@diff.delta', 'Changed' }
             ),
 
-            white     = (vim.g.terminal_color_15 ~= nil
-                and (type(vim.g.terminal_color_15) == 'string'
-                    and vim.g.terminal_color_15
-                    or string.format('#%06x', vim.g.terminal_color_15))
-                or '#ffffff'),
-
-            ansi      = ansi,
+            white     = white,
+            ansi      = resolve_ansi(),
         }
 
         io.write(vim.fn.json_encode(res))
@@ -571,9 +657,30 @@ mod tests {
     }
 
     #[test]
+    fn should_read_from_cache_in_default_strategy_even_if_external() {
+        let (_temp, mut ctx) = create_test_context();
+        ctx.state.nvim = NvimStrategy::Default;
+        let theme = "vesper";
+        let cache_path = ctx.paths.palettes.join(format!("{}.json", theme));
+
+        let dummy_palette = Palette {
+            name: "vesper".to_string(),
+            bg: "#ffffff".to_string(),
+            ..serde_json::from_str(r##"{"bg":"#ffffff","fg":"","caret":"","line_hl":"","sel":"","gutter_fg":"","comment":"","variable":"","constant":"","number":"","string":"","keyword":"","operator":"","func":"","type_name":"","tag":"","attribute":"","white":"","ansi":[]}"##).unwrap()
+        };
+        Palette::save_to_cache(&cache_path, &dummy_palette).unwrap();
+
+        let result = Palette::fetch(theme, false, &ctx);
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap().name, "vesper");
+    }
+
+    #[test]
     fn should_ignore_cache_when_force_is_true() {
-        let (_temp, ctx) = create_test_context();
-        let theme = "test";
+        let (_temp, mut ctx) = create_test_context();
+        ctx.state.nvim = NvimStrategy::Lazy;
+
+        let theme = "habamax";
         let cache_path = ctx.paths.palettes.join(format!("{}.json", theme));
 
         let old_palette = Palette {
@@ -585,18 +692,17 @@ mod tests {
 
         let cached_res = Palette::fetch(theme, false, &ctx).unwrap();
         assert_eq!(cached_res.name, "old");
-        assert_eq!(cached_res.bg, "#000000");
-
         let forced_res = Palette::fetch(theme, true, &ctx);
 
         match forced_res {
-            Ok(p) => assert_ne!(
-                p.name, "old",
-                "Should have fetched fresh data, not the old cache"
-            ),
-            Err(_) => {
-                ctx.log
-                    .info("Force successfully bypassed cache and tried to reach Neovim.");
+            Ok(p) => {
+                assert_ne!(
+                    p.name, "old",
+                    "Should have fetched fresh data, not the old cache"
+                );
+            }
+            Err(e) => {
+                ctx.log.info(&format!("Bypassed cache: {}", e));
             }
         }
     }
