@@ -144,6 +144,19 @@ pub enum CacheAction {
         #[arg(short, long)]
         all: bool,
     },
+
+    /// Remove a specific theme palette from the cache
+    Remove {
+        /// Name of the theme to delete from cache
+        #[arg(value_name = "THEME")]
+        theme: String,
+    },
+
+    /// List all cached palettes and their sizes
+    List,
+
+    /// Show cache directory paths and disk usage
+    Info,
 }
 
 #[derive(ValueEnum, Clone, Copy, PartialEq, Eq)]
