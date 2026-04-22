@@ -1,5 +1,8 @@
 use anyhow::{Context, Result};
-use std::{fs, path::PathBuf};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+};
 
 /// Paths manager for application
 #[derive(Clone)]
@@ -78,6 +81,35 @@ impl IrisPaths {
 
         self.ensure_dirs()?;
         Ok(())
+    }
+
+    /// Recursively calculates the size of requested directory in bytes
+    pub fn get_size(&self, path: &Path) -> u64 {
+        let metadata = match path.metadata() {
+            Ok(m) => m,
+            Err(_) => return 0,
+        };
+
+        if metadata.is_file() {
+            return metadata.len();
+        }
+
+        if metadata.is_dir() {
+            if let Ok(entries) = fs::read_dir(path) {
+                return entries
+                    .flatten()
+                    .map(|entry| self.get_size(&entry.path()))
+                    .sum();
+            }
+        }
+
+        0
+    }
+
+    /// Checks whether requested palette is already cached
+    pub fn is_palette_cached(&self, name: &str) -> bool {
+        let filename: String = format!("{}.json", name.to_lowercase());
+        self.palettes.join(filename).exists()
     }
 }
 
@@ -218,5 +250,43 @@ mod tests {
             paths.config.exists(),
             "Config directory should never be purged"
         );
+    }
+
+    #[test]
+    fn should_calculate_size_of_directory() {
+        let paths = setup_paths();
+        let root = paths.cache.to_path_buf();
+
+        let empty_file = root.join("empty.txt");
+        fs::write(&empty_file, "").unwrap();
+        assert_eq!(paths.get_size(&empty_file), 0);
+
+        let data_file = root.join("data.txt");
+        fs::write(&data_file, "hello world").unwrap();
+        assert_eq!(paths.get_size(&data_file), 11);
+
+        let dir = root.join("folder");
+        fs::create_dir(&dir).unwrap();
+        fs::write(dir.join("a.txt"), "abc").unwrap();
+
+        let sub = dir.join("sub");
+        fs::create_dir(&sub).unwrap();
+        fs::write(sub.join("b.txt"), "de").unwrap();
+
+        assert_eq!(paths.get_size(&dir), 5);
+        assert_eq!(paths.get_size(&root.join("missing")), 0);
+    }
+
+    #[test]
+    fn should_handle_palette_cached_case_insensitivity() {
+        let paths = setup_paths();
+        let palettes_dir = paths.palettes.to_path_buf();
+        fs::create_dir_all(&palettes_dir).unwrap();
+        fs::write(palettes_dir.join("gruvbox.json"), "{}").unwrap();
+
+        assert!(paths.is_palette_cached("gruvbox"));
+        assert!(paths.is_palette_cached("Gruvbox"));
+        assert!(paths.is_palette_cached("GRUVBOX"));
+        assert!(!paths.is_palette_cached("nord"));
     }
 }

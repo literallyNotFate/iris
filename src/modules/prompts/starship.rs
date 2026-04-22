@@ -1,8 +1,8 @@
 use crate::{
-    commands::HealthStatus,
-    core::IrisContext,
-    models::Palette,
+    core::{IrisPaths, Templater},
+    models::{HealthStatus, Palette},
     modules::{Generator, GeneratorType},
+    ui::Logger,
     utils,
 };
 use anyhow::{Context, Result};
@@ -28,12 +28,12 @@ impl Generator for StarshipGenerator {
         "starship.toml".into()
     }
 
-    fn link_path(&self, ctx: &IrisContext, _theme_name: &str) -> PathBuf {
+    fn link_path(&self, paths: &IrisPaths, _theme: &str) -> PathBuf {
         if let Some(env_path) = self.env_config_directory() {
             return env_path;
         }
 
-        self.resolve_config_directory(ctx)
+        self.resolve_config_directory(paths)
             .join(self.target_file_name(""))
     }
 
@@ -41,17 +41,23 @@ impl Generator for StarshipGenerator {
         env::var("STARSHIP_CONFIG").ok().map(PathBuf::from)
     }
 
-    fn apply(&self, p: &Palette, ctx: &IrisContext) -> Result<()> {
-        ctx.log.info(&format!(
+    fn apply(
+        &self,
+        p: &Palette,
+        paths: &IrisPaths,
+        templater: &Templater,
+        log: &Logger,
+    ) -> Result<()> {
+        log.info(&format!(
             "Writing {} theme to {}",
             utils::capitalize(&p.name).yellow(),
             self.name().bold().cyan(),
         ));
-        let config_path: PathBuf = self.link_path(ctx, &p.name);
+        let config_path: PathBuf = self.link_path(paths, &p.name);
 
-        self.update_config_file(&config_path, p, ctx)?;
+        self.update_config_file(&config_path, p, templater)?;
 
-        ctx.log.info(&format!(
+        log.info(&format!(
             "{} theme applied to {}",
             utils::capitalize(&p.name).yellow(),
             self.name().bold().cyan()
@@ -71,12 +77,12 @@ impl Generator for StarshipGenerator {
         c
     }
 
-    fn health_check(&self, ctx: &IrisContext) -> HealthStatus {
+    fn health_check(&self, paths: &IrisPaths, theme: &str) -> HealthStatus {
         if !self.is_installed() {
             return HealthStatus::Warning("`starship` binary not found".into());
         }
 
-        let config_path: PathBuf = self.link_path(ctx, "");
+        let config_path: PathBuf = self.link_path(paths, "");
 
         if !config_path.exists() {
             return HealthStatus::Error {
@@ -84,8 +90,6 @@ impl Generator for StarshipGenerator {
                 fix_hint: Some(format!("Create config at {}", config_path.display())),
             };
         }
-
-        let theme: &String = &ctx.state.current_theme;
 
         if !theme.is_empty() {
             let content: String = fs::read_to_string(&config_path).unwrap_or_default();
@@ -112,17 +116,23 @@ impl Generator for StarshipGenerator {
         HealthStatus::Ok
     }
 
-    fn fix(&self, status: &HealthStatus, p: &Palette, ctx: &IrisContext) -> Result<()> {
+    fn fix(
+        &self,
+        status: &HealthStatus,
+        p: &Palette,
+        paths: &IrisPaths,
+        templater: &Templater,
+        log: &Logger,
+    ) -> Result<()> {
         match status {
             HealthStatus::Error { .. } | HealthStatus::Warning(_) => {
-                ctx.log
-                    .step(
-                        &format!("Re-applying `{}` configuration...", self.name().bold()),
-                        2,
-                    )
-                    .done(true);
+                log.step(
+                    &format!("Re-applying `{}` configuration...", self.name().bold()),
+                    2,
+                )
+                .done(true);
 
-                self.apply(p, &ctx.silent())
+                self.apply(p, paths, templater, &Logger::quiet())
             }
             _ => Ok(()),
         }
@@ -130,9 +140,9 @@ impl Generator for StarshipGenerator {
 }
 
 impl StarshipGenerator {
-    fn update_config_file(&self, path: &Path, p: &Palette, ctx: &IrisContext) -> Result<()> {
+    fn update_config_file(&self, path: &Path, p: &Palette, templater: &Templater) -> Result<()> {
         let render_ctx = self.build_render_context(p);
-        let new_palette_block: String = ctx.templater.render(&self.template_path(), &render_ctx)?;
+        let new_palette_block: String = templater.render(&self.template_path(), &render_ctx)?;
 
         let content = if path.exists() {
             fs::read_to_string(path)
@@ -242,7 +252,9 @@ mod tests {
         fs::write(&config_path, initial_content).unwrap();
 
         temp_env::with_var("STARSHIP_CONFIG", Some(&config_path), || {
-            generator.apply(&p, &ctx).expect("Failed to apply");
+            generator
+                .apply(&p, &ctx.paths, &ctx.templater, &ctx.log)
+                .expect("Failed to apply");
             let result = fs::read_to_string(&config_path).unwrap();
 
             let palette_occurrences: Vec<_> = result.matches("palette =").collect();
@@ -268,9 +280,11 @@ mod tests {
 
         temp_env::with_var("STARSHIP_CONFIG", Some(&config_path), || {
             ctx.state.current_theme = p.name.clone();
-            generator.apply(&p, &ctx).unwrap();
+            generator
+                .apply(&p, &ctx.paths, &ctx.templater, &ctx.log)
+                .unwrap();
 
-            let status = generator.health_check(&ctx);
+            let status = generator.health_check(&ctx.paths, &p.name);
             assert!(
                 matches!(status, HealthStatus::Ok),
                 "Expected Ok, got {:?}",
@@ -289,14 +303,16 @@ mod tests {
 
         temp_env::with_var("STARSHIP_CONFIG", Some(&config_path), || {
             ctx.state.current_theme = p.name.clone();
-            generator.apply(&p, &ctx).unwrap();
+            generator
+                .apply(&p, &ctx.paths, &ctx.templater, &ctx.log)
+                .unwrap();
 
             let content = fs::read_to_string(&config_path).unwrap();
             let corrupted =
                 content.replace(&format!("palette = \"{}\"", p.name), "palette = \"wrong\"");
             fs::write(&config_path, corrupted).unwrap();
 
-            let status = generator.health_check(&ctx);
+            let status = generator.health_check(&ctx.paths, &p.name);
             assert!(
                 matches!(&status, HealthStatus::Warning(msg) if msg.contains("not using the current palette")),
                 "Expected Warning for wrong palette, got {:?}",
@@ -315,7 +331,9 @@ mod tests {
 
         temp_env::with_var("STARSHIP_CONFIG", Some(&config_path), || {
             ctx.state.current_theme = p.name.clone();
-            generator.apply(&p, &ctx).unwrap();
+            generator
+                .apply(&p, &ctx.paths, &ctx.templater, &ctx.log)
+                .unwrap();
 
             let content = fs::read_to_string(&config_path).unwrap();
             let header = format!("[palettes.{}]", p.name);
@@ -325,7 +343,7 @@ mod tests {
                 .collect();
             fs::write(&config_path, lines.join("\n")).unwrap();
 
-            let status = generator.health_check(&ctx);
+            let status = generator.health_check(&ctx.paths, &p.name);
             match status {
                 HealthStatus::Error { ref message, .. } => {
                     assert!(
@@ -348,7 +366,7 @@ mod tests {
         temp_env::with_var("STARSHIP_CONFIG", Some(&config_path), || {
             fs::write(&config_path, "[directory]\nstyle = \"blue\"\n").unwrap();
 
-            let result = generator.apply(&p, &ctx);
+            let result = generator.apply(&p, &ctx.paths, &ctx.templater, &ctx.log);
             assert!(result.is_ok());
 
             let final_content = fs::read_to_string(&config_path).unwrap();
@@ -376,7 +394,7 @@ mod tests {
             )
             .unwrap();
 
-            let status = generator.health_check(&ctx);
+            let status = generator.health_check(&ctx.paths, &p.name);
             assert!(
                 matches!(status, HealthStatus::Error { ref message, .. } if message.contains("missing")),
                 "Expected Error for missing block, got {:?}",
@@ -401,7 +419,7 @@ mod tests {
             )
             .unwrap();
 
-            let status = generator.health_check(&ctx);
+            let status = generator.health_check(&ctx.paths, &p.name);
             assert!(
                 matches!(status, HealthStatus::Warning(ref msg) if msg.contains("not using the current palette")),
                 "Expected Warning for wrong palette name, got {:?}",

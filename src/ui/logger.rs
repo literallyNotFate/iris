@@ -10,15 +10,13 @@ pub struct Logger {
 
 impl Logger {
     /// Creates a new Logger instance
-    pub fn new(quiet: bool) -> Self {
-        Self { quiet }
+    pub fn new() -> Self {
+        Self { quiet: false }
     }
 
     /// Returns new instance of a logger with quiet mode turned on
-    pub fn as_quiet(&self) -> Self {
-        let mut quiet_logger = self.clone();
-        quiet_logger.quiet = true;
-        quiet_logger
+    pub fn quiet() -> Self {
+        Self { quiet: true }
     }
 
     /// Generates formatting prefixes based on indent level and activity state
@@ -132,8 +130,8 @@ mod tests {
 
     #[test]
     fn should_create_logger_in_quiet_mode() {
-        let logger: Logger = Logger::new(false);
-        let quiet_logger: Logger = logger.as_quiet();
+        let logger: Logger = Logger::new();
+        let quiet_logger: Logger = Logger::quiet();
 
         assert_eq!(logger.quiet, false);
         assert_eq!(quiet_logger.quiet, true);
@@ -141,7 +139,7 @@ mod tests {
 
     #[test]
     fn should_handle_logger_prefix_logic() {
-        let logger: Logger = Logger::new(false);
+        let logger: Logger = Logger::new();
 
         assert_eq!(logger.get_prefix(0, true).contains("❯"), true);
         assert_eq!(logger.get_prefix(0, false), "");
@@ -156,7 +154,7 @@ mod tests {
 
     #[test]
     fn should_build_logger_success_messages() {
-        let logger: Logger = Logger::new(false);
+        let logger: Logger = Logger::new();
 
         let out_0: String = logger.build_success_output("Root", 0);
         assert!(out_0.contains("✔"));
@@ -169,7 +167,7 @@ mod tests {
 
     #[test]
     fn should_build_logger_warn_and_error_messages() {
-        let logger: Logger = Logger::new(false);
+        let logger: Logger = Logger::new();
 
         let warn_out: String = logger.build_warning_output("Warning", 0);
         assert!(warn_out.contains("!"));
@@ -182,14 +180,14 @@ mod tests {
 
     #[test]
     fn should_build_logger_info_messages() {
-        let output: String = Logger::new(false).build_info_output("Visible");
+        let output: String = Logger::new().build_info_output("Visible");
         assert!(output.contains("Visible"));
         assert!(output.contains("•") || output.contains("├─"));
     }
 
     #[test]
     fn should_build_step_output_normal() {
-        let logger: Logger = Logger::new(false);
+        let logger: Logger = Logger::new();
         let output: String = logger.build_step_output("Test", 0);
 
         assert!(!output.contains("..."));
@@ -198,7 +196,7 @@ mod tests {
 
     #[test]
     fn should_build_step_output_quiet() {
-        let logger: Logger = Logger::new(true);
+        let logger: Logger = Logger::quiet();
         let output: String = logger.build_step_output("Test", 0);
 
         assert!(output.contains("..."));

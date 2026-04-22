@@ -1,9 +1,9 @@
 use super::rules::RULES;
 use crate::{
-    commands::HealthStatus,
-    core::IrisContext,
-    models::Palette,
+    core::{IrisPaths, Templater},
+    models::{HealthStatus, Palette},
     modules::{Generator, GeneratorType},
+    ui::Logger,
     utils::{self},
 };
 use anyhow::{Context, Result};
@@ -30,38 +30,44 @@ impl Generator for BatGenerator {
         format!("{}.tmTheme", theme)
     }
 
-    fn resolve_config_directory(&self, ctx: &IrisContext) -> PathBuf {
-        let config_base: PathBuf = ctx
-            .paths
+    // fn resolve_config_directory(&self, ctx: &IrisContext) -> PathBuf {
+    fn resolve_config_directory(&self, paths: &IrisPaths) -> PathBuf {
+        let config_base: PathBuf = paths
             .config
             .parent()
             .map(|p| p.to_path_buf())
-            .unwrap_or_else(|| ctx.paths.config.clone());
+            .unwrap_or_else(|| paths.config.clone());
 
         config_base.join(self.name()).join("themes")
     }
 
-    fn apply(&self, p: &Palette, ctx: &IrisContext) -> Result<()> {
-        ctx.log.info(&format!(
+    fn apply(
+        &self,
+        p: &Palette,
+        paths: &IrisPaths,
+        templater: &Templater,
+        log: &Logger,
+    ) -> Result<()> {
+        log.info(&format!(
             "Generating {} theme for {}...",
             utils::capitalize(&p.name).yellow(),
             self.name().bold().cyan()
         ));
 
-        let cache_theme: PathBuf = self.ensure_theme_cache(p, ctx)?;
-        let link_path: PathBuf = self.link_path(ctx, &p.name);
+        let cache_theme: PathBuf = self.ensure_theme_cache(p, paths, templater)?;
+        let link_path: PathBuf = self.link_path(paths, &p.name);
 
-        ctx.log.info(&format!(
+        log.info(&format!(
             "Linking {} theme to {}...",
             self.name().bold(),
             utils::pretty_path(&link_path).magenta(),
         ));
-        self.ensure_symlink(&cache_theme, &link_path, ctx)?;
+        self.ensure_symlink(&cache_theme, &link_path)?;
 
-        self.ensure_config(p, ctx)?;
-        self.rebuild_bat_cache(ctx)?;
+        self.ensure_config(p, paths)?;
+        self.rebuild_bat_cache(log)?;
 
-        ctx.log.info(&format!(
+        log.info(&format!(
             "{} theme applied to {}",
             utils::capitalize(&p.name).yellow(),
             self.name().bold().cyan()
@@ -115,12 +121,12 @@ impl Generator for BatGenerator {
         c
     }
 
-    fn health_check(&self, ctx: &IrisContext) -> HealthStatus {
+    fn health_check(&self, paths: &IrisPaths, theme: &str) -> HealthStatus {
         if !self.is_installed() {
             return HealthStatus::Warning("`bat` binary not found".into());
         }
 
-        let expected_env: PathBuf = ctx.paths.generators.join(self.name()).join("bat.conf");
+        let expected_env: PathBuf = paths.generators.join(self.name()).join("bat.conf");
         let current_env: String = env::var("BAT_CONFIG_PATH").unwrap_or_default();
 
         if current_env != expected_env.to_string_lossy() {
@@ -133,10 +139,8 @@ impl Generator for BatGenerator {
             };
         }
 
-        let theme: &String = &ctx.state.current_theme;
-
         if !theme.is_empty() {
-            let link = self.link_path(ctx, theme);
+            let link = self.link_path(paths, theme);
             if !link.exists() {
                 return HealthStatus::Error {
                     message: format!(
@@ -153,37 +157,48 @@ impl Generator for BatGenerator {
         HealthStatus::Ok
     }
 
-    fn fix(&self, status: &HealthStatus, p: &Palette, ctx: &IrisContext) -> Result<()> {
+    fn fix(
+        &self,
+        status: &HealthStatus,
+        p: &Palette,
+        paths: &IrisPaths,
+        templater: &Templater,
+        log: &Logger,
+    ) -> Result<()> {
         match status {
             HealthStatus::Error { message, .. } => {
                 if message.contains("missing") || message.contains("not linked") {
-                    ctx.log.step("Restoring missing symlink...", 2).done(true);
+                    log.step("Restoring missing symlink...", 2).done(true);
 
-                    let cache = self.cache_path(ctx, &p.name);
-                    let link = self.link_path(ctx, &p.name);
-                    self.ensure_symlink(&cache, &link, &ctx.silent())?;
+                    let cache = self.cache_path(paths, &p.name);
+                    let link = self.link_path(paths, &p.name);
+                    self.ensure_symlink(&cache, &link)?;
                 }
 
-                self.apply(p, &ctx.silent())
+                self.apply(p, paths, templater, &Logger::quiet())
             }
             _ => {
-                ctx.log
-                    .step(
-                        &format!("Re-applying `{}` configuration...", self.name().bold()),
-                        2,
-                    )
-                    .done(true);
-                self.apply(p, &ctx.silent())
+                log.step(
+                    &format!("Re-applying `{}` configuration...", self.name().bold()),
+                    2,
+                )
+                .done(true);
+                self.apply(p, paths, templater, &Logger::quiet())
             }
         }
     }
 }
 
 impl BatGenerator {
-    fn ensure_theme_cache(&self, p: &Palette, ctx: &IrisContext) -> Result<PathBuf> {
-        let cache_path: PathBuf = self.cache_path(ctx, &p.name);
+    fn ensure_theme_cache(
+        &self,
+        p: &Palette,
+        paths: &IrisPaths,
+        templater: &Templater,
+    ) -> Result<PathBuf> {
+        let cache_path: PathBuf = self.cache_path(paths, &p.name);
         let render_ctx = self.build_render_context(p);
-        let content: String = ctx.templater.render(&self.template_path(), &render_ctx)?;
+        let content: String = templater.render(&self.template_path(), &render_ctx)?;
 
         if let Some(parent) = cache_path.parent() {
             fs::create_dir_all(parent).with_context(|| {
@@ -200,7 +215,7 @@ impl BatGenerator {
         Ok(cache_path)
     }
 
-    fn ensure_symlink(&self, target: &Path, link: &Path, _ctx: &IrisContext) -> anyhow::Result<()> {
+    fn ensure_symlink(&self, target: &Path, link: &Path) -> anyhow::Result<()> {
         if link.exists() || link.is_symlink() {
             fs::remove_file(link)
                 .with_context(|| format!("Failed to remove old `bat` link: {}", link.display()))?;
@@ -229,14 +244,14 @@ impl BatGenerator {
         Ok(())
     }
 
-    fn ensure_config(&self, p: &Palette, ctx: &IrisContext) -> anyhow::Result<()> {
+    fn ensure_config(&self, p: &Palette, paths: &IrisPaths) -> anyhow::Result<()> {
         let theme_name: String = utils::capitalize(&p.name);
         let config_content: String = format!(
             "--theme=\"{name}\"\n--style=\"numbers,changes\"\n--color=\"always\"\n",
             name = theme_name
         );
 
-        let generator_dir: PathBuf = ctx.paths.generators.join(self.name());
+        let generator_dir: PathBuf = paths.generators.join(self.name());
         let config_path: PathBuf = generator_dir.join("bat.conf");
 
         fs::create_dir_all(&generator_dir).with_context(|| {
@@ -251,8 +266,8 @@ impl BatGenerator {
         Ok(())
     }
 
-    fn rebuild_bat_cache(&self, ctx: &IrisContext) -> Result<()> {
-        ctx.log.info("Rebuilding `bat` cache...");
+    fn rebuild_bat_cache(&self, log: &Logger) -> Result<()> {
+        log.info("Rebuilding `bat` cache...");
         let output = Command::new("bat")
             .arg("cache")
             .arg("--build")
@@ -310,11 +325,13 @@ mod tests {
         let p = Palette::mock();
 
         ctx.state.current_theme = p.name.clone();
-        generator.apply(&p, &ctx).unwrap();
+        generator
+            .apply(&p, &ctx.paths, &ctx.templater, &ctx.log)
+            .unwrap();
         let expected_config = ctx.paths.generators.join(generator.name()).join("bat.conf");
 
         temp_env::with_var("BAT_CONFIG_PATH", Some(expected_config), || {
-            let status = generator.health_check(&ctx);
+            let status = generator.health_check(&ctx.paths, &p.name);
             assert!(matches!(status, HealthStatus::Ok));
         });
     }
@@ -325,7 +342,7 @@ mod tests {
         let generator = BatGenerator;
 
         temp_env::with_var("BAT_CONFIG_PATH", Some("/wrong/path/to/bat/config"), || {
-            let status = generator.health_check(&ctx);
+            let status = generator.health_check(&ctx.paths, &ctx.state.current_theme);
             match status {
                 HealthStatus::Error { message, .. } => {
                     assert!(message.contains("BAT_CONFIG_PATH"));
@@ -344,7 +361,7 @@ mod tests {
         let expected_file_name: String = generator.target_file_name(&p.name);
         let expected_theme_name: String = utils::capitalize(&p.name);
 
-        let result = generator.apply(&p, &ctx);
+        let result = generator.apply(&p, &ctx.paths, &ctx.templater, &ctx.log);
         assert!(result.is_ok(), "Apply failed: {:?}", result.err());
 
         let cache_theme_path: PathBuf = ctx.paths.generators.join("bat").join(&expected_file_name);
@@ -375,14 +392,18 @@ mod tests {
         let generator = BatGenerator;
         let p = Palette::mock();
 
-        generator.apply(&p, &ctx).unwrap();
-        let link = generator.link_path(&ctx, &p.name);
+        generator
+            .apply(&p, &ctx.paths, &ctx.templater, &ctx.log)
+            .unwrap();
+        let link = generator.link_path(&ctx.paths, &p.name);
         fs::remove_file(&link).unwrap();
 
-        let status = generator.health_check(&ctx);
+        let status = generator.health_check(&ctx.paths, &p.name);
         assert!(matches!(status, HealthStatus::Error { .. }));
 
-        generator.fix(&status, &p, &ctx.silent()).unwrap();
+        generator
+            .fix(&status, &p, &ctx.paths, &ctx.templater, &ctx.log)
+            .expect("Fix failed");
         assert!(link.exists());
     }
 }

@@ -12,23 +12,14 @@ pub mod switch;
 pub mod sync;
 pub mod watch;
 
-pub use health::HealthStatus;
-
-/// Handles all commands
+/// Main entry point for command execution
+/// Routes CLI commands to their respective logic modules
 pub fn handle(command: Commands, ctx: &mut IrisContext) -> anyhow::Result<()> {
     match command {
         Commands::Init => setup::exec(ctx)?,
-        Commands::Switch {
-            name,
-            force,
-            fallback,
-        } => switch::exec(name, force, fallback, ctx)?,
+        Commands::Switch(args) => switch::exec(args, ctx)?,
         Commands::Sync { force } => sync::exec(force, ctx)?,
-        Commands::Apply {
-            generator,
-            theme,
-            fallback,
-        } => apply::exec(generator, theme, fallback, ctx)?,
+        Commands::Apply(args) => apply::exec(args, ctx)?,
         Commands::Status => status::exec(ctx)?,
         Commands::Watch { interval } => watch::exec(interval, ctx)?,
         Commands::Health { fix } => health::exec(fix, ctx)?,
@@ -53,7 +44,7 @@ pub(crate) fn apply_theme(theme: &str, force: bool, ctx: &mut IrisContext) -> an
 
     let palette = {
         let mut t = ctx.log.step(&format!("Fetching colors: {}", theme), 1);
-        let p = Palette::fetch(theme, force, &ctx)?;
+        let p = Palette::fetch(theme, force, &ctx.paths, &ctx.state, &ctx.log)?;
         t.done(true);
         p
     };

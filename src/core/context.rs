@@ -1,6 +1,13 @@
 use super::IrisPaths;
-use crate::{core::Templater, models::State, modules::GeneratorRegistry, ui::Logger};
+use crate::{
+    core::Templater,
+    models::{HealthStatus, NvimStrategy, Palette, State},
+    modules::{Generator, GeneratorRegistry},
+    ui::Logger,
+    utils,
+};
 use anyhow::{Context as _, Result};
+use colored::*;
 use std::{fs, path::PathBuf};
 
 /// Application context with state and paths (config/cache/base)
@@ -38,17 +45,6 @@ impl IrisContext {
         Ok(ctx)
     }
 
-    /// Make context copy with quiet mode in logger
-    pub fn silent(&self) -> Self {
-        Self {
-            log: self.log.as_quiet(),
-            paths: self.paths.clone(),
-            state: self.state.clone(),
-            registry: self.registry.clone(),
-            templater: self.templater.clone(),
-        }
-    }
-
     /// Switch to specifc theme
     pub fn update(&mut self, name: &str) -> Result<()> {
         self.state.set_theme(name);
@@ -72,6 +68,101 @@ impl IrisContext {
         self.paths.ensure_dirs()?;
         self.state.save_to(&self.paths.state_file)?;
         Ok(())
+    }
+
+    /// Function to resolve theme
+    pub fn resolve_theme(
+        &self,
+        requested: Option<String>,
+        fallback_enabled: bool,
+    ) -> Result<(String, bool)> {
+        let target: Option<String> = requested
+            .map(|s| s.to_lowercase())
+            .filter(|s| !s.is_empty())
+            .or_else(|| {
+                let current: String = self.state.current_theme.to_lowercase();
+                if current.is_empty() {
+                    None
+                } else {
+                    Some(current)
+                }
+            });
+
+        match target {
+            Some(name) if self.is_theme_available(&name) => Ok((name, false)),
+            _ if fallback_enabled && !self.state.fallback_theme.is_empty() => {
+                let fb: String = self.state.fallback_theme.clone();
+                if self.is_theme_available(&fb) {
+                    Ok((fb, true))
+                } else {
+                    anyhow::bail!(
+                        "Requested theme unavailable and fallback `{}` not found.",
+                        utils::capitalize(&fb).yellow()
+                    )
+                }
+            }
+            Some(name) => anyhow::bail!(
+                "Theme `{}` is unavailable.",
+                utils::capitalize(&name).yellow()
+            ),
+            None => anyhow::bail!("No theme specified and no global theme active."),
+        }
+    }
+
+    /// Check whether requested theme is available
+    fn is_theme_available(&self, name: &str) -> bool {
+        if Palette::exists(name, &self.paths, &self.state) {
+            return true;
+        }
+
+        if matches!(self.state.nvim, NvimStrategy::Default) {
+            let is_builtin: bool = NvimStrategy::get_builtin_themes().iter().any(|t| t == name);
+            return is_builtin || self.paths.palettes.join(format!("{}.json", name)).exists();
+        }
+
+        false
+    }
+
+    /// Theme available wrapper with bail
+    pub fn validate_theme_exists(&self, name: &str) -> anyhow::Result<()> {
+        if self.is_theme_available(name) {
+            Ok(())
+        } else {
+            anyhow::bail!(
+                "Theme `{}` not found in cache or Neovim built-ins.",
+                utils::capitalize(&name).yellow().bold()
+            )
+        }
+    }
+
+    /// Resolve generator or throw an error
+    pub fn resolve_generator(&self, name: &str) -> Result<&dyn Generator> {
+        self.registry.get(name).ok_or_else(|| {
+            anyhow::anyhow!(
+                "Unknown generator: `{}`. Run `{}` for available tools.",
+                name.red().bold(),
+                "iris gen list".cyan().italic()
+            )
+        })
+    }
+
+    /// Get theme sync status
+    pub fn get_sync_status(&self) -> (String, bool) {
+        let current: &String = &self.state.current_theme;
+        let nvim_theme: String = Palette::current().unwrap_or_default();
+        let is_sync: bool = nvim_theme.to_lowercase() == current.to_lowercase();
+
+        (nvim_theme, is_sync)
+    }
+
+    /// Check if there are any generators with broken configs
+    pub fn is_any_config_broken(&self) -> bool {
+        self.registry.all().iter().any(|g| {
+            matches!(
+                g.health_check(&self.paths, &self.state.current_theme),
+                HealthStatus::Error { .. }
+            )
+        })
     }
 }
 
@@ -118,5 +209,65 @@ mod tests {
         let loaded_state: State = serde_json::from_str(&state_json).unwrap();
 
         assert_eq!(loaded_state.current_theme, "gruvbox".to_string());
+    }
+
+    #[test]
+    fn should_resolve_theme_explicit_exists() {
+        let (_temp, ctx) = create_test_context();
+
+        fs::create_dir_all(&ctx.paths.palettes).unwrap();
+        fs::write(ctx.paths.palettes.join("gruvbox.json"), "{}").unwrap();
+
+        let (name, fallback) = ctx.resolve_theme(Some("Gruvbox".into()), false).unwrap();
+
+        assert_eq!(name, "gruvbox");
+        assert!(!fallback);
+    }
+
+    #[test]
+    fn should_resolve_theme_fallback_to_current() {
+        let (_temp, mut ctx) = create_test_context();
+        ctx.state.current_theme = "nord".into();
+
+        fs::create_dir_all(&ctx.paths.palettes).unwrap();
+        fs::write(ctx.paths.palettes.join("nord.json"), "{}").unwrap();
+
+        let (name, fallback) = ctx.resolve_theme(None, false).unwrap();
+
+        assert_eq!(name, "nord");
+        assert!(!fallback);
+    }
+
+    #[test]
+    fn should_resolve_theme_use_fallback_theme_on_error() {
+        let (_temp, mut ctx) = create_test_context();
+        ctx.state.fallback_theme = "tokyonight".into();
+
+        fs::create_dir_all(&ctx.paths.palettes).unwrap();
+        fs::write(ctx.paths.palettes.join("tokyonight.json"), "{}").unwrap();
+
+        let (name, fallback) = ctx.resolve_theme(Some("invalid".into()), true).unwrap();
+
+        assert_eq!(name, "tokyonight");
+        assert!(fallback);
+    }
+
+    #[test]
+    fn should_check_if_theme_available_builtin() {
+        let (_temp, mut ctx) = create_test_context();
+        ctx.state.nvim = NvimStrategy::Default;
+
+        assert!(ctx.is_theme_available("habamax"));
+        assert!(!ctx.is_theme_available("non-existent-theme-123"));
+    }
+
+    #[test]
+    fn should_handle_resolve_generator_not_found() {
+        let (_temp, ctx) = create_test_context();
+        let result = ctx.resolve_generator("ghostty");
+        assert!(result.is_err());
+
+        let err_msg = format!("{:?}", result.err().unwrap());
+        assert!(err_msg.contains("Unknown generator"));
     }
 }

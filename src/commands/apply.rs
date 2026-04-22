@@ -1,116 +1,78 @@
 use crate::{
-    commands::HealthStatus,
+    cli::switch::ApplyArgs,
     core::IrisContext,
-    models::{NvimStrategy, Palette},
+    models::{HealthStatus, Palette},
+    modules::Generator,
     utils,
 };
 use colored::Colorize;
 
 /// Handle application apply command
-pub fn exec(
-    generator: String,
-    theme: Option<String>,
-    fallback: bool,
-    ctx: &mut IrisContext,
-) -> anyhow::Result<()> {
-    let mut theme_to_apply: String = theme
-        .clone()
-        .map(|s| s.to_lowercase())
-        .unwrap_or_else(|| ctx.state.current_theme.clone());
+pub fn exec(args: ApplyArgs, ctx: &mut IrisContext) -> anyhow::Result<()> {
+    let (theme_name, was_fallback) = ctx.resolve_theme(args.theme.clone(), args.fallback)?;
+    render_header(&theme_name, args.theme.as_deref(), was_fallback);
 
-    let mut is_fallback_applied: bool = false;
-    if theme_to_apply.is_empty() {
-        if fallback && !ctx.state.fallback_theme.is_empty() {
-            theme_to_apply = ctx.state.fallback_theme.clone();
-            is_fallback_applied = true;
-        } else {
-            anyhow::bail!(
-                "No theme specified and no global theme active. Use `iris switch <name>` or `--fallback`."
-            );
-        }
-    }
+    let palette = Palette::fetch(&theme_name, false, &ctx.paths, &ctx.state, &ctx.log)?;
+    let generator = ctx.resolve_generator(&args.generator)?;
 
-    let exists: bool = Palette::exists(&theme_to_apply, ctx);
-    let is_default_strat: bool = matches!(ctx.state.nvim, NvimStrategy::Default);
+    ensure_generator_health(generator, &palette, ctx)?;
 
-    if !exists
-        || (is_default_strat
-            && !NvimStrategy::get_builtin_themes().contains(&theme_to_apply)
-            && !ctx
-                .paths
-                .palettes
-                .join(format!("{}.json", theme_to_apply))
-                .exists())
-    {
-        if fallback {
-            theme_to_apply = ctx.state.fallback_theme.clone();
-            is_fallback_applied = true;
-
-            if !Palette::exists(&theme_to_apply, ctx) {
-                anyhow::bail!(
-                    "Both requested theme and fallback `{}` are unavailable.",
-                    theme_to_apply
-                );
-            }
-        } else {
-            anyhow::bail!(
-                "Theme `{}` is unavailable (not found or restricted by strategy). Use `--fallback`.",
-                theme_to_apply.yellow().bold()
-            );
-        }
-    }
-
-    println!(
-        "\n {}  {} {}",
-        "󰷉".yellow().bold(),
-        "Standalone apply:".bold(),
-        theme_to_apply.magenta()
-    );
-
-    if is_fallback_applied {
-        println!(
-            "    {} Using fallback: {} because `{}` was unavailable",
-            "󰁯".blue(),
-            theme_to_apply.green().bold(),
-            theme.unwrap_or_else(|| "current".to_string()).dimmed()
-        );
-    }
-
-    let palette: Palette = Palette::fetch(&theme_to_apply, false, ctx)?;
-    let g = ctx
-        .registry
-        .get(&generator)
-        .ok_or_else(|| anyhow::anyhow!("Unknown generator: `{}`", generator.red()))?;
-
-    let status = g.health_check(ctx);
-    if !matches!(status, HealthStatus::Ok) {
-        let mut t_fix = ctx.log.step(
-            &format!("{} Repairing {}...", "󰒓".green(), g.name().cyan()),
-            1,
-        );
-
-        g.fix(&status, &palette, ctx)?;
-        t_fix.done(true);
-    }
-
-    let mut t_apply = ctx.log.step(
+    let mut step = ctx.log.step(
         &format!(
             "{} Applying {} to {}...",
             "󱓞".magenta().bold(),
-            utils::capitalize(&theme_to_apply).yellow().bold(),
-            g.name().cyan().bold()
+            utils::capitalize(&theme_name).yellow().bold(),
+            generator.name().cyan().bold()
         ),
         1,
     );
 
-    g.apply(&palette, ctx)?;
-    t_apply.done(true);
+    generator.apply(&palette, &ctx.paths, &ctx.templater, &ctx.log)?;
+    step.done(true);
 
     println!(
         "\n {}  Successfully updated {}.",
         "󰄬".green(),
-        g.name().bold().cyan()
+        generator.name().bold().cyan()
     );
 
     Ok(())
+}
+
+/// Helper function to ensure generator health
+fn ensure_generator_health(
+    g: &dyn Generator,
+    p: &Palette,
+    ctx: &IrisContext,
+) -> anyhow::Result<()> {
+    let status: HealthStatus = g.health_check(&ctx.paths, &p.name);
+
+    if !status.is_ok() {
+        let mut t = ctx.log.step(
+            &format!("{} Repairing {}...", "󰒓".green(), g.name().cyan()),
+            1,
+        );
+
+        g.fix(&status, p, &ctx.paths, &ctx.templater, &ctx.log)?;
+        t.done(true);
+    }
+    Ok(())
+}
+
+/// Helper function to render header for apply
+fn render_header(theme: &str, original: Option<&str>, is_fallback: bool) {
+    println!(
+        "\n {}  {} {}",
+        "󰷉".yellow().bold(),
+        "Standalone apply:".bold(),
+        theme.magenta()
+    );
+    if is_fallback {
+        println!(
+            "    {} Using fallback: {} because `{}` was unavailable",
+            "󰁯".blue(),
+            theme.green().bold(),
+            original.unwrap_or("current").dimmed()
+        );
+    }
 }

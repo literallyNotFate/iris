@@ -1,8 +1,8 @@
 use crate::{
-    commands::HealthStatus,
-    core::IrisContext,
-    models::Palette,
+    core::{IrisPaths, Templater},
+    models::{HealthStatus, Palette},
     modules::{Generator, GeneratorType},
+    ui::Logger,
     utils::{self},
 };
 use anyhow::{Context, Result};
@@ -28,36 +28,42 @@ impl Generator for GhosttyGenerator {
         "current_theme.conf".into()
     }
 
-    fn cache_path(&self, ctx: &IrisContext, _theme_name: &str) -> PathBuf {
-        ctx.paths
+    fn cache_path(&self, paths: &IrisPaths, _theme: &str) -> PathBuf {
+        paths
             .generators
             .join(self.name())
             .join(self.target_file_name(""))
     }
 
-    fn link_path(&self, ctx: &IrisContext, _theme_name: &str) -> PathBuf {
-        self.resolve_config_directory(ctx)
+    fn link_path(&self, paths: &IrisPaths, _theme: &str) -> PathBuf {
+        self.resolve_config_directory(paths)
             .join(self.target_file_name(""))
     }
 
-    fn apply(&self, p: &Palette, ctx: &IrisContext) -> Result<()> {
-        ctx.log.info(&format!(
+    fn apply(
+        &self,
+        p: &Palette,
+        paths: &IrisPaths,
+        templater: &Templater,
+        log: &Logger,
+    ) -> Result<()> {
+        log.info(&format!(
             "Generating {} theme for {}",
             utils::capitalize(&p.name).yellow(),
             self.name().bold().cyan(),
         ));
-        let cache_file: PathBuf = self.ensure_cache_file(p, ctx)?;
-        let link_path: PathBuf = self.link_path(ctx, &p.name);
+        let cache_file: PathBuf = self.ensure_cache_file(p, paths, templater)?;
+        let link_path: PathBuf = self.link_path(paths, &p.name);
 
-        ctx.log.info(&format!(
+        log.info(&format!(
             "Linking {} theme to {}...",
             self.name().bold(),
             utils::pretty_path(&link_path).magenta(),
         ));
 
-        self.ensure_symlink(&cache_file, &link_path, ctx)?;
+        self.ensure_symlink(&cache_file, &link_path)?;
 
-        ctx.log.info(&format!(
+        log.info(&format!(
             "{} theme applied to {}",
             utils::capitalize(&p.name).yellow(),
             self.name().bold().cyan()
@@ -77,15 +83,15 @@ impl Generator for GhosttyGenerator {
         c
     }
 
-    fn health_check(&self, ctx: &IrisContext) -> HealthStatus {
+    fn health_check(&self, paths: &IrisPaths, _theme: &str) -> HealthStatus {
         if !self.is_installed() {
             return HealthStatus::Warning("`ghostty` binary not found".into());
         }
 
-        let ghostty_dir: PathBuf = self.resolve_config_directory(ctx);
+        let ghostty_dir: PathBuf = self.resolve_config_directory(paths);
         let config_path: PathBuf = ghostty_dir.join("config");
-        let link_path: PathBuf = self.link_path(ctx, "");
-        let expected_cache: PathBuf = self.cache_path(ctx, "");
+        let link_path: PathBuf = self.link_path(paths, "");
+        let expected_cache: PathBuf = self.cache_path(paths, "");
 
         if !link_path.exists() {
             return HealthStatus::Error {
@@ -112,7 +118,7 @@ impl Generator for GhosttyGenerator {
         }
 
         #[cfg(unix)]
-        if let Ok(target) = std::fs::read_link(&link_path) {
+        if let Ok(target) = fs::read_link(&link_path) {
             if target != expected_cache {
                 return HealthStatus::Warning("Link points to a different cache location".into());
             }
@@ -121,46 +127,54 @@ impl Generator for GhosttyGenerator {
         HealthStatus::Ok
     }
 
-    fn fix(&self, status: &HealthStatus, p: &Palette, ctx: &IrisContext) -> Result<()> {
+    fn fix(
+        &self,
+        status: &HealthStatus,
+        p: &Palette,
+        paths: &IrisPaths,
+        templater: &Templater,
+        log: &Logger,
+    ) -> Result<()> {
         match status {
             HealthStatus::Error { message, .. } => {
                 let msg_low: String = message.to_lowercase();
                 if msg_low.contains("missing") || msg_low.contains("not found") {
-                    ctx.log
-                        .step("Repairing `ghostty` configuration and paths...", 2)
+                    log.step("Repairing `ghostty` configuration and paths...", 2)
                         .done(true);
 
-                    let cache = self.cache_path(ctx, &p.name);
-                    let link = self.link_path(ctx, &p.name);
-                    self.ensure_symlink(&cache, &link, &ctx.silent())?;
+                    let cache = self.cache_path(paths, &p.name);
+                    let link = self.link_path(paths, &p.name);
+                    self.ensure_symlink(&cache, &link)?;
                 }
 
-                self.apply(p, &ctx.silent())
+                self.apply(p, paths, templater, &Logger::quiet())
             }
             HealthStatus::Warning(msg) if msg.contains("not imported") => {
-                ctx.log
-                    .step("Injecting import into `ghostty`...", 2)
-                    .done(true);
-                self.inject_import_line(ctx)
+                log.step("Injecting import into `ghostty`...", 2).done(true);
+                self.inject_import_line(paths)
             }
             _ => {
-                ctx.log
-                    .step(
-                        &format!("Re-applying `{}` configuration...", self.name().bold()),
-                        2,
-                    )
-                    .done(true);
-                self.apply(p, &ctx.silent())
+                log.step(
+                    &format!("Re-applying `{}` configuration...", self.name().bold()),
+                    2,
+                )
+                .done(true);
+                self.apply(p, paths, templater, &Logger::quiet())
             }
         }
     }
 }
 
 impl GhosttyGenerator {
-    fn ensure_cache_file(&self, p: &Palette, ctx: &IrisContext) -> Result<PathBuf> {
-        let cache_file: PathBuf = self.cache_path(ctx, &p.name);
+    fn ensure_cache_file(
+        &self,
+        p: &Palette,
+        paths: &IrisPaths,
+        templater: &Templater,
+    ) -> Result<PathBuf> {
+        let cache_file: PathBuf = self.cache_path(paths, &p.name);
         let render_ctx = self.build_render_context(p);
-        let content: String = ctx.templater.render(&self.template_path(), &render_ctx)?;
+        let content: String = templater.render(&self.template_path(), &render_ctx)?;
 
         if let Some(parent) = cache_file.parent() {
             fs::create_dir_all(parent).with_context(|| {
@@ -177,7 +191,7 @@ impl GhosttyGenerator {
         Ok(cache_file)
     }
 
-    fn ensure_symlink(&self, target: &Path, link: &Path, _ctx: &IrisContext) -> anyhow::Result<()> {
+    fn ensure_symlink(&self, target: &Path, link: &Path) -> anyhow::Result<()> {
         if link.exists() || link.is_symlink() {
             fs::remove_file(link).with_context(|| {
                 format!(
@@ -210,8 +224,8 @@ impl GhosttyGenerator {
         Ok(())
     }
 
-    fn inject_import_line(&self, ctx: &IrisContext) -> anyhow::Result<()> {
-        let config_path: PathBuf = self.resolve_config_directory(ctx).join("config");
+    fn inject_import_line(&self, paths: &IrisPaths) -> anyhow::Result<()> {
+        let config_path: PathBuf = self.resolve_config_directory(paths).join("config");
         let import_line: String = format!("config-file = {}", self.target_file_name(""));
 
         if !config_path.exists() {
@@ -294,13 +308,17 @@ mod tests {
         let p = Palette::mock();
 
         ctx.state.current_theme = p.name.clone();
-        generator.apply(&p, &ctx).unwrap();
+        generator
+            .apply(&p, &ctx.paths, &ctx.templater, &ctx.log)
+            .unwrap();
 
-        let config_path = generator.resolve_config_directory(&ctx).join("config");
+        let config_path = generator
+            .resolve_config_directory(&ctx.paths)
+            .join("config");
         let import_line = format!("config-file = {}", generator.target_file_name(&p.name));
         fs::write(&config_path, import_line).unwrap();
 
-        let status = generator.health_check(&ctx);
+        let status = generator.health_check(&ctx.paths, &p.name);
         assert!(
             matches!(status, HealthStatus::Ok),
             "Expected Ok, got {:?}",
@@ -314,8 +332,8 @@ mod tests {
         let generator = GhosttyGenerator;
         let root = tmp_dir.path();
 
-        let config_dir = generator.resolve_config_directory(&ctx);
-        let theme_link = generator.link_path(&ctx, "");
+        let config_dir = generator.resolve_config_directory(&ctx.paths);
+        let theme_link = generator.link_path(&ctx.paths, "");
 
         assert!(
             config_dir.starts_with(root),
@@ -333,7 +351,7 @@ mod tests {
             fs::remove_file(&config_path).unwrap();
         }
 
-        let status = generator.health_check(&ctx);
+        let status = generator.health_check(&ctx.paths, &ctx.state.current_theme);
         match status {
             HealthStatus::Error { ref message, .. } => {
                 assert!(
@@ -353,12 +371,16 @@ mod tests {
         let p = Palette::mock();
 
         ctx.state.current_theme = p.name.clone();
-        generator.apply(&p, &ctx).unwrap();
+        generator
+            .apply(&p, &ctx.paths, &ctx.templater, &ctx.log)
+            .unwrap();
 
-        let config_path = generator.resolve_config_directory(&ctx).join("config");
+        let config_path = generator
+            .resolve_config_directory(&ctx.paths)
+            .join("config");
         fs::write(&config_path, "font-family = JetBrainsMono").unwrap();
 
-        let status = generator.health_check(&ctx);
+        let status = generator.health_check(&ctx.paths, &p.name);
         match status {
             HealthStatus::Warning(msg) => {
                 assert!(msg.contains("not imported"));
@@ -373,7 +395,7 @@ mod tests {
         let generator = GhosttyGenerator;
         let p = Palette::mock();
 
-        let result = generator.apply(&p, &ctx);
+        let result = generator.apply(&p, &ctx.paths, &ctx.templater, &ctx.log);
         assert!(result.is_ok(), "Failed to apply: {:?}", result.err());
 
         let cache_file = ctx
@@ -395,19 +417,23 @@ mod tests {
         let generator = GhosttyGenerator;
         let p = Palette::mock();
 
-        let config_dir = generator.resolve_config_directory(&ctx);
+        let config_dir = generator.resolve_config_directory(&ctx.paths);
         fs::create_dir_all(&config_dir).unwrap();
         let config_path = config_dir.join("config");
 
-        generator.apply(&p, &ctx).unwrap();
+        generator
+            .apply(&p, &ctx.paths, &ctx.templater, &ctx.log)
+            .unwrap();
         fs::write(&config_path, "font-size = 12").unwrap();
 
-        let status = generator.health_check(&ctx);
-        generator.fix(&status, &p, &ctx.silent()).unwrap();
+        let status = generator.health_check(&ctx.paths, &p.name);
+        generator
+            .fix(&status, &p, &ctx.paths, &ctx.templater, &ctx.log)
+            .expect("Fix failed");
 
         let content = fs::read_to_string(&config_path).unwrap();
         assert!(content.contains("current_theme.conf"));
-        assert!(generator.health_check(&ctx).is_ok());
+        assert!(generator.health_check(&ctx.paths, &p.name).is_ok());
     }
 
     #[test]
@@ -415,29 +441,33 @@ mod tests {
         let (_, ctx) = create_test_context();
         let generator = GhosttyGenerator;
         let p = Palette::mock();
-        let config_dir = generator.resolve_config_directory(&ctx);
+        let config_dir = generator.resolve_config_directory(&ctx.paths);
         fs::create_dir_all(&config_dir).unwrap();
 
-        generator.apply(&p, &ctx).unwrap();
+        generator
+            .apply(&p, &ctx.paths, &ctx.templater, &ctx.log)
+            .unwrap();
 
         let config_path = config_dir.join("config");
         fs::write(&config_path, "config-import = current_theme.conf").unwrap();
 
-        let link_path = generator.link_path(&ctx, "");
+        let link_path = generator.link_path(&ctx.paths, "");
         if link_path.exists() || link_path.is_symlink() {
             fs::remove_file(&link_path).unwrap();
         }
 
-        let status = generator.health_check(&ctx);
+        let status = generator.health_check(&ctx.paths, &p.name);
         assert!(
             matches!(status, HealthStatus::Error { .. }),
             "Expected Error, got {:?}",
             status
         );
 
-        generator.fix(&status, &p, &ctx.silent()).unwrap();
+        generator
+            .fix(&status, &p, &ctx.paths, &ctx.templater, &ctx.log)
+            .expect("Fix failed");
 
-        let final_status = generator.health_check(&ctx);
+        let final_status = generator.health_check(&ctx.paths, &p.name);
         assert!(link_path.exists(), "Link should exist");
 
         match final_status {

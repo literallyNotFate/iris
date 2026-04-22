@@ -1,4 +1,9 @@
-use crate::{core::IrisContext, models::NvimStrategy};
+use crate::{
+    core::IrisPaths,
+    models::{NvimStrategy, State},
+    ui::Logger,
+    utils::{self, CustomColor},
+};
 use anyhow::{Context, Result};
 use colored::Colorize;
 use serde::{Deserialize, Serialize};
@@ -52,14 +57,20 @@ impl Palette {
     }
 
     /// Fetch palette from nvim using lua script
-    pub fn fetch(theme: &str, force: bool, ctx: &IrisContext) -> Result<Self> {
+    pub fn fetch(
+        theme: &str,
+        force: bool,
+        paths: &IrisPaths,
+        state: &State,
+        log: &Logger,
+    ) -> Result<Self> {
         let theme_lower: String = theme.to_lowercase();
-        let cache_path: PathBuf = ctx.paths.palettes.join(format!("{}.json", theme_lower));
+        let cache_path: PathBuf = paths.palettes.join(format!("{}.json", theme_lower));
 
         if !force && cache_path.exists() {
             if let Ok(content) = fs::read_to_string(&cache_path) {
                 if let Ok(cached) = serde_json::from_str::<Self>(&content) {
-                    ctx.log.info(&format!(
+                    log.info(&format!(
                         "Using cached palette for {}...",
                         theme.yellow().bold()
                     ));
@@ -68,14 +79,14 @@ impl Palette {
             }
         }
 
-        if matches!(ctx.state.nvim, NvimStrategy::Default) {
+        if matches!(state.nvim, NvimStrategy::Default) {
             let builtins: Vec<String> = NvimStrategy::get_builtin_themes();
 
             if !builtins.contains(&theme_lower) {
                 if cache_path.exists() {
                     if let Ok(content) = fs::read_to_string(&cache_path) {
                         if let Ok(cached) = serde_json::from_str::<Self>(&content) {
-                            ctx.log.warn(&format!(
+                            log.warn(&format!(
                                 "Cannot re-fetch external theme `{}` in Built-in mode. Using existing cache.",
                                 theme
                             ), 1);
@@ -94,19 +105,19 @@ impl Palette {
         }
 
         if force {
-            ctx.log.info(&format!(
+            log.info(&format!(
                 "`{}` flag detected. Bypassing cache...",
                 "--force".cyan().bold()
             ));
         } else {
-            ctx.log.info(&format!(
+            log.info(&format!(
                 "Cache miss. Loading Neovim runtime for {}...",
-                ctx.state.nvim
+                state.nvim
             ));
         }
-        let args: Vec<String> = Self::build_fetch_args(theme, &ctx);
+        let args: Vec<String> = Self::build_fetch_args(theme, state);
 
-        ctx.log.info("Executing Lua bridge in headless mode...");
+        log.info("Executing Lua bridge in headless mode...");
         let output: Output = Command::new("nvim")
             .args(&args)
             .output()
@@ -117,24 +128,23 @@ impl Palette {
             anyhow::bail!("Neovim failed to export palette: {}", error_msg.trim());
         }
 
-        ctx.log.info("Parsing palette data...");
+        log.info("Parsing palette data...");
         let stdout = String::from_utf8_lossy(&output.stdout);
 
         let mut palette: Palette = Self::parse_nvim_json(&stdout)?;
         palette.name = theme.to_string();
 
         if let Err(e) = Self::save_to_cache(&cache_path, &palette) {
-            ctx.log.warn(&format!("Failed to cache palette: {}", e), 1);
+            log.warn(&format!("Failed to cache palette: {}", e), 1);
         }
 
         Ok(palette)
     }
 
     /// Checks whether this theme exists in nvim colorscheme
-    pub fn exists(theme: &str, ctx: &IrisContext) -> bool {
+    pub fn exists(theme: &str, paths: &IrisPaths, state: &State) -> bool {
         let theme_lower: String = theme.to_lowercase();
-        if ctx
-            .paths
+        if paths
             .palettes
             .join(format!("{}.json", theme_lower))
             .exists()
@@ -142,7 +152,7 @@ impl Palette {
             return true;
         }
 
-        if matches!(ctx.state.nvim, NvimStrategy::Default) {
+        if matches!(state.nvim, NvimStrategy::Default) {
             return NvimStrategy::get_builtin_themes().contains(&theme_lower);
         }
 
@@ -150,7 +160,7 @@ impl Palette {
             return false;
         }
 
-        let args: Vec<String> = Self::build_exists_args(&theme_lower, ctx);
+        let args: Vec<String> = Self::build_exists_args(&theme_lower, state);
         let output = Command::new("nvim").args(&args).output();
 
         match output {
@@ -192,10 +202,10 @@ impl Palette {
     }
 
     /// Helper function to build base nvim arguments for fetch and exists
-    fn build_base_args(ctx: &IrisContext) -> Vec<String> {
+    fn build_base_args(state: &State) -> Vec<String> {
         let mut args: Vec<String> = vec!["--headless".to_string()];
 
-        match ctx.state.nvim {
+        match state.nvim {
             NvimStrategy::Default => {
                 args.push("-u".into());
                 args.push("NONE".into());
@@ -204,7 +214,7 @@ impl Palette {
                 args.push("-u".into());
                 args.push("NONE".into());
 
-                if let Some(rtp_cmd) = ctx.state.get_rtp_command() {
+                if let Some(rtp_cmd) = state.get_rtp_command() {
                     args.push("-c".into());
                     args.push(rtp_cmd);
                 }
@@ -214,8 +224,8 @@ impl Palette {
     }
 
     /// Helper function to build command args for nvim (palette fetch command)
-    fn build_fetch_args(theme: &str, ctx: &IrisContext) -> Vec<String> {
-        let mut args: Vec<String> = Self::build_base_args(ctx);
+    fn build_fetch_args(theme: &str, state: &State) -> Vec<String> {
+        let mut args: Vec<String> = Self::build_base_args(state);
         args.extend([
             "-c".into(),
             format!("colorscheme {}", theme.to_lowercase()),
@@ -228,8 +238,8 @@ impl Palette {
     }
 
     /// Helper function to build command args for nvim (exists palette command)
-    fn build_exists_args(theme: &str, ctx: &IrisContext) -> Vec<String> {
-        let mut args: Vec<String> = Self::build_base_args(ctx);
+    fn build_exists_args(theme: &str, state: &State) -> Vec<String> {
+        let mut args: Vec<String> = Self::build_base_args(state);
         args.extend([
             "-c".into(),
             format!(
@@ -465,6 +475,80 @@ impl Palette {
         "##
     }
 
+    /// Table with core and syntax colors
+    pub fn core_and_syntax_colors(&self) {
+        let core: [(&str, &String); 5] = [
+            ("Background", &self.bg),
+            ("Foreground", &self.fg),
+            ("Selection ", &self.sel),
+            ("Caret     ", &self.caret),
+            ("Gutter    ", &self.gutter_fg),
+        ];
+
+        let syntax: [(&str, &String); 5] = [
+            ("Keyword ", &self.keyword),
+            ("Function", &self.func),
+            ("String  ", &self.string),
+            ("Constant", &self.constant),
+            ("Variable", &self.variable),
+        ];
+
+        for i in 0..5 {
+            self.render_row(core[i], syntax[i]);
+        }
+    }
+
+    /// ANSI grid colors (terminal colors 0-15)
+    pub fn ansi_grid(&self) {
+        for row in 0..2 {
+            print!("  ");
+            for col in 0..8 {
+                let idx: usize = row * 8 + col;
+                let color: &String = &self.ansi[idx];
+                let label: String = format!(" {:02} ", idx);
+
+                print!("{}", label.on_color_code(color).black());
+            }
+
+            println!();
+        }
+    }
+
+    /// Code snippet with palette colors
+    pub fn preview_code(&self) {
+        println!(
+            "  {} {} {} {} {}",
+            "fn".color_code_fg(&self.keyword),
+            "main".color_code_fg(&self.func),
+            "() {".color_code_fg(&self.fg),
+            "\"Hello World\"".color_code_fg(&self.string),
+            "};".color_code_fg(&self.fg)
+        );
+    }
+
+    /// Helper function to render row in core vs syntax table
+    fn render_row(&self, left: (&str, &String), right: (&str, &String)) {
+        let format_col = |label: &str, hex: &str| {
+            let (r, g, b) = utils::hex_to_rgb(hex);
+            let rgb_str: String = format!("({},{},{})", r, g, b);
+            let block = "  ".on_color_code(hex);
+
+            format!(
+                "{:<12} {}  {:<9} {:<15}",
+                label.color_code_fg(&self.fg),
+                block,
+                hex.color_code_fg(&self.comment),
+                rgb_str.bright_black()
+            )
+        };
+
+        println!(
+            "  {} │ {}",
+            format_col(left.0, left.1),
+            format_col(right.0, right.1)
+        );
+    }
+
     #[cfg(test)]
     /// Function to create palette mock
     pub fn mock() -> Self {
@@ -620,7 +704,7 @@ mod tests {
     fn should_test_build_fetch_args_case() {
         let (_temp, ctx) = create_test_context();
         let theme = "Tokyonight";
-        let args = Palette::build_fetch_args(theme, &ctx);
+        let args = Palette::build_fetch_args(theme, &ctx.state);
 
         assert!(args.contains(&"--headless".to_string()));
         assert!(args.contains(&"NONE".to_string()));
@@ -636,7 +720,7 @@ mod tests {
     fn should_test_build_exists_args_case() {
         let (_temp, mut ctx) = create_test_context();
         ctx.state.nvim = NvimStrategy::Lazy;
-        let args = Palette::build_exists_args("gruvbox", &ctx);
+        let args = Palette::build_exists_args("gruvbox", &ctx.state);
 
         assert!(args.contains(&"--headless".to_string()));
         assert!(args.contains(&"NONE".to_string()));
@@ -650,7 +734,7 @@ mod tests {
     fn should_test_build_args_without_rtp_for_default_strategy() {
         let (_temp, mut ctx) = create_test_context();
         ctx.state.nvim = NvimStrategy::Default;
-        let args = Palette::build_exists_args("default_theme", &ctx);
+        let args = Palette::build_exists_args("default_theme", &ctx.state);
 
         let has_rtp = args.iter().any(|a| a.contains("vim.opt.rtp:append"));
         assert!(!has_rtp, "Default strategy should NOT include RTP setup");
@@ -670,7 +754,7 @@ mod tests {
         };
         Palette::save_to_cache(&cache_path, &dummy_palette).unwrap();
 
-        let result = Palette::fetch(theme, false, &ctx);
+        let result = Palette::fetch(theme, false, &ctx.paths, &ctx.state, &ctx.log);
         assert!(result.is_ok());
         assert_eq!(result.unwrap().name, "vesper");
     }
@@ -690,9 +774,9 @@ mod tests {
         };
         Palette::save_to_cache(&cache_path, &old_palette).unwrap();
 
-        let cached_res = Palette::fetch(theme, false, &ctx).unwrap();
+        let cached_res = Palette::fetch(theme, false, &ctx.paths, &ctx.state, &ctx.log).unwrap();
         assert_eq!(cached_res.name, "old");
-        let forced_res = Palette::fetch(theme, true, &ctx);
+        let forced_res = Palette::fetch(theme, true, &ctx.paths, &ctx.state, &ctx.log);
 
         match forced_res {
             Ok(p) => {

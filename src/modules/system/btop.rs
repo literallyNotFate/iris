@@ -1,8 +1,8 @@
 use crate::{
-    commands::HealthStatus,
-    core::IrisContext,
-    models::Palette,
+    core::{IrisPaths, Templater},
+    models::{HealthStatus, Palette},
     modules::{Generator, GeneratorType},
+    ui::Logger,
     utils::{self},
 };
 use anyhow::{Context, Result};
@@ -28,42 +28,47 @@ impl Generator for BtopGenerator {
         format!("{}.theme", theme)
     }
 
-    fn resolve_config_directory(&self, ctx: &IrisContext) -> PathBuf {
-        let config_base: PathBuf = ctx
-            .paths
+    fn resolve_config_directory(&self, paths: &IrisPaths) -> PathBuf {
+        let config_base: PathBuf = paths
             .config
             .parent()
             .map(|p| p.to_path_buf())
-            .unwrap_or_else(|| ctx.paths.config.clone());
+            .unwrap_or_else(|| paths.config.clone());
 
         config_base.join(self.name()).join("themes")
     }
 
-    fn apply(&self, p: &Palette, ctx: &IrisContext) -> Result<()> {
-        ctx.log.info(&format!(
+    fn apply(
+        &self,
+        p: &Palette,
+        paths: &IrisPaths,
+        templater: &Templater,
+        log: &Logger,
+    ) -> Result<()> {
+        log.info(&format!(
             "Generating {} theme for {}",
             utils::capitalize(&p.name).yellow(),
             self.name().bold().cyan(),
         ));
 
-        let cache_file: PathBuf = self.ensure_cache_file(p, ctx)?;
-        let link_path: PathBuf = self.link_path(ctx, &p.name);
+        let cache_file: PathBuf = self.ensure_cache_file(p, paths, templater)?;
+        let link_path: PathBuf = self.link_path(paths, &p.name);
 
-        ctx.log.info(&format!(
+        log.info(&format!(
             "Linking {} theme to {}...",
             self.name().bold(),
             utils::pretty_path(&link_path).magenta(),
         ));
-        self.ensure_symlink(&cache_file, &link_path, ctx)?;
+        self.ensure_symlink(&cache_file, &link_path)?;
 
         let conf_path: PathBuf = self
-            .resolve_config_directory(ctx)
+            .resolve_config_directory(paths)
             .parent()
-            .unwrap_or(&self.resolve_config_directory(ctx))
+            .unwrap_or(&self.resolve_config_directory(paths))
             .join("btop.conf");
 
         if conf_path.exists() {
-            ctx.log.info(&format!(
+            log.info(&format!(
                 "Setting color_theme = \"{}\" in btop.conf",
                 p.name.bold().red()
             ));
@@ -71,7 +76,7 @@ impl Generator for BtopGenerator {
             self.update_btop_conf(&conf_path, &p.name)?;
         }
 
-        ctx.log.info(&format!(
+        log.info(&format!(
             "{} theme applied to {}",
             utils::capitalize(&p.name).yellow(),
             self.name().bold().cyan()
@@ -103,12 +108,12 @@ impl Generator for BtopGenerator {
         c
     }
 
-    fn health_check(&self, ctx: &IrisContext) -> HealthStatus {
+    fn health_check(&self, paths: &IrisPaths, theme: &str) -> HealthStatus {
         if !self.is_installed() {
             return HealthStatus::Warning("`btop` binary not found".into());
         }
 
-        let themes_dir: PathBuf = self.resolve_config_directory(ctx);
+        let themes_dir: PathBuf = self.resolve_config_directory(paths);
         let conf_path: PathBuf = themes_dir.parent().unwrap_or(&themes_dir).join("btop.conf");
 
         if !conf_path.exists() {
@@ -117,8 +122,6 @@ impl Generator for BtopGenerator {
                 fix_hint: Some("Run `btop` once to generate default config".into()),
             };
         }
-
-        let theme: &String = &ctx.state.current_theme;
 
         if !theme.is_empty() {
             let content: String = fs::read_to_string(&conf_path).unwrap_or_default();
@@ -131,7 +134,7 @@ impl Generator for BtopGenerator {
                 ));
             }
 
-            let link = self.link_path(ctx, theme);
+            let link = self.link_path(paths, theme);
             if !link.exists() {
                 return HealthStatus::Error {
                     message: format!("Theme file {}.theme missing in btop themes folder", theme),
@@ -145,44 +148,47 @@ impl Generator for BtopGenerator {
         HealthStatus::Ok
     }
 
-    fn fix(&self, status: &HealthStatus, p: &Palette, ctx: &IrisContext) -> Result<()> {
+    fn fix(
+        &self,
+        status: &HealthStatus,
+        p: &Palette,
+        paths: &IrisPaths,
+        templater: &Templater,
+        log: &Logger,
+    ) -> Result<()> {
         match status {
             HealthStatus::Error { message, .. } => {
                 if message.contains("missing") {
-                    ctx.log
-                        .step("Restoring `btop` theme symlink...", 2)
-                        .done(true);
+                    log.step("Restoring `btop` theme symlink...", 2).done(true);
 
-                    let cache = self.cache_path(ctx, &p.name);
-                    let link = self.link_path(ctx, &p.name);
-                    self.ensure_symlink(&cache, &link, &ctx.silent())?;
+                    let cache = self.cache_path(paths, &p.name);
+                    let link = self.link_path(paths, &p.name);
+                    self.ensure_symlink(&cache, &link)?
                 }
 
-                self.apply(p, &ctx.silent())
+                self.apply(p, paths, templater, &Logger::quiet())
             }
 
             HealthStatus::Warning(msg) if msg.contains("not using the current theme") => {
-                ctx.log
-                    .step("Updating btop.conf to use the correct theme...", 2)
+                log.step("Updating btop.conf to use the correct theme...", 2)
                     .done(true);
 
                 let conf_path = self
-                    .resolve_config_directory(ctx)
+                    .resolve_config_directory(paths)
                     .parent()
-                    .unwrap_or(&self.resolve_config_directory(ctx))
+                    .unwrap_or(&self.resolve_config_directory(paths))
                     .join("btop.conf");
 
                 self.update_btop_conf(&conf_path, &p.name)
             }
 
             _ => {
-                ctx.log
-                    .step(
-                        &format!("Re-applying `{}` configuration...", self.name().bold()),
-                        2,
-                    )
-                    .done(true);
-                self.apply(p, &ctx.silent())
+                log.step(
+                    &format!("Re-applying `{}` configuration...", self.name().bold()),
+                    2,
+                )
+                .done(true);
+                self.apply(p, paths, templater, &Logger::quiet())
             }
         }
     }
@@ -219,10 +225,15 @@ impl BtopGenerator {
         Ok(())
     }
 
-    fn ensure_cache_file(&self, p: &Palette, ctx: &IrisContext) -> Result<PathBuf> {
-        let cache_file: PathBuf = self.cache_path(ctx, &p.name);
+    fn ensure_cache_file(
+        &self,
+        p: &Palette,
+        paths: &IrisPaths,
+        templater: &Templater,
+    ) -> Result<PathBuf> {
+        let cache_file: PathBuf = self.cache_path(paths, &p.name);
         let render_ctx = self.build_render_context(p);
-        let content: String = ctx.templater.render(&self.template_path(), &render_ctx)?;
+        let content: String = templater.render(&self.template_path(), &render_ctx)?;
 
         if let Some(parent) = cache_file.parent() {
             fs::create_dir_all(parent).with_context(|| {
@@ -242,7 +253,7 @@ impl BtopGenerator {
         Ok(cache_file)
     }
 
-    fn ensure_symlink(&self, target: &Path, link: &Path, _ctx: &IrisContext) -> Result<()> {
+    fn ensure_symlink(&self, target: &Path, link: &Path) -> Result<()> {
         if link.exists() || link.is_symlink() {
             fs::remove_file(link).with_context(|| {
                 format!(
@@ -345,10 +356,12 @@ mod tests {
         let p = Palette::mock();
 
         ctx.state.current_theme = p.name.clone();
-        generator.apply(&p, &ctx).unwrap();
+        generator
+            .apply(&p, &ctx.paths, &ctx.templater, &ctx.log)
+            .unwrap();
 
         let btop_dir = generator
-            .resolve_config_directory(&ctx)
+            .resolve_config_directory(&ctx.paths)
             .parent()
             .unwrap()
             .to_path_buf();
@@ -362,7 +375,7 @@ mod tests {
         )
         .unwrap();
 
-        let status = generator.health_check(&ctx);
+        let status = generator.health_check(&ctx.paths, &p.name);
         assert!(
             matches!(status, HealthStatus::Ok),
             "Expected Ok, got {:?}",
@@ -375,7 +388,7 @@ mod tests {
         let (_, ctx) = create_test_context();
         let generator = BtopGenerator;
 
-        let status = generator.health_check(&ctx);
+        let status = generator.health_check(&ctx.paths, &ctx.state.current_theme);
         match status {
             HealthStatus::Error { ref message, .. } => {
                 assert!(message.contains("btop.conf missing"));
@@ -391,17 +404,19 @@ mod tests {
         let p = Palette::mock();
 
         ctx.state.current_theme = p.name.clone();
-        generator.apply(&p, &ctx).unwrap();
+        generator
+            .apply(&p, &ctx.paths, &ctx.templater, &ctx.log)
+            .unwrap();
 
         let btop_dir = generator
-            .resolve_config_directory(&ctx)
+            .resolve_config_directory(&ctx.paths)
             .parent()
             .unwrap()
             .to_path_buf();
         fs::create_dir_all(&btop_dir).unwrap();
         fs::write(btop_dir.join("btop.conf"), "color_theme = \"default\"").unwrap();
 
-        let status = generator.health_check(&ctx);
+        let status = generator.health_check(&ctx.paths, &p.name);
         match status {
             HealthStatus::Warning(msg) => {
                 assert!(msg.contains("not using the current theme"));
@@ -417,7 +432,7 @@ mod tests {
         let p = Palette::mock();
 
         let btop_dir = generator
-            .resolve_config_directory(&ctx)
+            .resolve_config_directory(&ctx.paths)
             .parent()
             .unwrap()
             .to_path_buf();
@@ -430,7 +445,7 @@ mod tests {
         )
         .unwrap();
 
-        let result = generator.apply(&p, &ctx);
+        let result = generator.apply(&p, &ctx.paths, &ctx.templater, &ctx.log);
         assert!(result.is_ok());
 
         let cache_file = ctx.paths.generators.join("btop").join("test-theme.theme");
@@ -457,13 +472,13 @@ mod tests {
         )
         .unwrap();
 
-        let status = generator.health_check(&ctx);
+        let status = generator.health_check(&ctx.paths, &p.name);
 
         if let HealthStatus::Warning(msg) = &status {
             assert!(msg.contains("not using the current theme"));
 
             generator
-                .fix(&status, &p, &ctx.silent())
+                .fix(&status, &p, &ctx.paths, &ctx.templater, &ctx.log)
                 .expect("Fix failed");
 
             let content = fs::read_to_string(&conf_path).unwrap();
@@ -489,21 +504,25 @@ mod tests {
         )
         .unwrap();
 
-        generator.apply(&p, &ctx).unwrap();
+        generator
+            .apply(&p, &ctx.paths, &ctx.templater, &ctx.log)
+            .unwrap();
 
-        let link_path = generator.link_path(&ctx, &p.name);
+        let link_path = generator.link_path(&ctx.paths, &p.name);
         assert!(link_path.exists());
 
         fs::remove_file(&link_path).unwrap();
 
-        let status = generator.health_check(&ctx);
+        let status = generator.health_check(&ctx.paths, &p.name);
         assert!(
             matches!(status, HealthStatus::Error { .. }),
             "Expected Error due to missing theme file, got {:?}",
             status
         );
 
-        generator.fix(&status, &p, &ctx.silent()).unwrap();
+        generator
+            .fix(&status, &p, &ctx.paths, &ctx.templater, &ctx.log)
+            .expect("Fix failed");
         assert!(link_path.exists(), "Fix should restore the symlink");
     }
 }

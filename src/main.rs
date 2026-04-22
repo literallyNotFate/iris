@@ -4,7 +4,11 @@ use iris::{cli::Cli, commands, core::IrisContext, ui::Logger};
 
 fn main() {
     let cli: Cli = Cli::parse();
-    let logger: Logger = Logger::new(cli.quiet);
+    let logger: Logger = if cli.quiet {
+        Logger::quiet()
+    } else {
+        Logger::new()
+    };
 
     if let Err(err) = run(cli, logger) {
         eprintln!(

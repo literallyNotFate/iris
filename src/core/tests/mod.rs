@@ -36,7 +36,7 @@ pub fn create_test_context() -> (TempDir, IrisContext) {
         paths,
         state: State::default(),
         registry: GeneratorRegistry::default(),
-        log: Logger::new(true),
+        log: Logger::quiet(),
         templater: Templater::new(Some(user_templates_path)),
     };
 

@@ -1,3 +1,4 @@
+use crate::utils;
 use colored::*;
 use std::{
     io::{self, Write},
@@ -37,7 +38,7 @@ impl Task {
             print!("\r\x1B[K{}", self.build_done_output(is_last));
         } else {
             let duration: Duration = self.start_time.elapsed();
-            let duration_str: String = self.format_duration(duration);
+            let duration_str: String = utils::format_duration(duration);
             println!("{}{}", "done".green(), duration_str);
         }
 
@@ -50,22 +51,6 @@ impl Task {
         if !self.quiet {
             print!("{}", self.build_info_output(message));
         }
-    }
-
-    /// Formats Duration into a human-readable string
-    fn format_duration(&self, duration: Duration) -> String {
-        let millis = duration.as_millis();
-        if millis < 100 {
-            return "".to_string();
-        }
-
-        let text = if duration.as_secs() >= 1 {
-            format!("{:.2}s", duration.as_secs_f32())
-        } else {
-            format!("{}ms", millis)
-        };
-
-        format!(" {}{}{}", "[".dimmed(), text.yellow().bold(), "]".dimmed())
     }
 }
 
@@ -82,7 +67,7 @@ impl Drop for Task {
 impl Task {
     /// Build string for task done output
     fn build_done_output(&self, is_last: bool) -> String {
-        let duration_str = self.format_duration(self.start_time.elapsed());
+        let duration_str = utils::format_duration(self.start_time.elapsed());
         let indent = "  ".repeat(self.level as usize);
 
         let branch = if self.level == 0 {
@@ -127,7 +112,6 @@ impl Task {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::time::Duration;
 
     #[test]
     fn should_handle_task_done_branches() {
@@ -138,18 +122,6 @@ mod tests {
 
         let output_last: String = task.build_done_output(true);
         assert!(output_last.contains("└─"));
-    }
-
-    #[test]
-    fn should_format_duration_correctly() {
-        let task: Task = Task::new("Time".to_string(), 0, false);
-        assert_eq!(task.format_duration(Duration::from_millis(50)), "");
-
-        let ms_output: String = task.format_duration(Duration::from_millis(250));
-        assert!(ms_output.contains("250ms"));
-
-        let s_output: String = task.format_duration(Duration::from_secs(2));
-        assert!(s_output.contains("2.00s"));
     }
 
     #[test]

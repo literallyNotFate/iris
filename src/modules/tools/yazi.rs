@@ -1,8 +1,8 @@
 use crate::{
-    commands::HealthStatus,
-    core::IrisContext,
-    models::Palette,
+    core::{IrisPaths, Templater},
+    models::{HealthStatus, Palette},
     modules::{Generator, GeneratorType},
+    ui::Logger,
     utils,
 };
 use anyhow::{Context, Result};
@@ -28,23 +28,29 @@ impl Generator for YaziGenerator {
         "theme.toml".into()
     }
 
-    fn link_path(&self, ctx: &IrisContext, _theme_name: &str) -> PathBuf {
-        self.resolve_config_directory(ctx)
+    fn link_path(&self, paths: &IrisPaths, _theme: &str) -> PathBuf {
+        self.resolve_config_directory(paths)
             .join(self.target_file_name(""))
     }
 
-    fn apply(&self, p: &Palette, ctx: &IrisContext) -> Result<()> {
-        let cache_file: PathBuf = self.ensure_cache_file(p, ctx)?;
-        let link_path: PathBuf = self.link_path(ctx, &p.name);
+    fn apply(
+        &self,
+        p: &Palette,
+        paths: &IrisPaths,
+        templater: &Templater,
+        log: &Logger,
+    ) -> Result<()> {
+        let cache_file: PathBuf = self.ensure_cache_file(p, paths, templater)?;
+        let link_path: PathBuf = self.link_path(paths, &p.name);
 
-        ctx.log.info(&format!(
+        log.info(&format!(
             "Linking {} theme to {}...",
             self.name().bold().cyan(),
             utils::pretty_path(&link_path).magenta(),
         ));
         self.ensure_symlink(&cache_file, &link_path)?;
 
-        ctx.log.info(&format!(
+        log.info(&format!(
             "{} theme applied to {}",
             utils::capitalize(&p.name).yellow(),
             self.name().bold().cyan()
@@ -88,13 +94,13 @@ impl Generator for YaziGenerator {
         c
     }
 
-    fn health_check(&self, ctx: &IrisContext) -> HealthStatus {
+    fn health_check(&self, paths: &IrisPaths, _theme: &str) -> HealthStatus {
         if !self.is_installed() {
             return HealthStatus::Warning("`yazi` binary not found".into());
         }
 
-        let link_path: PathBuf = self.link_path(ctx, "");
-        let expected_cache: PathBuf = self.cache_path(ctx, "");
+        let link_path: PathBuf = self.link_path(paths, "");
+        let expected_cache: PathBuf = self.cache_path(paths, "");
 
         if !link_path.exists() && !link_path.is_symlink() {
             return HealthStatus::Error {
@@ -125,50 +131,58 @@ impl Generator for YaziGenerator {
         HealthStatus::Ok
     }
 
-    fn fix(&self, status: &HealthStatus, p: &Palette, ctx: &IrisContext) -> Result<()> {
+    fn fix(
+        &self,
+        status: &HealthStatus,
+        p: &Palette,
+        paths: &IrisPaths,
+        templater: &Templater,
+        log: &Logger,
+    ) -> Result<()> {
         match status {
             HealthStatus::Error { message, .. } => {
                 if message.contains("cache file is missing") {
-                    ctx.log
-                        .step("Generating missing cache file...", 2)
-                        .done(true);
-                    self.ensure_cache_file(p, ctx)?;
+                    log.step("Generating missing cache file...", 2).done(true);
+                    self.ensure_cache_file(p, paths, templater)?;
                 } else if message.contains("link missing") {
-                    ctx.log.step("Restoring missing symlink...", 2).done(true);
-                    let cache: PathBuf = self.cache_path(ctx, &p.name);
-                    let link: PathBuf = self.link_path(ctx, &p.name);
+                    log.step("Restoring missing symlink...", 2).done(true);
+
+                    let cache: PathBuf = self.cache_path(paths, &p.name);
+                    let link: PathBuf = self.link_path(paths, &p.name);
                     self.ensure_symlink(&cache, &link)?;
                 }
                 Ok(())
             }
 
             HealthStatus::Warning(msg) if msg.contains("unexpected location") => {
-                ctx.log
-                    .step("Relinking to correct location...", 2)
-                    .done(true);
+                log.step("Relinking to correct location...", 2).done(true);
 
-                let cache: PathBuf = self.cache_path(ctx, &p.name);
-                let link: PathBuf = self.link_path(ctx, &p.name);
+                let cache: PathBuf = self.cache_path(paths, &p.name);
+                let link: PathBuf = self.link_path(paths, &p.name);
                 self.ensure_symlink(&cache, &link)
             }
             _ => {
-                ctx.log
-                    .step(
-                        &format!("Re-applying `{}` configuration...", self.name().bold()),
-                        2,
-                    )
-                    .done(true);
-                self.apply(p, ctx)
+                log.step(
+                    &format!("Re-applying `{}` configuration...", self.name().bold()),
+                    2,
+                )
+                .done(true);
+                self.apply(p, paths, templater, log)
             }
         }
     }
 }
 
 impl YaziGenerator {
-    fn ensure_cache_file(&self, p: &Palette, ctx: &IrisContext) -> Result<PathBuf> {
-        let cache_file: PathBuf = self.cache_path(ctx, &p.name);
+    fn ensure_cache_file(
+        &self,
+        p: &Palette,
+        paths: &IrisPaths,
+        templater: &Templater,
+    ) -> Result<PathBuf> {
+        let cache_file: PathBuf = self.cache_path(paths, &p.name);
         let render_ctx = self.build_render_context(p);
-        let content: String = ctx.templater.render(&self.template_path(), &render_ctx)?;
+        let content: String = templater.render(&self.template_path(), &render_ctx)?;
 
         if let Some(parent) = cache_file.parent() {
             fs::create_dir_all(parent).with_context(|| {
@@ -263,9 +277,11 @@ mod tests {
         let p = Palette::mock();
 
         ctx.state.current_theme = p.name.clone();
-        generator.apply(&p, &ctx).unwrap();
+        generator
+            .apply(&p, &ctx.paths, &ctx.templater, &ctx.log)
+            .unwrap();
 
-        let status = generator.health_check(&ctx);
+        let status = generator.health_check(&ctx.paths, &p.name);
         assert!(matches!(status, HealthStatus::Ok));
     }
 
@@ -273,7 +289,7 @@ mod tests {
     fn should_return_health_error_missing_link_for_yazi() {
         let (_, ctx) = create_test_context();
         let generator = YaziGenerator;
-        let link = generator.link_path(&ctx, "");
+        let link = generator.link_path(&ctx.paths, "");
 
         if link.exists() || link.is_symlink() {
             if link.is_dir() && !link.is_symlink() {
@@ -283,7 +299,7 @@ mod tests {
             }
         }
 
-        let status = generator.health_check(&ctx);
+        let status = generator.health_check(&ctx.paths, &ctx.state.current_theme);
         match status {
             HealthStatus::Error { message, .. } => {
                 assert!(
@@ -307,12 +323,14 @@ mod tests {
         let p = Palette::mock();
 
         ctx.state.current_theme = p.name.clone();
-        generator.apply(&p, &ctx).unwrap();
+        generator
+            .apply(&p, &ctx.paths, &ctx.templater, &ctx.log)
+            .unwrap();
 
-        let cache_path = generator.cache_path(&ctx, &p.name);
+        let cache_path = generator.cache_path(&ctx.paths, &p.name);
         fs::remove_file(cache_path).unwrap();
 
-        let status = generator.health_check(&ctx);
+        let status = generator.health_check(&ctx.paths, &p.name);
         match status {
             HealthStatus::Error { message, .. } => {
                 assert!(message.contains("cache file is missing"));
@@ -327,10 +345,10 @@ mod tests {
         let generator = YaziGenerator;
         let p = Palette::mock();
 
-        let result = generator.apply(&p, &ctx);
+        let result = generator.apply(&p, &ctx.paths, &ctx.templater, &ctx.log);
         assert!(result.is_ok(), "Apply failed: {:?}", result.err());
 
-        let expected_yazi_dir = generator.resolve_config_directory(&ctx);
+        let expected_yazi_dir = generator.resolve_config_directory(&ctx.paths);
         let yazi_theme_link = expected_yazi_dir.join("theme.toml");
 
         assert!(
@@ -349,10 +367,12 @@ mod tests {
         let generator = YaziGenerator;
         let p = Palette::mock();
 
-        generator.apply(&p, &ctx).expect("Initial apply failed");
+        generator
+            .apply(&p, &ctx.paths, &ctx.templater, &ctx.log)
+            .expect("Initial apply failed");
 
-        let link_path = generator.link_path(&ctx, &p.name);
-        let cache_file = generator.cache_path(&ctx, &p.name);
+        let link_path = generator.link_path(&ctx.paths, &p.name);
+        let cache_file = generator.cache_path(&ctx.paths, &p.name);
 
         assert!(link_path.exists(), "Link should exist after apply");
         assert!(cache_file.exists(), "Cache should exist after apply");
@@ -360,7 +380,7 @@ mod tests {
         fs::remove_file(&link_path).expect("Failed to break link");
         assert!(!link_path.exists());
 
-        let status = generator.health_check(&ctx);
+        let status = generator.health_check(&ctx.paths, &p.name);
         assert!(
             matches!(status, HealthStatus::Error { ref message, .. } if message.contains("link missing")),
             "Expected link missing error, got {:?}",
@@ -368,9 +388,8 @@ mod tests {
         );
 
         generator
-            .fix(&status, &p, &ctx.silent())
+            .fix(&status, &p, &ctx.paths, &ctx.templater, &ctx.log)
             .expect("Fix failed");
-
         assert!(link_path.exists(), "Fix should recreate the symlink");
 
         #[cfg(unix)]
@@ -382,7 +401,7 @@ mod tests {
             );
         }
 
-        let final_status = generator.health_check(&ctx);
+        let final_status = generator.health_check(&ctx.paths, &p.name);
         assert!(final_status.is_ok(), "Final health status should be Ok");
     }
 
@@ -392,16 +411,20 @@ mod tests {
         let generator = YaziGenerator;
         let p = Palette::mock();
 
-        generator.apply(&p, &ctx).ok();
-        let cache_file = generator.cache_path(&ctx, &p.name);
+        generator
+            .apply(&p, &ctx.paths, &ctx.templater, &ctx.log)
+            .ok();
+        let cache_file = generator.cache_path(&ctx.paths, &p.name);
         fs::remove_file(&cache_file).unwrap();
 
-        let status = generator.health_check(&ctx);
+        let status = generator.health_check(&ctx.paths, &p.name);
         assert!(
             matches!(status, HealthStatus::Error { ref message, .. } if message.contains("cache file is missing"))
         );
 
-        generator.fix(&status, &p, &ctx).expect("Fix failed");
+        generator
+            .fix(&status, &p, &ctx.paths, &ctx.templater, &ctx.log)
+            .expect("Fix failed");
         assert!(
             cache_file.exists(),
             "Fix should regenerate the missing cache file"

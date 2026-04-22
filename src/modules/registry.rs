@@ -121,12 +121,14 @@ impl GeneratorRegistry {
 
         for (i, generator) in to_apply.iter().enumerate() {
             let mut task = ctx.log.step(generator.name(), 2);
-            generator.apply(palette, ctx).with_context(|| {
-                format!(
-                    "Failed to apply theme to `{}`",
-                    generator.name().bold().green()
-                )
-            })?;
+            generator
+                .apply(palette, &ctx.paths, &ctx.templater, &ctx.log)
+                .with_context(|| {
+                    format!(
+                        "Failed to apply theme to `{}`",
+                        generator.name().bold().green()
+                    )
+                })?;
 
             task.done(i == total - 1);
         }
@@ -145,7 +147,11 @@ impl GeneratorRegistry {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::commands::HealthStatus;
+    use crate::{
+        core::{IrisPaths, Templater},
+        models::HealthStatus,
+        ui::Logger,
+    };
 
     // Mock generator and trait implementation
     struct MockGenerator {
@@ -171,7 +177,13 @@ mod tests {
             self.installed
         }
 
-        fn apply(&self, _: &Palette, _: &IrisContext) -> anyhow::Result<()> {
+        fn apply(
+            &self,
+            _: &Palette,
+            _: &IrisPaths,
+            _: &Templater,
+            _: &Logger,
+        ) -> anyhow::Result<()> {
             Ok(())
         }
 
@@ -179,7 +191,14 @@ mod tests {
             tera::Context::new()
         }
 
-        fn fix(&self, _: &HealthStatus, _: &Palette, _: &IrisContext) -> anyhow::Result<()> {
+        fn fix(
+            &self,
+            _: &HealthStatus,
+            _: &Palette,
+            _: &IrisPaths,
+            _: &Templater,
+            _: &Logger,
+        ) -> anyhow::Result<()> {
             Ok(())
         }
     }

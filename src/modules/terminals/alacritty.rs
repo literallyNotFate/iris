@@ -1,8 +1,8 @@
 use crate::{
-    commands::HealthStatus,
-    core::IrisContext,
-    models::Palette,
+    core::{IrisPaths, Templater},
+    models::{HealthStatus, Palette},
     modules::{Generator, GeneratorType},
+    ui::Logger,
     utils::{self},
 };
 use anyhow::{Context, Result};
@@ -28,36 +28,42 @@ impl Generator for AlacrittyGenerator {
         "current_theme.toml".into()
     }
 
-    fn cache_path(&self, ctx: &IrisContext, _theme_name: &str) -> PathBuf {
-        ctx.paths
+    fn cache_path(&self, paths: &IrisPaths, _theme: &str) -> PathBuf {
+        paths
             .generators
             .join(self.name())
             .join(self.target_file_name(""))
     }
 
-    fn link_path(&self, ctx: &IrisContext, _theme_name: &str) -> PathBuf {
-        self.resolve_config_directory(ctx)
+    fn link_path(&self, paths: &IrisPaths, _theme: &str) -> PathBuf {
+        self.resolve_config_directory(paths)
             .join(self.target_file_name(""))
     }
 
-    fn apply(&self, p: &Palette, ctx: &IrisContext) -> Result<()> {
-        ctx.log.info(&format!(
+    fn apply(
+        &self,
+        p: &Palette,
+        paths: &IrisPaths,
+        templater: &Templater,
+        log: &Logger,
+    ) -> Result<()> {
+        log.info(&format!(
             "Generating {} theme for {}",
             utils::capitalize(&p.name).yellow(),
             self.name().bold().cyan(),
         ));
 
-        let cache_file: PathBuf = self.ensure_cache_file(p, ctx)?;
-        let link_path: PathBuf = self.link_path(ctx, &p.name);
+        let cache_file: PathBuf = self.ensure_cache_file(p, paths, templater)?;
+        let link_path: PathBuf = self.link_path(paths, &p.name);
 
-        ctx.log.info(&format!(
+        log.info(&format!(
             "Linking {} theme to {}...",
             self.name().bold(),
             utils::pretty_path(&link_path).magenta(),
         ));
-        self.ensure_symlink(&cache_file, &link_path, ctx)?;
+        self.ensure_symlink(&cache_file, &link_path)?;
 
-        ctx.log.info(&format!(
+        log.info(&format!(
             "{} theme applied to {}",
             utils::capitalize(&p.name).yellow(),
             self.name().bold().cyan()
@@ -76,15 +82,15 @@ impl Generator for AlacrittyGenerator {
         c
     }
 
-    fn health_check(&self, ctx: &IrisContext) -> HealthStatus {
+    fn health_check(&self, paths: &IrisPaths, _theme: &str) -> HealthStatus {
         if !self.is_installed() {
             return HealthStatus::Warning("`alacritty` binary not found".into());
         }
 
-        let alacritty_dir: PathBuf = self.resolve_config_directory(ctx);
+        let alacritty_dir: PathBuf = self.resolve_config_directory(paths);
         let main_config: PathBuf = alacritty_dir.join("alacritty.toml");
-        let link_path: PathBuf = self.link_path(ctx, "");
-        let expected_cache: PathBuf = self.cache_path(ctx, "");
+        let link_path: PathBuf = self.link_path(paths, "");
+        let expected_cache: PathBuf = self.cache_path(paths, "");
 
         if !link_path.exists() && !link_path.is_symlink() {
             return HealthStatus::Error {
@@ -94,7 +100,7 @@ impl Generator for AlacrittyGenerator {
         }
 
         #[cfg(unix)]
-        if let Ok(target) = std::fs::read_link(&link_path) {
+        if let Ok(target) = fs::read_link(&link_path) {
             if target != expected_cache {
                 return HealthStatus::Warning("Link points to an unexpected location".into());
             }
@@ -125,65 +131,72 @@ impl Generator for AlacrittyGenerator {
         HealthStatus::Ok
     }
 
-    fn fix(&self, status: &HealthStatus, p: &Palette, ctx: &IrisContext) -> Result<()> {
+    fn fix(
+        &self,
+        status: &HealthStatus,
+        p: &Palette,
+        paths: &IrisPaths,
+        templater: &Templater,
+        log: &Logger,
+    ) -> Result<()> {
         match status {
             HealthStatus::Error { message, .. } => {
                 let message_low = message.to_lowercase();
                 if message_low.contains("link missing") {
-                    ctx.log
-                        .step("Restoring `alacritty` theme symlink...", 2)
+                    log.step("Restoring `alacritty` theme symlink...", 2)
                         .done(true);
 
-                    let cache = self.cache_path(ctx, "");
-                    let link = self.link_path(ctx, "");
-                    self.ensure_symlink(&cache, &link, &ctx.silent())?;
+                    let cache = self.cache_path(paths, "");
+                    let link = self.link_path(paths, "");
+                    self.ensure_symlink(&cache, &link)?;
                 }
 
                 if message_low.contains("import") {
-                    ctx.log
-                        .step("Injecting theme import into alacritty.toml...", 2)
+                    log.step("Injecting theme import into alacritty.toml...", 2)
                         .done(true);
 
-                    self.inject_import_line(ctx)?;
+                    self.inject_import_line(paths)?;
                 }
 
-                self.apply(p, &ctx.silent())
+                self.apply(p, paths, templater, &Logger::quiet())
             }
 
             HealthStatus::Warning(msg) => {
                 let msg_low = msg.to_lowercase();
 
                 if msg_low.contains("unexpected") || msg_low.contains("old") {
-                    ctx.log
-                        .step("Updating `alacritty` symlink target...", 2)
+                    log.step("Updating `alacritty` symlink target...", 2)
                         .done(true);
                 } else {
-                    ctx.log
-                        .step(&format!("Fixing `alacritty` warning: {}...", msg), 2)
+                    log.step(&format!("Fixing `alacritty` warning: {}...", msg), 2)
                         .done(true);
                 }
 
-                self.apply(p, &ctx.silent())
+                self.apply(p, paths, templater, &Logger::quiet())
             }
 
             _ => {
-                ctx.log
-                    .step(
-                        &format!("Re-applying `{}` configuration...", self.name().bold()),
-                        2,
-                    )
-                    .done(true);
-                self.apply(p, &ctx.silent())
+                log.step(
+                    &format!("Re-applying `{}` configuration...", self.name().bold()),
+                    2,
+                )
+                .done(true);
+                self.apply(p, paths, templater, &Logger::quiet())
             }
         }
     }
 }
 
 impl AlacrittyGenerator {
-    fn ensure_cache_file(&self, p: &Palette, ctx: &IrisContext) -> Result<PathBuf> {
-        let cache_file: PathBuf = self.cache_path(ctx, &p.name);
+    fn ensure_cache_file(
+        &self,
+        p: &Palette,
+        paths: &IrisPaths,
+        templater: &Templater,
+    ) -> Result<PathBuf> {
+        let cache_file: PathBuf = self.cache_path(paths, &p.name);
         let render_ctx = self.build_render_context(p);
-        let content: String = ctx.templater.render(&self.template_path(), &render_ctx)?;
+        let content: String = templater.render(&self.template_path(), &render_ctx)?;
 
         if let Some(parent) = cache_file.parent() {
             fs::create_dir_all(parent).with_context(|| {
@@ -203,7 +216,7 @@ impl AlacrittyGenerator {
         Ok(cache_file)
     }
 
-    fn ensure_symlink(&self, target: &Path, link: &Path, _ctx: &IrisContext) -> Result<()> {
+    fn ensure_symlink(&self, target: &Path, link: &Path) -> Result<()> {
         if link.exists() || link.is_symlink() {
             fs::remove_file(link).with_context(|| {
                 format!(
@@ -236,8 +249,8 @@ impl AlacrittyGenerator {
         Ok(())
     }
 
-    fn inject_import_line(&self, ctx: &IrisContext) -> Result<()> {
-        let config_path: PathBuf = self.resolve_config_directory(ctx).join("alacritty.toml");
+    fn inject_import_line(&self, paths: &IrisPaths) -> Result<()> {
+        let config_path: PathBuf = self.resolve_config_directory(paths).join("alacritty.toml");
         let import_line: &str = "import = [\"~/.config/alacritty/current_theme.toml\"]";
 
         if !config_path.exists() {
@@ -327,13 +340,15 @@ mod tests {
         let p = Palette::mock();
 
         ctx.state.current_theme = p.name.clone();
-        generator.apply(&p, &ctx).unwrap();
+        generator
+            .apply(&p, &ctx.paths, &ctx.templater, &ctx.log)
+            .unwrap();
 
-        let alacritty_dir = generator.resolve_config_directory(&ctx);
+        let alacritty_dir = generator.resolve_config_directory(&ctx.paths);
         let main_config = alacritty_dir.join("alacritty.toml");
         fs::write(&main_config, "import = [\"current_theme.toml\"]").unwrap();
 
-        let status = generator.health_check(&ctx);
+        let status = generator.health_check(&ctx.paths, &p.name);
         assert!(
             matches!(status, HealthStatus::Ok),
             "Expected Ok, got {:?}",
@@ -348,14 +363,16 @@ mod tests {
         let p = Palette::mock();
 
         ctx.state.current_theme = p.name.clone();
-        generator.apply(&p, &ctx).unwrap();
+        generator
+            .apply(&p, &ctx.paths, &ctx.templater, &ctx.log)
+            .unwrap();
 
         let main_config = generator
-            .resolve_config_directory(&ctx)
+            .resolve_config_directory(&ctx.paths)
             .join("alacritty.toml");
         fs::write(&main_config, "[window]\ndecorations = \"none\"").unwrap();
 
-        let status = generator.health_check(&ctx);
+        let status = generator.health_check(&ctx.paths, &p.name);
         match status {
             HealthStatus::Error { ref message, .. } => {
                 assert!(message.contains("not imported"));
@@ -371,16 +388,18 @@ mod tests {
         let p = Palette::mock();
 
         ctx.state.current_theme = p.name.clone();
-        generator.apply(&p, &ctx).unwrap();
+        generator
+            .apply(&p, &ctx.paths, &ctx.templater, &ctx.log)
+            .unwrap();
 
         let main_config = generator
-            .resolve_config_directory(&ctx)
+            .resolve_config_directory(&ctx.paths)
             .join("alacritty.toml");
         if main_config.exists() {
             fs::remove_file(main_config).unwrap();
         }
 
-        let status = generator.health_check(&ctx);
+        let status = generator.health_check(&ctx.paths, &p.name);
         assert!(matches!(status, HealthStatus::Warning(msg) if msg.contains("not found")));
     }
 
@@ -390,7 +409,7 @@ mod tests {
         let generator = AlacrittyGenerator;
         let p = Palette::mock();
 
-        let result = generator.apply(&p, &ctx);
+        let result = generator.apply(&p, &ctx.paths, &ctx.templater, &ctx.log);
         assert!(result.is_ok(), "Apply failed: {:?}", result.err());
 
         let cache_file = ctx
@@ -400,7 +419,7 @@ mod tests {
             .join("current_theme.toml");
         assert!(cache_file.exists(), "Theme missing in Iris cache");
 
-        let alacritty_dir = generator.resolve_config_directory(&ctx);
+        let alacritty_dir = generator.resolve_config_directory(&ctx.paths);
         let link_path = alacritty_dir.join("current_theme.toml");
         assert!(
             link_path.exists(),
@@ -420,14 +439,16 @@ mod tests {
         let generator = AlacrittyGenerator;
         let p = Palette::mock();
 
-        let alacritty_dir = generator.resolve_config_directory(&ctx);
+        let alacritty_dir = generator.resolve_config_directory(&ctx.paths);
         fs::create_dir_all(&alacritty_dir).unwrap();
         let config_path = alacritty_dir.join("alacritty.toml");
 
-        generator.apply(&p, &ctx).unwrap();
+        generator
+            .apply(&p, &ctx.paths, &ctx.templater, &ctx.log)
+            .unwrap();
         fs::write(&config_path, "[window]\ndecorations = \"none\"").unwrap();
 
-        let status = generator.health_check(&ctx);
+        let status = generator.health_check(&ctx.paths, &p.name);
 
         match status {
             HealthStatus::Error { ref message, .. }
@@ -435,7 +456,9 @@ mod tests {
             _ => panic!("Expected Import Error, but got: {:?}", status),
         }
 
-        generator.fix(&status, &p, &ctx.silent()).unwrap();
+        generator
+            .fix(&status, &p, &ctx.paths, &ctx.templater, &ctx.log)
+            .expect("Fix failed");
 
         let content = fs::read_to_string(&config_path).unwrap();
         assert!(
@@ -443,7 +466,7 @@ mod tests {
             "Import line missing after fix!"
         );
 
-        let final_status = generator.health_check(&ctx);
+        let final_status = generator.health_check(&ctx.paths, &p.name);
         assert!(
             final_status.is_ok(),
             "Final status should be Ok, but got: {:?}",
@@ -457,7 +480,7 @@ mod tests {
         let generator = AlacrittyGenerator;
         let p = Palette::mock();
 
-        let alacritty_dir = generator.resolve_config_directory(&ctx);
+        let alacritty_dir = generator.resolve_config_directory(&ctx.paths);
         fs::create_dir_all(&alacritty_dir).unwrap();
 
         let config_path = alacritty_dir.join("alacritty.toml");
@@ -467,23 +490,27 @@ mod tests {
         )
         .unwrap();
 
-        generator.apply(&p, &ctx).unwrap();
+        generator
+            .apply(&p, &ctx.paths, &ctx.templater, &ctx.log)
+            .unwrap();
 
-        let link_path = generator.link_path(&ctx, "");
+        let link_path = generator.link_path(&ctx.paths, "");
         if link_path.exists() || link_path.is_symlink() {
             fs::remove_file(&link_path).unwrap();
         }
 
-        let status = generator.health_check(&ctx);
+        let status = generator.health_check(&ctx.paths, &p.name);
         assert!(
             matches!(status, HealthStatus::Error { .. }),
             "Should be Error, got: {:?}",
             status
         );
 
-        generator.fix(&status, &p, &ctx.silent()).unwrap();
+        generator
+            .fix(&status, &p, &ctx.paths, &ctx.templater, &ctx.log)
+            .expect("Fix failed");
 
-        let final_status = generator.health_check(&ctx);
+        let final_status = generator.health_check(&ctx.paths, &p.name);
         assert!(
             final_status.is_ok(),
             "Health check failed after fix: {:?}",

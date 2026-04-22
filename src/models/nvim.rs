@@ -1,4 +1,4 @@
-use crate::{core::IrisContext, utils};
+use crate::{ui::Logger, utils};
 use colored::*;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -212,9 +212,10 @@ impl NvimStrategy {
     }
 
     /// Chooses, which strategy to use based on CLI arguments
-    pub fn choose(strategy: Option<Self>, detect: bool, ctx: &IrisContext) -> anyhow::Result<Self> {
+    pub fn choose(strategy: Option<Self>, detect: bool, log: &Logger) -> anyhow::Result<Self> {
         if detect {
-            let mut d = ctx.log.step("Scanning environment", 1);
+            println!();
+            let mut d = log.step("Scanning environment", 1);
             let res = Self::detect_strategy();
             d.done(true);
 
@@ -223,7 +224,7 @@ impl NvimStrategy {
         }
 
         if let Some(s) = strategy {
-            println!("  {}  Manual selection: {}", "󰁕".yellow().bold(), s);
+            println!("\n  {}  Manual selection: {}", "󰁕".yellow().bold(), s);
             return Ok(s);
         }
 

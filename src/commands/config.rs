@@ -1,52 +1,32 @@
-use crate::{
-    cli::ConfigAction,
-    core::IrisContext,
-    models::{NvimStrategy, Palette},
-};
+use crate::{cli::ConfigAction, core::IrisContext, models::NvimStrategy};
 use colored::*;
 
 /// Handle application config command
 pub fn exec(action: ConfigAction, ctx: &mut IrisContext) -> anyhow::Result<()> {
     match action {
         ConfigAction::Nvim { strategy, detect } => {
-            println!(
-                "\n{}  {}\n",
-                "⚙".bright_yellow().bold(),
-                "Neovim Configuration".bold()
-            );
+            render_config_header("Neovim Configuration", "⚙");
 
-            let selected: NvimStrategy = NvimStrategy::choose(strategy, detect, ctx)?;
+            let selected: NvimStrategy = NvimStrategy::choose(strategy, detect, &ctx.log)?;
             selected.validate()?;
 
-            let count: usize = selected.count_plugins();
-            if count > 0 {
-                println!(
-                    "      {}  Status: {} plugins found",
-                    "󰄬".green().bold(),
-                    count.to_string().cyan().bold()
-                );
-            }
-
+            render_nvim_status(&selected);
             ctx.state.nvim = selected;
         }
 
         ConfigAction::Fallback { name } => {
-            let theme_lower: String = name.to_lowercase();
-            if !Palette::exists(&theme_lower, ctx) {
-                anyhow::bail!(
-                    "Cannot set `{}` as fallback. Theme not found in cache or Neovim.",
-                    name.yellow().bold()
-                );
-            }
+            render_config_header("Fallback Configuration", "⚙");
+            let theme: String = name.to_lowercase();
+            ctx.validate_theme_exists(&theme)?;
 
             println!(
                 "\n{}  {} set to {}",
                 "󰁯".bright_magenta().bold(),
-                "Fallback Theme".bold(),
-                theme_lower.cyan().bold()
+                "Fallback theme".bold(),
+                theme.cyan().bold()
             );
 
-            ctx.state.fallback_theme = theme_lower;
+            ctx.state.fallback_theme = theme;
         }
     }
 
@@ -61,4 +41,21 @@ pub fn exec(action: ConfigAction, ctx: &mut IrisContext) -> anyhow::Result<()> {
     );
 
     Ok(())
+}
+
+/// Helper function to render header for config
+fn render_config_header(title: &str, icon: &str) {
+    println!("\n{}  {}", icon.bright_yellow().bold(), title.bold());
+}
+
+/// Helper function to render nvim status w/strategy
+fn render_nvim_status(strategy: &NvimStrategy) {
+    let count = strategy.count_plugins();
+    if count > 0 {
+        println!(
+            "      {}  Status: {} plugins found",
+            "󰄬".green().bold(),
+            count.to_string().cyan().bold()
+        );
+    }
 }

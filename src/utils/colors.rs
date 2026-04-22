@@ -1,4 +1,8 @@
 use colored::{ColoredString, Colorize};
+use dialoguer::{
+    console::{Style, style},
+    theme::ColorfulTheme,
+};
 
 /// Helper trait for colored to be able to work with hex
 pub trait CustomColor {
@@ -29,6 +33,20 @@ pub fn hex_to_rgb(hex: &str) -> (u8, u8, u8) {
     let g = u8::from_str_radix(&hex[2..4], 16).unwrap_or(0);
     let b = u8::from_str_radix(&hex[4..6], 16).unwrap_or(0);
     (r, g, b)
+}
+
+/// Helper function to get colorful theme for select
+pub fn select_theme() -> ColorfulTheme {
+    ColorfulTheme {
+        active_item_prefix: style("  ❯ ".to_string()).for_stderr().cyan().bold(),
+        checked_item_prefix: style("  󰄬 ".to_string()).for_stderr().green().bold(),
+        unchecked_item_prefix: style("  󰄱 ".to_string()).for_stderr().dim(),
+        active_item_style: Style::new().cyan().bold(),
+        prompt_prefix: style("  ? ".to_string()).for_stderr().yellow(),
+        prompt_suffix: style("".to_string()),
+        inactive_item_prefix: style("    ".to_string()).for_stderr(),
+        ..ColorfulTheme::default()
+    }
 }
 
 /// Unit-tests for color utility functions
