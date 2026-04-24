@@ -6,6 +6,7 @@ pub mod cache;
 pub mod config;
 pub mod generators;
 pub mod health;
+pub mod preview;
 pub mod setup;
 pub mod status;
 pub mod switch;
@@ -21,6 +22,7 @@ pub fn handle(command: Commands, ctx: &mut IrisContext) -> anyhow::Result<()> {
         Commands::Sync { force } => sync::exec(force, ctx)?,
         Commands::Apply(args) => apply::exec(args, ctx)?,
         Commands::Status => status::exec(ctx)?,
+        Commands::Preview { theme } => preview::exec(theme, ctx)?,
         Commands::Watch { interval } => watch::exec(interval, ctx)?,
         Commands::Health { fix } => health::exec(fix, ctx)?,
         Commands::Gen { action } => generators::exec(action, ctx)?,

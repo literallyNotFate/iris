@@ -1,66 +1,62 @@
 use crate::{
     core::IrisContext,
-    models::Palette,
-    ui::Logger,
-    utils::{self, CustomColor},
+    utils::{self},
 };
 use colored::*;
 
 /// Handle application status command
-pub fn exec(ctx: &mut IrisContext) -> anyhow::Result<()> {
+pub fn exec(ctx: &IrisContext) -> anyhow::Result<()> {
     let (nvim_theme, is_sync) = ctx.get_sync_status();
     let current: String = ctx.state.current_theme.clone();
 
     if ctx.log.quiet {
-        return Ok(render_quiet(ctx, &current, &nvim_theme, is_sync));
+        render_quiet(ctx, &current, &nvim_theme, is_sync);
+        return Ok(());
     }
 
-    println!("\n {}  {}", "󰗼".cyan().bold(), "Iris system status".bold());
     println!(
-        "\n  {}  Active theme:  {}",
+        "\n {}  {} {}",
+        "󰗼".cyan().bold(),
+        "Iris system status".bold(),
+        format!("v{}", env!("CARGO_PKG_VERSION")).dimmed()
+    );
+    println!(
+        "\n  {}  Active theme:    {}",
         "󰏘".red(),
         current.bold().blue()
     );
     println!("  {}  Plugin Manager:  {}", "⚙".magenta(), ctx.state.nvim);
+
+    let cache_size: u64 = ctx.paths.get_size(&ctx.paths.palettes);
+    let cached_count: usize = std::fs::read_dir(&ctx.paths.palettes)
+        .map(|d| d.count())
+        .unwrap_or(0);
+
     println!(
-        "  {}  Config path:   {}",
+        "  {}  Config path:     {}",
         "󰉖".white(),
         utils::pretty_path(&ctx.paths.config).bright_black()
+    );
+    println!(
+        "  {}  Cache:           {} {} ({} files)",
+        "󰉉".bright_black(),
+        utils::pretty_path(&ctx.paths.palettes).bright_black(),
+        format!("({})", utils::format_size(cache_size))
+            .yellow()
+            .dimmed(),
+        cached_count
     );
 
     println!("\n  {}  {}", "󰒓".yellow(), "Enabled generators:".bold());
     render_generators_list(ctx);
 
-    render_sync_block(ctx, is_sync, &current, &nvim_theme);
+    render_sync_block(is_sync, &current, &nvim_theme);
 
-    let palette_result = Palette::fetch(&current, false, &ctx.paths, &ctx.state, &Logger::quiet());
-    if let Ok(palette) = palette_result {
-        println!(
-            "\n  {}  {}\n",
-            "".red().bold(),
-            utils::capitalize(&palette.name).bold()
-        );
-
-        println!(
-            "  {}",
-            "Core Vs. Syntax:".bold().color_code_fg(&palette.comment)
-        );
-        palette.core_and_syntax_colors();
-
-        println!(
-            "\n  {}",
-            "Terminal Colors:".bold().color_code_fg(&palette.comment)
-        );
-        palette.ansi_grid();
-
-        println!(
-            "\n  {}",
-            "Sample code preview:"
-                .bold()
-                .color_code_fg(&palette.comment)
-        );
-        palette.preview_code();
-    }
+    println!(
+        "\n  {}  Run `{}` to see full colors and code preview.",
+        "󰄶".blue(),
+        "iris preview".cyan().bold()
+    );
 
     Ok(())
 }
@@ -89,19 +85,25 @@ fn render_generators_list(ctx: &IrisContext) {
 }
 
 /// Helper function to render sync block
-fn render_sync_block(ctx: &IrisContext, is_sync: bool, iris_theme: &str, nvim_theme: &str) {
+fn render_sync_block(is_sync: bool, iris_theme: &str, nvim_theme: &str) {
     println!();
     if is_sync {
         println!("  {}  {}", "󰄬".green(), "Sync with Neovim: OK".green());
     } else {
-        ctx.log.warn("Out of sync with Neovim", 2);
         println!(
-            "    {} {} {}  {} {}\n    {}",
+            "  {}  {}",
+            "󰀦".yellow().bold(),
+            "Out of sync with Neovim".yellow()
+        );
+        println!(
+            "     {} {} {} {}",
             "Neovim:".dimmed(),
             nvim_theme.bright_yellow(),
-            "󰄬".dimmed(),
-            "Iris:".dimmed(),
-            iris_theme.dimmed(),
+            "󰁔".dimmed(),
+            format!("Iris expects: {}", iris_theme).dimmed()
+        );
+        println!(
+            "     {}",
             "󰚔  Run `iris sync` to update all configs".cyan().italic()
         );
     }
@@ -114,18 +116,18 @@ fn render_quiet(ctx: &IrisContext, current: &str, nvim_theme: &str, is_sync: boo
     } else {
         "󰀦".yellow()
     };
+
     let gens = ctx
         .state
         .enabled_generators
         .iter()
         .map(|n| {
             if ctx.registry.is_installed(n) {
-                n.normal()
+                n.normal().to_string()
             } else {
-                n.strikethrough().dimmed()
+                n.strikethrough().dimmed().to_string()
             }
         })
-        .map(|s| s.to_string())
         .collect::<Vec<_>>()
         .join(", ");
 
@@ -135,14 +137,17 @@ fn render_quiet(ctx: &IrisContext, current: &str, nvim_theme: &str, is_sync: boo
         current.cyan().bold(),
         ctx.state.nvim,
         if gens.is_empty() {
-            "none".dimmed()
+            "none".dimmed().to_string()
         } else {
-            gens.normal()
+            gens
         }
     );
 
     if !is_sync {
-        ctx.log
-            .warn(&format!("Out of sync: Neovim is using `{}`", nvim_theme), 2);
+        println!(
+            "{} {}",
+            "󰚔".cyan(),
+            format!("Sync mismatch: Neovim is on `{}`", nvim_theme).dimmed()
+        );
     }
 }

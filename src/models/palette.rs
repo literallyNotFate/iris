@@ -516,14 +516,71 @@ impl Palette {
 
     /// Code snippet with palette colors
     pub fn preview_code(&self) {
+        let indent: &str = "    ";
+
         println!(
-            "  {} {} {} {} {}",
-            "fn".color_code_fg(&self.keyword),
-            "main".color_code_fg(&self.func),
-            "() {".color_code_fg(&self.fg),
-            "\"Hello World\"".color_code_fg(&self.string),
-            "};".color_code_fg(&self.fg)
+            "\n  {}{} {}{} {} {} {}{}",
+            indent,
+            "const".color_code_fg(&self.keyword),
+            "ID".color_code_fg(&self.constant),
+            ":".color_code_fg(&self.operator),
+            "u32".color_code_fg(&self.type_name),
+            "=".color_code_fg(&self.operator),
+            "2026".color_code_fg(&self.number),
+            ";".color_code_fg(&self.operator)
         );
+        println!();
+
+        println!(
+            "  {}{} {}{}{}{}{}{}{} {} {} {}",
+            indent,
+            "fn".color_code_fg(&self.keyword),
+            "run".color_code_fg(&self.func),
+            "(".color_code_fg(&self.gutter_fg),
+            "s".color_code_fg(&self.variable),
+            ":".color_code_fg(&self.operator),
+            " &".color_code_fg(&self.operator),
+            "str".color_code_fg(&self.type_name),
+            ")".color_code_fg(&self.gutter_fg),
+            "->".color_code_fg(&self.operator),
+            "bool".color_code_fg(&self.type_name),
+            "{".color_code_fg(&self.gutter_fg),
+        );
+
+        println!(
+            "  {}{}  {} {}{}{}{} {} {} {} {} {}{}{}{}{}{}{}{}",
+            indent,
+            indent,
+            "if".color_code_fg(&self.keyword),
+            "s".color_code_fg(&self.variable),
+            ".".color_code_fg(&self.operator),
+            "len".color_code_fg(&self.func),
+            "()".color_code_fg(&self.gutter_fg),
+            "==".color_code_fg(&self.operator),
+            "0".color_code_fg(&self.number),
+            "{".color_code_fg(&self.gutter_fg),
+            "return".color_code_fg(&self.keyword),
+            format!("\"{}\"", "error").color_code_fg(&self.string),
+            ".".color_code_fg(&self.operator),
+            "contains".color_code_fg(&self.func),
+            "(".color_code_fg(&self.gutter_fg),
+            "s".color_code_fg(&self.variable),
+            ")".color_code_fg(&self.gutter_fg),
+            ";".color_code_fg(&self.operator),
+            " }".color_code_fg(&self.gutter_fg)
+        );
+
+        println!(
+            "  {}{}  {}{}{}{}",
+            indent,
+            indent,
+            "Ok".color_code_fg(&self.type_name),
+            "(".color_code_fg(&self.gutter_fg),
+            "true".color_code_fg(&self.keyword),
+            ")".color_code_fg(&self.gutter_fg),
+        );
+
+        print!("  {} {}", indent, "}".color_code_fg(&self.gutter_fg));
     }
 
     /// Helper function to render row in core vs syntax table

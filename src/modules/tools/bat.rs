@@ -30,7 +30,6 @@ impl Generator for BatGenerator {
         format!("{}.tmTheme", theme)
     }
 
-    // fn resolve_config_directory(&self, ctx: &IrisContext) -> PathBuf {
     fn resolve_config_directory(&self, paths: &IrisPaths) -> PathBuf {
         let config_base: PathBuf = paths
             .config

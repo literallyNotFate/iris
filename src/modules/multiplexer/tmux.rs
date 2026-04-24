@@ -1,5 +1,5 @@
 use crate::{
-    core::{IrisContext, IrisPaths, Templater},
+    core::{IrisPaths, Templater},
     models::{HealthStatus, Palette},
     modules::{Generator, GeneratorType},
     ui::Logger,
@@ -292,7 +292,7 @@ impl TmuxGenerator {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::tests::create_test_context;
+    use crate::core::{IrisContext, tests::create_test_context};
     use tempdir::TempDir;
 
     // Helper function to get tmux conf just like in generator

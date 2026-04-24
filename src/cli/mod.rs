@@ -47,6 +47,13 @@ pub enum Commands {
     /// Display current status, active theme, and enabled applications
     Status,
 
+    /// Display the colors of a theme
+    Preview {
+        /// Name of the theme to preview (defaults to current)
+        #[arg(value_name = "THEME")]
+        theme: Option<String>,
+    },
+
     /// Watch for changes in the palette or configuration and re-apply automatically
     Watch {
         /// Debounce interval in milliseconds to prevent flickering during rapid changes
