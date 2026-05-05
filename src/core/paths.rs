@@ -111,6 +111,24 @@ impl IrisPaths {
         let filename: String = format!("{}.json", name.to_lowercase());
         self.palettes.join(filename).exists()
     }
+
+    /// Returns a sorted list of theme names available in cache
+    pub fn get_cached_themes(&self) -> Result<Vec<String>> {
+        let mut themes: Vec<String> = fs::read_dir(&self.palettes)?
+            .filter_map(|entry| {
+                let path = entry.ok()?.path();
+
+                if path.is_file() && path.extension().map_or(false, |ext| ext == "json") {
+                    Some(path.file_stem()?.to_string_lossy().into_owned())
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        themes.sort();
+        Ok(themes)
+    }
 }
 
 /// Unit-tests context paths
@@ -256,6 +274,7 @@ mod tests {
     fn should_calculate_size_of_directory() {
         let paths = setup_paths();
         let root = paths.cache.to_path_buf();
+        fs::create_dir_all(&root).unwrap();
 
         let empty_file = root.join("empty.txt");
         fs::write(&empty_file, "").unwrap();
@@ -288,5 +307,29 @@ mod tests {
         assert!(paths.is_palette_cached("Gruvbox"));
         assert!(paths.is_palette_cached("GRUVBOX"));
         assert!(!paths.is_palette_cached("nord"));
+    }
+
+    #[test]
+    fn should_return_all_cached_themes() {
+        let paths = setup_paths();
+        let palettes_dir = paths.palettes.to_path_buf();
+        fs::create_dir_all(&palettes_dir).unwrap();
+
+        fs::write(palettes_dir.join("nord.json"), "{}").unwrap();
+        fs::write(palettes_dir.join("gruvbox.json"), "{}").unwrap();
+        fs::write(palettes_dir.join("tokyonight.json"), "{}").unwrap();
+
+        fs::write(palettes_dir.join("README.md"), "").unwrap();
+        fs::write(palettes_dir.join(".DS_Store"), "").unwrap();
+        fs::create_dir(palettes_dir.join("subfolder.json")).unwrap();
+
+        let themes = paths.get_cached_themes().unwrap();
+        assert_eq!(themes.len(), 3);
+
+        assert_eq!(themes[0], "gruvbox");
+        assert_eq!(themes[1], "nord");
+        assert_eq!(themes[2], "tokyonight");
+        assert!(!themes.contains(&"README".to_string()));
+        assert!(!themes.contains(&"subfolder".to_string()));
     }
 }

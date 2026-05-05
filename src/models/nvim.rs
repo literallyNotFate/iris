@@ -181,6 +181,29 @@ impl NvimStrategy {
         }
     }
 
+    // Get all themes installed in nvim
+    pub fn get_all_themes() -> anyhow::Result<Vec<String>> {
+        let output = Command::new("nvim")
+            .args([
+                "--headless",
+                "-c",
+                "lua io.write(table.concat(vim.fn.getcompletion('', 'color'), ','))",
+                "+q!",
+            ])
+            .output()?;
+
+        let s = String::from_utf8_lossy(&output.stdout);
+        let mut names: Vec<String> = s
+            .split(',')
+            .map(|s| s.to_string())
+            .filter(|s| !s.is_empty())
+            .collect();
+
+        names.sort();
+        names.dedup();
+        Ok(names)
+    }
+
     /// Validates if strategy can be applied
     pub fn validate(&self) -> anyhow::Result<()> {
         match self {

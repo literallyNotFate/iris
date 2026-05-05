@@ -44,6 +44,9 @@ pub enum Commands {
     #[command(arg_required_else_help = true)]
     Apply(switch::ApplyArgs),
 
+    /// Interactive theme selection (with cached ones and installed)
+    Select,
+
     /// Display current status, active theme, and enabled applications
     Status,
 
