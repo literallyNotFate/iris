@@ -70,18 +70,18 @@ fn handle_select(ctx: &mut IrisContext) -> anyhow::Result<()> {
 
     ctx.state.replace_enabled(selected_names.clone());
 
-    let mut task = ctx.log.step("Saving settings", 1);
-    ctx.save()?;
-    task.done(true);
+    let success_msg: &str = if !selected_names.is_empty() {
+        &format!(
+            "Settings updated and saved!\n  Active modules: {}\n",
+            ctx.registry.active(&ctx.state)
+        )
+    } else {
+        "Settings updated and saved!\n"
+    };
 
-    if !selected_names.is_empty() {
-        let list = selected_names
-            .iter()
-            .map(|n| n.cyan().to_string())
-            .collect::<Vec<_>>()
-            .join(", ");
-        println!(" {} {} {}", "󱐋".green().bold(), "Active:".bold(), list);
-    }
+    ctx.log.action(success_msg, || ctx.save())?;
+    println!();
+
     Ok(())
 }
 
@@ -92,13 +92,10 @@ fn handle_status_change(name: String, enable: bool, ctx: &mut IrisContext) -> an
 
     let success = if enable {
         if !ctx.registry.get(&name).unwrap().is_installed() {
-            ctx.log.warn(
-                &format!(
-                    "Generator `{}` is recognized, but app is not found",
-                    name.green()
-                ),
-                1,
-            );
+            ctx.log.warn(&format!(
+                "Generator `{}` is recognized, but app is not found!",
+                name.green()
+            ));
         }
         ctx.state.enable_generator(&name)
     } else {
@@ -106,57 +103,74 @@ fn handle_status_change(name: String, enable: bool, ctx: &mut IrisContext) -> an
     };
 
     if success {
-        let action_msg = if enable { "Enabling" } else { "Disabling" };
-        let mut task = ctx.log.step(&format!("{}: {}", action_msg, name.cyan()), 1);
-        ctx.save()?;
-        task.done(true);
+        let verb = if enable { "Enabling" } else { "Disabling" };
+        let list = ctx.registry.active(&ctx.state);
+
+        let success_msg: &str = if !list.is_empty() {
+            &format!(
+                "{} generator: {}\n  Active modules: {}\n",
+                verb,
+                name.cyan(),
+                list
+            )
+        } else {
+            &format!("{} generator: {}\n", verb, name.cyan())
+        };
+
+        ctx.log.action(success_msg, || ctx.save())?;
     } else {
-        let status_msg = if enable {
+        let status = if enable {
             "already active"
         } else {
             "already disabled"
         };
+
         ctx.log
-            .warn(&format!("`{}` is {}", name.cyan().bold(), status_msg), 0);
+            .warn(&format!("`{}` is {}", name.cyan().bold(), status));
     }
+
+    println!();
     Ok(())
 }
 
 /// Autodiscovering generators
-fn handle_auto(ctx: &mut IrisContext) -> anyhow::Result<()> {
+pub fn handle_auto(ctx: &mut IrisContext) -> anyhow::Result<()> {
+    use colored::*;
     ui::render_header("Autodiscovering generators...", "󰩊");
 
-    let mut added = 0;
-    for g in ctx.registry.installed() {
+    let mut added: i32 = 0;
+    let installed = ctx.registry.installed();
+
+    ctx.log
+        .info("Scanning system for supported applications...");
+
+    for g in &installed {
         if !ctx.state.is_enabled(g.name()) {
-            let mut task = ctx
-                .log
-                .step(&format!("Detected: {}", g.name().cyan().bold()), 1);
             ctx.state.enable_generator(g.name());
             added += 1;
-            task.done(true);
         }
     }
 
     if added > 0 {
-        let mut task = ctx.log.step("Saving configuration", 1);
-        ctx.save()?;
-        task.done(true);
-        println!();
-        ctx.log.success(
-            &format!(
-                "Auto-discovery complete! Added {} new generators",
-                added.to_string().green().bold()
-            ),
-            0,
-        );
-    } else {
         println!(
-            " {} {}",
-            "ℹ".blue().bold(),
-            "All discovered apps are already active.".dimmed()
+            "{}  {} {} {}",
+            "└──".dimmed(),
+            "Added".bold(),
+            format!("{} new generators to configuration", added)
+                .cyan()
+                .bold(),
+            "✓".green()
         );
+
+        println!();
+
+        ctx.log
+            .action("Saved configuration to state.json\n", || ctx.save())?;
+    } else {
+        println!("{}", "All discovered apps are already active.".dimmed());
     }
+
+    println!();
     Ok(())
 }
 
@@ -166,6 +180,8 @@ fn render_list(
     status_filter: Option<StateFilter>,
     ctx: &IrisContext,
 ) -> anyhow::Result<()> {
+    println!();
+
     let filtered: Vec<_> = ctx
         .registry
         .all()
@@ -205,7 +221,7 @@ fn render_list(
     if !ctx.log.quiet {
         ui::render_list_footer(total, enabled_count, status_filter.is_none());
     } else if total > 0 {
-        println!("\nTotal: {} (Enabled: {})", total, enabled_count);
+        println!("\nTotal: {} (Enabled: {})\n", total, enabled_count);
     }
 
     Ok(())

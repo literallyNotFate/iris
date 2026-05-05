@@ -1,8 +1,8 @@
 use crate::{
     core::{IrisPaths, Templater},
+    log::Task,
     models::{HealthStatus, Palette},
     modules::GeneratorType,
-    ui::Logger,
 };
 use anyhow::{Context, Result};
 use colored::Colorize;
@@ -52,7 +52,7 @@ pub trait Generator: Send + Sync {
         p: &Palette,
         paths: &IrisPaths,
         templater: &Templater,
-        log: &Logger,
+        task: &mut Task,
     ) -> Result<()>;
 
     /// Automatic config directory resolver
@@ -92,7 +92,7 @@ pub trait Generator: Send + Sync {
         p: &Palette,
         paths: &IrisPaths,
         templater: &Templater,
-        log: &Logger,
+        task: &mut Task,
     ) -> Result<()>;
 
     /// Basic template context builder

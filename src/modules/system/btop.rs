@@ -1,8 +1,8 @@
 use crate::{
     core::{IrisPaths, Templater},
+    log::Task,
     models::{HealthStatus, Palette},
     modules::{Generator, GeneratorType},
-    ui::Logger,
     utils::{self},
 };
 use anyhow::{Context, Result};
@@ -43,9 +43,9 @@ impl Generator for BtopGenerator {
         p: &Palette,
         paths: &IrisPaths,
         templater: &Templater,
-        log: &Logger,
+        task: &mut Task,
     ) -> Result<()> {
-        log.info(&format!(
+        task.info(&format!(
             "Generating {} theme for {}",
             utils::capitalize(&p.name).yellow(),
             self.name().bold().cyan(),
@@ -54,7 +54,7 @@ impl Generator for BtopGenerator {
         let cache_file: PathBuf = self.ensure_cache_file(p, paths, templater)?;
         let link_path: PathBuf = self.link_path(paths, &p.name);
 
-        log.info(&format!(
+        task.info(&format!(
             "Linking {} theme to {}...",
             self.name().bold(),
             utils::pretty_path(&link_path).magenta(),
@@ -68,7 +68,7 @@ impl Generator for BtopGenerator {
             .join("btop.conf");
 
         if conf_path.exists() {
-            log.info(&format!(
+            task.info(&format!(
                 "Setting color_theme = \"{}\" in btop.conf",
                 p.name.bold().red()
             ));
@@ -76,7 +76,7 @@ impl Generator for BtopGenerator {
             self.update_btop_conf(&conf_path, &p.name)?;
         }
 
-        log.info(&format!(
+        task.info(&format!(
             "{} theme applied to {}",
             utils::capitalize(&p.name).yellow(),
             self.name().bold().cyan()
@@ -154,42 +154,37 @@ impl Generator for BtopGenerator {
         p: &Palette,
         paths: &IrisPaths,
         templater: &Templater,
-        log: &Logger,
+        task: &mut Task,
     ) -> Result<()> {
         match status {
             HealthStatus::Error { message, .. } => {
                 if message.contains("missing") {
-                    log.step("Restoring `btop` theme symlink...", 2).done(true);
-
-                    let cache = self.cache_path(paths, &p.name);
-                    let link = self.link_path(paths, &p.name);
-                    self.ensure_symlink(&cache, &link)?
+                    task.log.action("Restored `btop` theme symlink", || {
+                        let cache = self.cache_path(paths, &p.name);
+                        let link = self.link_path(paths, &p.name);
+                        self.ensure_symlink(&cache, &link)
+                    })?;
                 }
 
-                self.apply(p, paths, templater, &Logger::quiet())
+                self.apply(p, paths, templater, &mut task.as_quiet())
             }
 
-            HealthStatus::Warning(msg) if msg.contains("not using the current theme") => {
-                log.step("Updating btop.conf to use the correct theme...", 2)
-                    .done(true);
+            HealthStatus::Warning(msg) if msg.contains("not using the current theme") => task
+                .log
+                .action("Updated btop.conf to use the correct theme", || {
+                    let conf_path = self
+                        .resolve_config_directory(paths)
+                        .parent()
+                        .unwrap_or(&self.resolve_config_directory(paths))
+                        .join("btop.conf");
 
-                let conf_path = self
-                    .resolve_config_directory(paths)
-                    .parent()
-                    .unwrap_or(&self.resolve_config_directory(paths))
-                    .join("btop.conf");
+                    self.update_btop_conf(&conf_path, &p.name)
+                }),
 
-                self.update_btop_conf(&conf_path, &p.name)
-            }
-
-            _ => {
-                log.step(
-                    &format!("Re-applying `{}` configuration...", self.name().bold()),
-                    2,
-                )
-                .done(true);
-                self.apply(p, paths, templater, &Logger::quiet())
-            }
+            _ => task.log.action(
+                &format!("Re-applied `{}` configuration", self.name().bold()),
+                || self.apply(p, paths, templater, &mut task.as_quiet()),
+            ),
         }
     }
 }
@@ -355,9 +350,10 @@ mod tests {
         let generator = BtopGenerator;
         let p = Palette::mock();
 
+        let mut task = ctx.log.step("Test", false).as_quiet();
         ctx.state.current_theme = p.name.clone();
         generator
-            .apply(&p, &ctx.paths, &ctx.templater, &ctx.log)
+            .apply(&p, &ctx.paths, &ctx.templater, &mut task)
             .unwrap();
 
         let btop_dir = generator
@@ -403,9 +399,10 @@ mod tests {
         let generator = BtopGenerator;
         let p = Palette::mock();
 
+        let mut task = ctx.log.step("Test", false).as_quiet();
         ctx.state.current_theme = p.name.clone();
         generator
-            .apply(&p, &ctx.paths, &ctx.templater, &ctx.log)
+            .apply(&p, &ctx.paths, &ctx.templater, &mut task)
             .unwrap();
 
         let btop_dir = generator
@@ -445,7 +442,8 @@ mod tests {
         )
         .unwrap();
 
-        let result = generator.apply(&p, &ctx.paths, &ctx.templater, &ctx.log);
+        let mut task = ctx.log.step("Test", false).as_quiet();
+        let result = generator.apply(&p, &ctx.paths, &ctx.templater, &mut task);
         assert!(result.is_ok());
 
         let cache_file = ctx.paths.generators.join("btop").join("test-theme.theme");
@@ -477,8 +475,9 @@ mod tests {
         if let HealthStatus::Warning(msg) = &status {
             assert!(msg.contains("not using the current theme"));
 
+            let mut task = ctx.log.step("Test", false).as_quiet();
             generator
-                .fix(&status, &p, &ctx.paths, &ctx.templater, &ctx.log)
+                .fix(&status, &p, &ctx.paths, &ctx.templater, &mut task)
                 .expect("Fix failed");
 
             let content = fs::read_to_string(&conf_path).unwrap();
@@ -504,8 +503,9 @@ mod tests {
         )
         .unwrap();
 
+        let mut task = ctx.log.step("Test", false).as_quiet();
         generator
-            .apply(&p, &ctx.paths, &ctx.templater, &ctx.log)
+            .apply(&p, &ctx.paths, &ctx.templater, &mut task)
             .unwrap();
 
         let link_path = generator.link_path(&ctx.paths, &p.name);
@@ -521,7 +521,7 @@ mod tests {
         );
 
         generator
-            .fix(&status, &p, &ctx.paths, &ctx.templater, &ctx.log)
+            .fix(&status, &p, &ctx.paths, &ctx.templater, &mut task)
             .expect("Fix failed");
         assert!(link_path.exists(), "Fix should restore the symlink");
     }

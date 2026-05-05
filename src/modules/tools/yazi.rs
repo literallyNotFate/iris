@@ -1,8 +1,8 @@
 use crate::{
     core::{IrisPaths, Templater},
+    log::Task,
     models::{HealthStatus, Palette},
     modules::{Generator, GeneratorType},
-    ui::Logger,
     utils,
 };
 use anyhow::{Context, Result};
@@ -38,19 +38,19 @@ impl Generator for YaziGenerator {
         p: &Palette,
         paths: &IrisPaths,
         templater: &Templater,
-        log: &Logger,
+        task: &mut Task,
     ) -> Result<()> {
         let cache_file: PathBuf = self.ensure_cache_file(p, paths, templater)?;
         let link_path: PathBuf = self.link_path(paths, &p.name);
 
-        log.info(&format!(
+        task.info(&format!(
             "Linking {} theme to {}...",
             self.name().bold().cyan(),
             utils::pretty_path(&link_path).magenta(),
         ));
         self.ensure_symlink(&cache_file, &link_path)?;
 
-        log.info(&format!(
+        task.info(&format!(
             "{} theme applied to {}",
             utils::capitalize(&p.name).yellow(),
             self.name().bold().cyan()
@@ -137,38 +137,36 @@ impl Generator for YaziGenerator {
         p: &Palette,
         paths: &IrisPaths,
         templater: &Templater,
-        log: &Logger,
+        task: &mut Task,
     ) -> Result<()> {
         match status {
             HealthStatus::Error { message, .. } => {
                 if message.contains("cache file is missing") {
-                    log.step("Generating missing cache file...", 2).done(true);
-                    self.ensure_cache_file(p, paths, templater)?;
+                    task.log.action("Generated missing cache file", || {
+                        self.ensure_cache_file(p, paths, templater)
+                    })?;
                 } else if message.contains("link missing") {
-                    log.step("Restoring missing symlink...", 2).done(true);
-
-                    let cache: PathBuf = self.cache_path(paths, &p.name);
-                    let link: PathBuf = self.link_path(paths, &p.name);
-                    self.ensure_symlink(&cache, &link)?;
+                    task.log.action("Restored missing symlink", || {
+                        let cache = self.cache_path(paths, &p.name);
+                        let link = self.link_path(paths, &p.name);
+                        self.ensure_symlink(&cache, &link)
+                    })?;
                 }
                 Ok(())
             }
 
             HealthStatus::Warning(msg) if msg.contains("unexpected location") => {
-                log.step("Relinking to correct location...", 2).done(true);
+                task.log.action("Relinked theme to correct location", || {
+                    let cache = self.cache_path(paths, &p.name);
+                    let link = self.link_path(paths, &p.name);
+                    self.ensure_symlink(&cache, &link)
+                })
+            }
 
-                let cache: PathBuf = self.cache_path(paths, &p.name);
-                let link: PathBuf = self.link_path(paths, &p.name);
-                self.ensure_symlink(&cache, &link)
-            }
-            _ => {
-                log.step(
-                    &format!("Re-applying `{}` configuration...", self.name().bold()),
-                    2,
-                )
-                .done(true);
-                self.apply(p, paths, templater, log)
-            }
+            _ => task.log.action(
+                &format!("Re-applied `{}` configuration", self.name().bold()),
+                || self.apply(p, paths, templater, &mut task.as_quiet()),
+            ),
         }
     }
 }
@@ -277,8 +275,9 @@ mod tests {
         let p = Palette::mock();
 
         ctx.state.current_theme = p.name.clone();
+        let mut task = ctx.log.step("Test", false);
         generator
-            .apply(&p, &ctx.paths, &ctx.templater, &ctx.log)
+            .apply(&p, &ctx.paths, &ctx.templater, &mut task)
             .unwrap();
 
         let status = generator.health_check(&ctx.paths, &p.name);
@@ -323,8 +322,9 @@ mod tests {
         let p = Palette::mock();
 
         ctx.state.current_theme = p.name.clone();
+        let mut task = ctx.log.step("Test", false);
         generator
-            .apply(&p, &ctx.paths, &ctx.templater, &ctx.log)
+            .apply(&p, &ctx.paths, &ctx.templater, &mut task)
             .unwrap();
 
         let cache_path = generator.cache_path(&ctx.paths, &p.name);
@@ -345,7 +345,8 @@ mod tests {
         let generator = YaziGenerator;
         let p = Palette::mock();
 
-        let result = generator.apply(&p, &ctx.paths, &ctx.templater, &ctx.log);
+        let mut task = ctx.log.step("Test", false);
+        let result = generator.apply(&p, &ctx.paths, &ctx.templater, &mut task);
         assert!(result.is_ok(), "Apply failed: {:?}", result.err());
 
         let expected_yazi_dir = generator.resolve_config_directory(&ctx.paths);
@@ -367,8 +368,9 @@ mod tests {
         let generator = YaziGenerator;
         let p = Palette::mock();
 
+        let mut task = ctx.log.step("Test", false);
         generator
-            .apply(&p, &ctx.paths, &ctx.templater, &ctx.log)
+            .apply(&p, &ctx.paths, &ctx.templater, &mut task)
             .expect("Initial apply failed");
 
         let link_path = generator.link_path(&ctx.paths, &p.name);
@@ -387,8 +389,9 @@ mod tests {
             status
         );
 
+        let mut task = ctx.log.step("Test", false);
         generator
-            .fix(&status, &p, &ctx.paths, &ctx.templater, &ctx.log)
+            .fix(&status, &p, &ctx.paths, &ctx.templater, &mut task)
             .expect("Fix failed");
         assert!(link_path.exists(), "Fix should recreate the symlink");
 
@@ -411,8 +414,9 @@ mod tests {
         let generator = YaziGenerator;
         let p = Palette::mock();
 
+        let mut task = ctx.log.step("Test", false);
         generator
-            .apply(&p, &ctx.paths, &ctx.templater, &ctx.log)
+            .apply(&p, &ctx.paths, &ctx.templater, &mut task)
             .ok();
         let cache_file = generator.cache_path(&ctx.paths, &p.name);
         fs::remove_file(&cache_file).unwrap();
@@ -423,7 +427,7 @@ mod tests {
         );
 
         generator
-            .fix(&status, &p, &ctx.paths, &ctx.templater, &ctx.log)
+            .fix(&status, &p, &ctx.paths, &ctx.templater, &mut task)
             .expect("Fix failed");
         assert!(
             cache_file.exists(),

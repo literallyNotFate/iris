@@ -1,8 +1,8 @@
 use crate::{
     core::{IrisPaths, Templater},
+    log::Task,
     models::{HealthStatus, Palette},
     modules::{Generator, GeneratorType},
-    ui::Logger,
     utils::{self},
 };
 use anyhow::{Context, Result};
@@ -43,9 +43,9 @@ impl Generator for TmuxGenerator {
         p: &Palette,
         paths: &IrisPaths,
         templater: &Templater,
-        log: &Logger,
+        task: &mut Task,
     ) -> Result<()> {
-        log.info(&format!(
+        task.info(&format!(
             "Generating {} theme for {}",
             utils::capitalize(&p.name).yellow(),
             self.name().bold().cyan(),
@@ -54,7 +54,7 @@ impl Generator for TmuxGenerator {
         let cache_file = self.ensure_cache_file(p, paths, templater)?;
         let link_path = self.link_path(paths, &p.name);
 
-        log.info(&format!(
+        task.info(&format!(
             "Linking {} theme to {}...",
             self.name().bold(),
             utils::pretty_path(&link_path).magenta(),
@@ -64,7 +64,7 @@ impl Generator for TmuxGenerator {
         let conf_path = self.resolve_tmux_conf_path(paths);
 
         if conf_path.exists() {
-            log.info(&format!(
+            task.info(&format!(
                 "Patching tmux.conf to source {}...",
                 utils::capitalize(&p.name).yellow(),
             ));
@@ -148,32 +148,28 @@ impl Generator for TmuxGenerator {
         p: &Palette,
         paths: &IrisPaths,
         templater: &Templater,
-        log: &Logger,
+        task: &mut Task,
     ) -> Result<()> {
         match status {
             HealthStatus::Error { message, .. } if message.contains("Theme link missing") => {
-                log.step("Restoring `tmux` theme symlink...", 2).done(true);
-                self.apply(p, paths, templater, &Logger::quiet())
+                task.log.action("Restored `tmux` theme symlink", || {
+                    self.apply(p, paths, templater, &mut task.as_quiet())
+                })
             }
 
             HealthStatus::Warning(msg)
                 if msg.contains("not sourced") || msg.contains("different theme") =>
             {
-                log.step("Repairing tmux.conf source line...", 2).done(true);
-
-                let conf_path: PathBuf = self.resolve_tmux_conf_path(paths);
-                self.update_tmux_conf(&conf_path, &p.name)
+                task.log.action("Repaired tmux.conf source line", || {
+                    let conf_path = self.resolve_tmux_conf_path(paths);
+                    self.update_tmux_conf(&conf_path, &p.name)
+                })
             }
 
-            _ => {
-                log.step(
-                    &format!("Re-applying `{}` configuration...", self.name().bold()),
-                    2,
-                )
-                .done(true);
-
-                self.apply(p, paths, templater, log)
-            }
+            _ => task.log.action(
+                &format!("Re-applied `{}` configuration", self.name().bold()),
+                || self.apply(p, paths, templater, &mut task.as_quiet()),
+            ),
         }
     }
 }
@@ -370,9 +366,10 @@ mod tests {
         )
         .unwrap();
 
+        let mut task = ctx.log.step("Test", false).as_quiet();
         ctx.state.current_theme = p.name.clone();
         generator
-            .apply(&p, &ctx.paths, &ctx.templater, &ctx.log)
+            .apply(&p, &ctx.paths, &ctx.templater, &mut task)
             .expect("Apply failed");
 
         let status = generator.health_check(&ctx.paths, &p.name);
@@ -403,9 +400,10 @@ mod tests {
         )
         .unwrap();
 
+        let mut task = ctx.log.step("Test", false).as_quiet();
         ctx.state.current_theme = p.name.clone();
         generator
-            .apply(&p, &ctx.paths, &ctx.templater, &ctx.log)
+            .apply(&p, &ctx.paths, &ctx.templater, &mut task)
             .unwrap();
 
         let link = generator.link_path(&ctx.paths, &p.name);
@@ -466,9 +464,10 @@ mod tests {
         )
         .unwrap();
 
+        let mut task = ctx.log.step("Test", false).as_quiet();
         ctx.state.current_theme = p.name.clone();
         generator
-            .apply(&p, &ctx.paths, &ctx.templater, &ctx.log)
+            .apply(&p, &ctx.paths, &ctx.templater, &mut task)
             .unwrap();
 
         let link = generator.link_path(&ctx.paths, &p.name);
@@ -494,8 +493,9 @@ mod tests {
         fs::create_dir_all(&tmux_dir).unwrap();
         fs::write(&tmux_conf, "run '~/.tmux/plugins/tpm/tpm'").unwrap();
 
+        let mut task = ctx.log.step("Test", false).as_quiet();
         generator
-            .apply(&p, &ctx.paths, &ctx.templater, &ctx.log)
+            .apply(&p, &ctx.paths, &ctx.templater, &mut task)
             .expect("Apply failed");
         let content = fs::read_to_string(&tmux_conf).expect("Read failed");
 
@@ -518,9 +518,10 @@ mod tests {
         fs::create_dir_all(tmux_conf.parent().unwrap()).unwrap();
         fs::write(&tmux_conf, "run '~/.tmux/plugins/tpm/tpm'").unwrap();
 
+        let mut task = ctx.log.step("Test", false).as_quiet();
         let status = generator.health_check(&ctx.paths, &p.name);
         generator
-            .fix(&status, &p, &ctx.paths, &ctx.templater, &ctx.log)
+            .fix(&status, &p, &ctx.paths, &ctx.templater, &mut task)
             .expect("Fix failed");
 
         let content = fs::read_to_string(&tmux_conf).unwrap();
@@ -564,8 +565,9 @@ mod tests {
             status
         );
 
+        let mut task = ctx.log.step("Test", false).as_quiet();
         generator
-            .fix(&status, &p, &ctx.paths, &ctx.templater, &ctx.log)
+            .fix(&status, &p, &ctx.paths, &ctx.templater, &mut task)
             .expect("Fix failed");
 
         let content = fs::read_to_string(&tmux_conf).unwrap();
@@ -579,8 +581,9 @@ mod tests {
         let generator = TmuxGenerator;
         let p = Palette::mock();
 
+        let mut task = ctx.log.step("Test", false).as_quiet();
         generator
-            .apply(&p, &ctx.paths, &ctx.templater, &ctx.log)
+            .apply(&p, &ctx.paths, &ctx.templater, &mut task)
             .unwrap();
         let link_path = generator.link_path(&ctx.paths, &p.name);
 
@@ -590,7 +593,7 @@ mod tests {
         assert!(matches!(status, HealthStatus::Error { .. }));
 
         generator
-            .fix(&status, &p, &ctx.paths, &ctx.templater, &ctx.log)
+            .fix(&status, &p, &ctx.paths, &ctx.templater, &mut task)
             .expect("Fix failed");
         assert!(link_path.exists());
     }

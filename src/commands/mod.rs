@@ -1,5 +1,4 @@
 use crate::{cli::Commands, core::IrisContext, models::Palette, utils};
-use colored::Colorize;
 
 pub mod apply;
 pub mod cache;
@@ -7,6 +6,7 @@ pub mod config;
 pub mod generators;
 pub mod health;
 pub mod preview;
+pub mod select;
 pub mod setup;
 pub mod status;
 pub mod switch;
@@ -21,6 +21,7 @@ pub fn handle(command: Commands, ctx: &mut IrisContext) -> anyhow::Result<()> {
         Commands::Switch(args) => switch::exec(args, ctx)?,
         Commands::Sync { force } => sync::exec(force, ctx)?,
         Commands::Apply(args) => apply::exec(args, ctx)?,
+        Commands::Select => select::exec(ctx)?,
         Commands::Status => status::exec(ctx)?,
         Commands::Preview { theme } => preview::exec(theme, ctx)?,
         Commands::Watch { interval } => watch::exec(interval, ctx)?,
@@ -34,30 +35,28 @@ pub fn handle(command: Commands, ctx: &mut IrisContext) -> anyhow::Result<()> {
 }
 
 /// Helper function to apply theme
-pub(crate) fn apply_theme(theme: &str, force: bool, ctx: &mut IrisContext) -> anyhow::Result<()> {
-    if !ctx.log.quiet {
+pub(crate) fn apply_theme(palette: &Palette, ctx: &mut IrisContext) -> anyhow::Result<()> {
+    use colored::*;
+
+    let registry = &ctx.registry;
+    let state = &ctx.state;
+    let paths = &ctx.paths;
+    let templater = &ctx.templater;
+    let log = ctx.log.clone();
+
+    if !log.quiet {
         println!(
-            "\n {}  {}",
+            "{}  {}\n",
             "󰚔".green().bold(),
-            format!("Applying {}...", utils::capitalize(theme)).bold()
+            format!("Applying {}...", utils::capitalize(&palette.name)).bold()
         );
-        println!();
     }
 
-    let palette = {
-        let mut t = ctx.log.step(&format!("Fetching colors: {}", theme), 1);
-        let p = Palette::fetch(theme, force, &ctx.paths, &ctx.state, &ctx.log)?;
-        t.done(true);
-        p
-    };
+    registry.apply_all(palette, state, paths, templater, &log)?;
 
-    ctx.registry.apply_all(&palette, ctx)?;
+    let theme_name: String = palette.name.clone();
+    log.action("Updated local state", move || ctx.update(&theme_name))?;
 
-    {
-        let mut state_task = ctx.log.step("Updating local state", 1);
-        ctx.update(theme)?;
-        state_task.done(true);
-    }
-
+    println!("\n");
     Ok(())
 }

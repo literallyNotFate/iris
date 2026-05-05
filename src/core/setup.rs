@@ -1,7 +1,7 @@
 use crate::{
     core::IrisContext,
+    log::Task,
     models::{NvimStrategy, Palette},
-    ui::Task,
     utils,
 };
 use anyhow::{Context as _, Result};
@@ -16,37 +16,30 @@ pub struct IrisSetup;
 
 impl IrisSetup {
     pub fn run(ctx: &mut IrisContext) -> Result<()> {
-        println!();
         if !ctx.log.quiet {
-            println!(" {}  {}", "󰒓".purple().bold(), "Iris initialization".bold());
+            println!();
+            println!("{}  {}", "󰒓".purple().bold(), "Iris initialization".bold());
             println!();
         }
 
-        {
-            let mut task = ctx.log.step(
-                &format!("{}  Preparing infrastructure", "󰉖".cyan().bold()),
-                1,
-            );
-            ctx.paths.ensure_dirs()?;
-            task.done(false);
-        }
+        ctx.log
+            .action("Infrastructure prepared\n", || ctx.paths.ensure_dirs())?;
+        println!();
 
         {
-            let mut task = ctx.log.step(
-                &format!("{}  Initializing application state", "󰏘".red().bold()),
-                1,
-            );
+            let task =
+                ctx.log
+                    .step_with_icon(&"󰏘".red().bold(), "Initializing application state", false);
             Self::setup_initial_state(ctx, &task)?;
-            task.done(false);
+            task.done_with("System state initialized");
         }
 
         {
-            let mut task = ctx.log.step(
-                &format!("{}  Integrating with shell (zsh)", "󰒍".green().bold()),
-                1,
-            );
+            let task =
+                ctx.log
+                    .step_with_icon(&"󰒍".green().bold(), "Integrating with shell (zsh)", true);
             Self::setup_zsh_hook(ctx, &task)?;
-            task.done(true);
+            task.done_with("`zsh` synchronization hook installed");
         }
 
         Ok(())
@@ -54,7 +47,7 @@ impl IrisSetup {
 
     fn setup_initial_state(ctx: &mut IrisContext, task: &Task) -> Result<()> {
         if ctx.paths.state_file.exists() {
-            task.info("Found existing state.json, loading current configuration.");
+            task.info("Found existing state.json, loading configuration.");
             return Ok(());
         }
 
@@ -68,23 +61,19 @@ impl IrisSetup {
                 strategy,
                 count.to_string().yellow().bold()
             ));
-        } else {
-            task.info("No specific plugin manager detected. Using built-in strategy.");
         }
 
         ctx.state.nvim = strategy;
         task.info("Detecting active Neovim theme...");
-        let current_theme: String = Palette::current().unwrap_or_else(|_| "".to_string());
+        let current_theme = Palette::current().unwrap_or_else(|_| "".to_string());
 
         task.info("Scanning for compatible tools...");
         let installed = ctx.registry.installed();
 
         if installed.is_empty() {
-            task.info(
-                "No compatible tools found. You can enable them later via 'iris gen select'.",
-            );
+            task.info("No compatible tools found.");
         } else {
-            for generator in &installed {
+            for generator in installed.iter() {
                 task.info(&format!("Found: {}", generator.name().green().bold()));
                 ctx.state.enable_generator(generator.name());
             }
@@ -105,8 +94,7 @@ impl IrisSetup {
         let zshrc = home.join(".zshrc");
 
         if !zshrc.exists() {
-            ctx.log
-                .warn(".zshrc not found, skipping hook injection.", 1);
+            ctx.log.warn(".zshrc not found, skipping hook injection.");
             return Ok(());
         }
 
@@ -176,7 +164,7 @@ mod tests {
         fs::write(&zshrc_path, "export PATH=$HOME/bin:$PATH\n").unwrap();
 
         temp_env::with_var("HOME", Some(fake_home), || {
-            let task = ctx.log.step("Test Task", 1);
+            let task = ctx.log.step("Test Task", true);
 
             let result = IrisSetup::setup_zsh_hook(&ctx, &task);
             assert!(result.is_ok());
@@ -205,7 +193,7 @@ mod tests {
         )
         .unwrap();
 
-        let task = ctx.log.step("Initial State Test", 1);
+        let task = ctx.log.step("Initial State Test", true);
         let result = IrisSetup::setup_initial_state(&mut ctx, &task);
 
         assert!(result.is_ok());

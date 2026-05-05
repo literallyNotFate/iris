@@ -1,5 +1,6 @@
 use crate::{
-    core::IrisContext,
+    core::{IrisPaths, Templater},
+    log::Reporter,
     models::{Palette, State},
     modules::{Generator, GeneratorType},
 };
@@ -96,33 +97,64 @@ impl GeneratorRegistry {
             .map(|b| b.as_ref())
             .collect()
     }
+
+    /// Get all active generators (returns joined string of array of names)
+    pub fn active(&self, state: &State) -> String {
+        self.generators
+            .iter()
+            .filter(|g| state.is_enabled(g.name()))
+            .map(|n| n.name().cyan().to_string())
+            .collect::<Vec<_>>()
+            .join(", ")
+    }
 }
 
 impl GeneratorRegistry {
     /// Apply themes to available programs (enabled generators)
-    pub fn apply_all(&self, palette: &Palette, ctx: &IrisContext) -> Result<()> {
+    pub fn apply_all(
+        &self,
+        palette: &Palette,
+        state: &State,
+        paths: &IrisPaths,
+        templater: &Templater,
+        log: &Reporter,
+    ) -> Result<()> {
         let to_apply: Vec<&dyn Generator> = self
             .generators
             .iter()
-            .filter(|g| ctx.state.is_enabled(g.name()) && g.is_installed())
+            .filter(|g| state.is_enabled(g.name()) && g.is_installed())
             .map(|b| b.as_ref())
             .collect();
 
         if to_apply.is_empty() {
+            log.warn("No targets enabled or installed");
             return Ok(());
         }
 
-        if !ctx.log.quiet {
-            println!("\n {}  {}\n", "󰚗".magenta(), "Updating targets...".bold());
-        }
-
         let total = to_apply.len();
-        let start_all = std::time::Instant::now();
+        let root = log.step_with_icon(
+            "󰛓".blue().bold(),
+            &format!("Updating {} targets...", total.to_string().blue().bold()),
+            true,
+        );
 
         for (i, generator) in to_apply.iter().enumerate() {
-            let mut task = ctx.log.step(generator.name(), 2);
+            let is_last: bool = i == total - 1;
+            let generator_color = generator.generator_type().color();
+            let generator_icon = generator
+                .generator_type()
+                .icon()
+                .color(generator_color)
+                .bold();
+
+            let mut task = root.log.step_with_icon(
+                generator_icon,
+                &format!("{}", generator.name().color(generator_color).bold()),
+                is_last,
+            );
+
             generator
-                .apply(palette, &ctx.paths, &ctx.templater, &ctx.log)
+                .apply(palette, paths, templater, &mut task)
                 .with_context(|| {
                     format!(
                         "Failed to apply theme to `{}`",
@@ -130,14 +162,13 @@ impl GeneratorRegistry {
                     )
                 })?;
 
-            task.done(i == total - 1);
+            task.done_with(&format!("{} updated!", generator.name().cyan()));
         }
 
-        println!(
-            "\n {} All systems updated! {}\n",
-            "󰄬".green().bold(),
-            format!("[{:.2?}]", start_all.elapsed()).dimmed()
-        );
+        root.done_with(&format!(
+            "All {} targets were updated!",
+            total.to_string().blue()
+        ));
 
         Ok(())
     }
@@ -149,8 +180,8 @@ mod tests {
     use super::*;
     use crate::{
         core::{IrisPaths, Templater},
+        log::Task,
         models::HealthStatus,
-        ui::Logger,
     };
 
     // Mock generator and trait implementation
@@ -182,7 +213,7 @@ mod tests {
             _: &Palette,
             _: &IrisPaths,
             _: &Templater,
-            _: &Logger,
+            _: &mut Task,
         ) -> anyhow::Result<()> {
             Ok(())
         }
@@ -197,7 +228,7 @@ mod tests {
             _: &Palette,
             _: &IrisPaths,
             _: &Templater,
-            _: &Logger,
+            _: &mut Task,
         ) -> anyhow::Result<()> {
             Ok(())
         }
@@ -292,5 +323,18 @@ mod tests {
         assert_eq!(types.len(), 2);
         assert!(types.contains(&GeneratorType::Terminal));
         assert!(types.contains(&GeneratorType::Prompt));
+    }
+
+    #[test]
+    fn should_return_array_string_of_active_generators() {
+        let reg = setup_registry();
+        let mut state = State::default();
+
+        state.enable_generator("alacritty");
+        state.enable_generator("zsh");
+        state.enable_generator("kitty");
+
+        let array = reg.active(&state);
+        assert_eq!(array, "alacritty, zsh, kitty");
     }
 }

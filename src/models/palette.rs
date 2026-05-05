@@ -1,17 +1,13 @@
 use crate::{
     core::IrisPaths,
+    log::Reporter,
     models::{NvimStrategy, State},
-    ui::Logger,
     utils::{self, CustomColor},
 };
 use anyhow::{Context, Result};
 use colored::Colorize;
 use serde::{Deserialize, Serialize};
-use std::{
-    fs,
-    path::PathBuf,
-    process::{Command, Output},
-};
+use std::{fs, path::PathBuf, process::Command};
 
 /// Theme palette that is being retreived from nvim
 #[derive(Debug, Deserialize, Serialize)]
@@ -60,84 +56,92 @@ impl Palette {
     pub fn fetch(
         theme: &str,
         force: bool,
+        save: bool,
         paths: &IrisPaths,
         state: &State,
-        log: &Logger,
+        log: &Reporter,
     ) -> Result<Self> {
-        let theme_lower: String = theme.to_lowercase();
-        let cache_path: PathBuf = paths.palettes.join(format!("{}.json", theme_lower));
+        let theme_lower = theme.to_lowercase();
+        let cache_path = paths.palettes.join(format!("{}.json", theme_lower));
+
+        let main_task = log.step_with_icon(
+            "".magenta().bold(),
+            &format!("Fetching palette: {}", theme.cyan().bold()),
+            true,
+        );
 
         if !force && cache_path.exists() {
             if let Ok(content) = fs::read_to_string(&cache_path) {
                 if let Ok(cached) = serde_json::from_str::<Self>(&content) {
-                    log.info(&format!(
+                    main_task.log.info(&format!(
                         "Using cached palette for {}...",
                         theme.yellow().bold()
                     ));
+                    main_task.done();
                     return Ok(cached);
                 }
             }
         }
 
         if matches!(state.nvim, NvimStrategy::Default) {
-            let builtins: Vec<String> = NvimStrategy::get_builtin_themes();
-
+            let builtins = NvimStrategy::get_builtin_themes();
             if !builtins.contains(&theme_lower) {
                 if cache_path.exists() {
                     if let Ok(content) = fs::read_to_string(&cache_path) {
                         if let Ok(cached) = serde_json::from_str::<Self>(&content) {
-                            log.warn(&format!(
-                                "Cannot re-fetch external theme `{}` in Built-in mode. Using existing cache.",
-                                theme
-                            ), 1);
+                            main_task.log.warn(
+                                "Built-in mode active. Using existing cache for external theme.",
+                            );
+                            main_task.done();
                             return Ok(cached);
                         }
                     }
                 }
 
                 anyhow::bail!(
-                    "Theme `{}` is not a built-in theme and is not cached.\n\
-                     {} To use it, switch to `lazy` or `packer` strategy or fetch it while in `lazy` or `packer` mode first.",
-                    theme.yellow().bold(),
-                    "󰋗".blue()
+                    "Theme `{}` is not a built-in theme and not cached",
+                    theme.yellow().bold()
                 );
             }
         }
 
         if force {
-            log.info(&format!(
+            main_task.log.info(&format!(
                 "`{}` flag detected. Bypassing cache...",
-                "--force".cyan().bold()
-            ));
-        } else {
-            log.info(&format!(
-                "Cache miss. Loading Neovim runtime for {}...",
-                state.nvim
+                "--force".cyan()
             ));
         }
-        let args: Vec<String> = Self::build_fetch_args(theme, state);
 
-        log.info("Executing Lua bridge in headless mode...");
-        let output: Output = Command::new("nvim")
-            .args(&args)
-            .output()
-            .context("Failed to execute `nvim` command. Is Neovim installed?")?;
+        let output = main_task.log.action("Executed Lua bridge", || {
+            let args = Self::build_fetch_args(theme, state);
+            Command::new("nvim")
+                .args(&args)
+                .output()
+                .context("Failed to execute `nvim`")
+        })?;
 
         if !output.status.success() {
             let error_msg = String::from_utf8_lossy(&output.stderr);
             anyhow::bail!("Neovim failed to export palette: {}", error_msg.trim());
         }
 
-        log.info("Parsing palette data...");
-        let stdout = String::from_utf8_lossy(&output.stdout);
+        let mut palette: Palette = main_task.log.action("Parsed palette data", || {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            Self::parse_nvim_json(&stdout)
+        })?;
 
-        let mut palette: Palette = Self::parse_nvim_json(&stdout)?;
         palette.name = theme.to_string();
 
-        if let Err(e) = Self::save_to_cache(&cache_path, &palette) {
-            log.warn(&format!("Failed to cache palette: {}", e), 1);
+        if save {
+            main_task.log.action("Saved palette to cache", || {
+                Self::save_to_cache(&cache_path, &palette)
+            })?;
         }
 
+        main_task.done_with(&format!(
+            "Palette `{}` fetched successfully!",
+            utils::capitalize(&palette.name).yellow()
+        ));
         Ok(palette)
     }
 
@@ -811,7 +815,7 @@ mod tests {
         };
         Palette::save_to_cache(&cache_path, &dummy_palette).unwrap();
 
-        let result = Palette::fetch(theme, false, &ctx.paths, &ctx.state, &ctx.log);
+        let result = Palette::fetch(theme, false, false, &ctx.paths, &ctx.state, &ctx.log);
         assert!(result.is_ok());
         assert_eq!(result.unwrap().name, "vesper");
     }
@@ -831,9 +835,10 @@ mod tests {
         };
         Palette::save_to_cache(&cache_path, &old_palette).unwrap();
 
-        let cached_res = Palette::fetch(theme, false, &ctx.paths, &ctx.state, &ctx.log).unwrap();
+        let cached_res =
+            Palette::fetch(theme, false, false, &ctx.paths, &ctx.state, &ctx.log).unwrap();
         assert_eq!(cached_res.name, "old");
-        let forced_res = Palette::fetch(theme, true, &ctx.paths, &ctx.state, &ctx.log);
+        let forced_res = Palette::fetch(theme, true, false, &ctx.paths, &ctx.state, &ctx.log);
 
         match forced_res {
             Ok(p) => {
@@ -843,8 +848,23 @@ mod tests {
                 );
             }
             Err(e) => {
-                ctx.log.info(&format!("Bypassed cache: {}", e));
+                eprintln!("Bypassed cache: {}", e);
             }
         }
+    }
+
+    #[test]
+    fn should_only_save_to_cache_when_save_flag_is_true() {
+        let (_temp, ctx) = create_test_context();
+        let theme = "tokyonight";
+        let cache_path = ctx.paths.palettes.join(format!("{}.json", theme));
+
+        assert!(!cache_path.exists());
+
+        let _ = Palette::fetch(theme, false, false, &ctx.paths, &ctx.state, &ctx.log);
+        assert!(
+            !cache_path.exists(),
+            "File should not be created if save = false"
+        );
     }
 }

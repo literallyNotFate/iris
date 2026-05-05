@@ -1,9 +1,9 @@
 use super::IrisPaths;
 use crate::{
     core::Templater,
+    log::Reporter,
     models::{HealthStatus, NvimStrategy, Palette, State},
     modules::{Generator, GeneratorRegistry},
-    ui::Logger,
     utils,
 };
 use anyhow::{Context as _, Result};
@@ -18,12 +18,12 @@ pub struct IrisContext {
     pub registry: GeneratorRegistry,
     pub templater: Templater,
 
-    pub log: Logger,
+    pub log: Reporter,
 }
 
 impl IrisContext {
     /// New context w/loading UIState from file
-    pub fn new(log: Logger) -> Result<Self> {
+    pub fn new(log: Reporter) -> Result<Self> {
         let paths = IrisPaths::new()?;
         let user_templates: Option<PathBuf> = Some(paths.config.join("templates"));
 

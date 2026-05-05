@@ -1,10 +1,11 @@
 use crate::{cli::CacheAction, core::IrisContext, utils};
+use anyhow::{Context, Result};
 use colored::Colorize;
-use dialoguer::{Confirm, theme::ColorfulTheme};
-use std::fs;
+use dialoguer::Confirm;
+use std::{fs, path::PathBuf};
 
 /// Handle application cache command and its subcommands
-pub fn exec(action: CacheAction, ctx: &IrisContext) -> anyhow::Result<()> {
+pub fn exec(action: CacheAction, ctx: &IrisContext) -> Result<()> {
     match action {
         CacheAction::Clear { all, generator } => handle_clear(all, generator, ctx)?,
         CacheAction::Remove { theme } => handle_remove(&theme, ctx)?,
@@ -12,64 +13,77 @@ pub fn exec(action: CacheAction, ctx: &IrisContext) -> anyhow::Result<()> {
         CacheAction::Info => render_info(ctx)?,
     }
 
-    println!(
-        "\n{}  {}",
-        "".green().bold(),
-        "Operation complete.".green().bold()
-    );
+    println!();
     Ok(())
 }
 
 /// Cache clear (all, for generator or config)
-fn handle_clear(all: bool, gen_name: Option<String>, ctx: &IrisContext) -> anyhow::Result<()> {
+fn handle_clear(all: bool, gen_name: Option<String>, ctx: &IrisContext) -> Result<()> {
     println!();
+
+    let generator = if let Some(ref name) = gen_name {
+        let g = ctx.resolve_generator(name)?;
+        Some(g)
+    } else {
+        None
+    };
+
+    let prompt_message = match (&generator, all) {
+        (Some(g), _) => format!(
+            "Do you want to clear the cache for the `{}` generator?",
+            g.name().cyan().bold()
+        ),
+        (None, true) => format!(
+            "{}: This will wipe all Iris caches and configurations. Are you sure?",
+            "DANGER".bold()
+        ),
+        (None, false) => "Do you want to clean generated configurations?".to_string(),
+    };
+
     if all {
-        println!(
-            "{}  {} {}",
-            "".yellow().bold(),
-            "DANGER:".yellow().bold(),
-            "Nuclear option. Purging everything.".bold()
-        );
-    } else if let Some(ref name) = gen_name {
-        println!(
-            "{}  Cleaning cache for: {}",
-            "󰋽".cyan().bold(),
-            name.green().bold()
-        );
+        ctx.log.warn(&format!(
+            "{}: Nuclear option. Purging everything.",
+            "DANGER".bold()
+        ));
+    } else if let Some(ref g) = generator {
+        ctx.log.info(&format!(
+            "Cleaning cache for generator: {}",
+            g.name().green().bold()
+        ));
+    } else {
+        ctx.log.info("Cleaning generated configurations");
     }
 
-    if !Confirm::with_theme(&ColorfulTheme::default())
-        .with_prompt("Do you want to proceed?")
+    if !Confirm::with_theme(&utils::colors::select_theme())
+        .with_prompt(prompt_message)
         .default(false)
         .interact()?
     {
-        println!("\n{}  {}", "󰋽".dimmed(), "Canceled.".dimmed());
+        println!();
+        ctx.log.info("Canceled.");
         return Ok(());
     }
 
     if all {
-        let mut step = ctx.log.step("Purging iris cache...", 1);
-        ctx.paths.purge_all()?;
-        utils::external::clear_bat_cache();
-        step.done(true);
-    } else if let Some(name) = gen_name {
-        let g = ctx.resolve_generator(&name)?;
-        let mut step = ctx.log.step(
-            &format!("Cleaning `{}` cache...", g.name().cyan().bold()),
-            1,
-        );
-        g.clear(&ctx.paths)?;
-        step.done(true);
+        ctx.log.action("Purged all Iris caches\n", || {
+            ctx.paths.purge_all()?;
+            utils::external::clear_bat_cache();
+            Ok(())
+        })
+    } else if let Some(ref g) = generator {
+        ctx.log.action(
+            &format!("Cleaned `{}` cache\n", g.name().cyan().bold()),
+            || g.clear(&ctx.paths),
+        )
     } else {
-        let mut step = ctx.log.step("Cleaning generated configs...", 1);
-        ctx.paths.clean_gen()?;
-        step.done(true);
+        ctx.log.action("Cleaned generated configurations\n", || {
+            ctx.paths.clean_gen()
+        })
     }
-    Ok(())
 }
 
 /// Removes requested palette from the cache
-fn handle_remove(theme: &str, ctx: &IrisContext) -> anyhow::Result<()> {
+fn handle_remove(theme: &str, ctx: &IrisContext) -> Result<()> {
     let theme_lower = theme.to_lowercase();
     let path = ctx.paths.palettes.join(format!("{}.json", theme_lower));
 
@@ -79,6 +93,7 @@ fn handle_remove(theme: &str, ctx: &IrisContext) -> anyhow::Result<()> {
             utils::capitalize(theme).cyan().bold()
         );
     }
+
     if ctx.state.fallback_theme == theme_lower {
         anyhow::bail!(
             "Cannot remove fallback theme `{}`.",
@@ -86,53 +101,48 @@ fn handle_remove(theme: &str, ctx: &IrisContext) -> anyhow::Result<()> {
         );
     }
 
-    fs::remove_file(&path).map_err(|e| {
-        if e.kind() == std::io::ErrorKind::NotFound {
-            anyhow::anyhow!("Theme `{}` not found in cache.", theme.yellow())
-        } else {
-            anyhow::Error::new(e).context("Failed to delete theme file")
-        }
-    })?;
+    if !path.exists() {
+        anyhow::bail!("Theme not found in cache");
+    }
 
-    let mut s = ctx
-        .log
-        .step(&format!("Removing {} from cache", theme.yellow()), 1);
-    s.done(true);
-
-    println!(
-        "\n {}  Theme `{}` has been purged.",
-        "󰆴".red().bold(),
-        utils::capitalize(theme).cyan()
-    );
+    println!();
+    ctx.log.action(
+        &format!("Removed `{}` from cache", utils::capitalize(theme).yellow()),
+        || fs::remove_file(&path).context("Failed to delete theme file"),
+    )?;
     Ok(())
 }
 
 /// List of cached palettes
-fn render_list(ctx: &IrisContext) -> anyhow::Result<()> {
+fn render_list(ctx: &IrisContext) -> Result<()> {
     println!("\n{}  {}\n", "󰋽".cyan().bold(), "Cached Palettes:".bold());
+    let themes: Vec<String> = ctx.paths.get_cached_themes()?;
 
-    for entry in fs::read_dir(&ctx.paths.palettes)?.flatten() {
-        let name = entry.file_name().to_string_lossy().replace(".json", "");
-        let size = entry.metadata()?.len();
+    for name in themes {
+        let file_path: PathBuf = ctx.paths.palettes.join(format!("{}.json", name));
+        let size: u64 = fs::metadata(&file_path)?.len();
+        let display_name: String = utils::capitalize(&name);
 
         let mut line = format!(
             "  • {:<15} {:>8}",
-            utils::capitalize(&name),
+            display_name,
             utils::format_size(size).dimmed()
         );
 
         if name == ctx.state.current_theme {
-            line.push_str(&format!(" {}", "󰄬 (active)".green()));
+            line.push_str(&format!(" {}", "󰄬  (active)".green()));
         } else if name == ctx.state.fallback_theme {
-            line.push_str(&format!(" {}", "󰁯 (fallback)".blue()));
+            line.push_str(&format!(" {}", "󰁯  (fallback)".blue()));
         }
+
         println!("{}", line);
     }
+
     Ok(())
 }
 
 /// Handling cache info (status)
-fn render_info(ctx: &IrisContext) -> anyhow::Result<()> {
+fn render_info(ctx: &IrisContext) -> Result<()> {
     println!(
         "\n{}  {}",
         "󰋽".cyan().bold(),

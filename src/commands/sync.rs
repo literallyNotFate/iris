@@ -1,10 +1,10 @@
-use crate::{commands::apply_theme, core::IrisContext};
-use colored::Colorize;
+use crate::{commands::apply_theme, core::IrisContext, models::Palette};
 
 /// Handle application sync command
 pub fn exec(force: bool, ctx: &mut IrisContext) -> anyhow::Result<()> {
+    use colored::*;
     println!(
-        "\n {}  {}",
+        "\n{}  {}",
         "󰓦".cyan().bold(),
         "Synchronizing system state...".bold()
     );
@@ -13,20 +13,17 @@ pub fn exec(force: bool, ctx: &mut IrisContext) -> anyhow::Result<()> {
     let is_dirty: bool = ctx.is_any_config_broken();
 
     if is_synced && !is_dirty && !force {
-        println!();
-        ctx.log.success("Everything is already in sync", 0);
+        ctx.log.success("Everything is already in sync\n");
         return Ok(());
     }
 
-    println!();
-    if is_dirty && is_synced {
-        ctx.log.warn("Found broken configs, restoring...", 0);
-    } else {
-        ctx.log
-            .step(&format!("Syncing theme: {} 󰁯 Neovim", nvim_theme.cyan()), 1);
+    if is_dirty && is_synced && !force {
+        ctx.log.warn("Found broken configs, restoring...\n");
     }
 
-    apply_theme(&nvim_theme, force, ctx)?;
-    ctx.log.success("All apps are now in sync!", 0);
+    let palette = Palette::fetch(&nvim_theme, force, true, &ctx.paths, &ctx.state, &ctx.log)?;
+    apply_theme(&palette, ctx)?;
+
+    ctx.log.success("All apps are now in sync!\n");
     Ok(())
 }

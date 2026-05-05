@@ -10,7 +10,17 @@ pub fn exec(action: ConfigAction, ctx: &mut IrisContext) -> anyhow::Result<()> {
             let selected: NvimStrategy = NvimStrategy::choose(strategy, detect, &ctx.log)?;
             selected.validate()?;
 
-            render_nvim_status(&selected);
+            let count = selected.count_plugins();
+            if count > 0 {
+                println!(
+                    "{} found {} {} {}",
+                    "└──".dimmed(),
+                    selected,
+                    format!("({} plugins)", count).dimmed(),
+                    "✓".green()
+                );
+            }
+
             ctx.state.nvim = selected;
         }
 
@@ -19,11 +29,16 @@ pub fn exec(action: ConfigAction, ctx: &mut IrisContext) -> anyhow::Result<()> {
             let theme: String = name.to_lowercase();
             ctx.validate_theme_exists(&theme)?;
 
+            ctx.log.info(&format!(
+                "Selecting {} as a fallback...",
+                theme.to_string().magenta().bold()
+            ));
+
             println!(
-                "\n{}  {} set to {}",
-                "󰁯".bright_magenta().bold(),
-                "Fallback theme".bold(),
-                theme.cyan().bold()
+                "{} {} applied! {}",
+                "└──".dimmed(),
+                theme.magenta().bold(),
+                "✓".green()
             );
 
             ctx.state.fallback_theme = theme;
@@ -31,31 +46,16 @@ pub fn exec(action: ConfigAction, ctx: &mut IrisContext) -> anyhow::Result<()> {
     }
 
     println!();
-    let mut s = ctx.log.step("Updating state.json", 1);
-    ctx.state.save_to(&ctx.paths.state_file)?;
-    s.done(true);
 
-    println!(
-        "\n{}  Configuration updated successfully.",
-        "✔".green().bold()
-    );
+    ctx.log.action("Saved configuration to state.json\n", || {
+        ctx.state.save_to(&ctx.paths.state_file)
+    })?;
 
+    println!();
     Ok(())
 }
 
 /// Helper function to render header for config
 fn render_config_header(title: &str, icon: &str) {
-    println!("\n{}  {}", icon.bright_yellow().bold(), title.bold());
-}
-
-/// Helper function to render nvim status w/strategy
-fn render_nvim_status(strategy: &NvimStrategy) {
-    let count = strategy.count_plugins();
-    if count > 0 {
-        println!(
-            "      {}  Status: {} plugins found",
-            "󰄬".green().bold(),
-            count.to_string().cyan().bold()
-        );
-    }
+    println!("\n{}  {}\n", icon.bright_yellow().bold(), title.bold());
 }

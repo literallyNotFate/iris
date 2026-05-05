@@ -1,4 +1,4 @@
-use crate::{commands::apply_theme, core::IrisContext, utils};
+use crate::{commands::apply_theme, core::IrisContext, models::Palette, utils};
 use colored::Colorize;
 use notify_debouncer_mini::{new_debouncer, notify::*};
 use std::{
@@ -28,13 +28,17 @@ pub fn exec(interval_ms: u64, ctx: &mut IrisContext) -> anyhow::Result<()> {
 
     loop {
         if exit_rx.try_recv().is_ok() {
-            println!("\n {} {}", "󰈆".yellow().bold(), "Watcher stopped.".yellow());
+            println!(
+                "\n {}  {}\n",
+                "󰈆".yellow().bold(),
+                "Watcher stopped.".yellow()
+            );
             break;
         }
 
         match rx.recv_timeout(Duration::from_millis(200)) {
             Ok(Ok(_)) => handle_change(&cache_path, ctx)?,
-            Ok(Err(e)) => eprintln!(" {} Watcher error: {:?}", "󰅙".red(), e),
+            Ok(Err(e)) => eprintln!(" {}  Watcher error: {:?}", "󰅙".red(), e),
             Err(RecvTimeoutError::Timeout) => continue,
             Err(RecvTimeoutError::Disconnected) => anyhow::bail!("Watcher disconnected"),
         }
@@ -61,15 +65,16 @@ fn handle_change(path: &PathBuf, ctx: &mut IrisContext) -> anyhow::Result<()> {
     );
 
     let start = Instant::now();
-    apply_theme(&theme, false, ctx)?;
+    let palette: Palette = Palette::fetch(&theme, false, true, &ctx.paths, &ctx.state, &ctx.log)?;
 
+    apply_theme(&palette, ctx)?;
     render_watch_ui(path);
 
     println!(
         " {}  {} {} {} {}",
         "󰄬".green().bold(),
         "Theme".green(),
-        theme.cyan().bold(),
+        utils::capitalize(&palette.name).cyan().bold(),
         "applied in".green(),
         format!("{:.2?}", start.elapsed()).white().bold()
     );
@@ -79,12 +84,12 @@ fn handle_change(path: &PathBuf, ctx: &mut IrisContext) -> anyhow::Result<()> {
 
 fn render_watch_ui(path: &PathBuf) {
     print!("\x1B[2J\x1B[1;1H");
-    println!(" {} {}", "󰈈".blue().bold(), "Iris Watch Mode".bold());
+    println!("\n\n {}  {}", "󰈈".blue().bold(), "Iris Watch Mode".bold());
     println!(
-        " {} Watching: {}",
+        " {}  Watching: {}",
         "󰈚".dimmed(),
         utils::pretty_path(path).dimmed()
     );
-    println!(" {} {}", "󰜺".red(), "Press Ctrl+C to exit".dimmed());
+    println!(" {}  {}", "󰜺".red(), "Press Ctrl+C to exit".dimmed());
     println!();
 }

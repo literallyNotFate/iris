@@ -1,8 +1,8 @@
 use crate::{
     core::{IrisPaths, Templater},
+    log::Task,
     models::{HealthStatus, Palette},
     modules::{Generator, GeneratorType},
-    ui::Logger,
     utils::{self},
 };
 use anyhow::{Context, Result};
@@ -43,16 +43,16 @@ impl Generator for FzfGenerator {
         p: &Palette,
         paths: &IrisPaths,
         templater: &Templater,
-        log: &Logger,
+        task: &mut Task,
     ) -> Result<()> {
-        log.info(&format!(
+        task.info(&format!(
             "Generating {} script in: {}",
             self.name().bold().cyan(),
             utils::pretty_path(&self.cache_path(paths, "")).magenta()
         ));
         self.ensure_cache_file(p, paths, templater)?;
 
-        log.info(&format!(
+        task.info(&format!(
             "{} theme applied to {}",
             utils::capitalize(&p.name).yellow(),
             self.name().bold().cyan()
@@ -116,37 +116,33 @@ impl Generator for FzfGenerator {
         p: &Palette,
         paths: &IrisPaths,
         templater: &Templater,
-        log: &Logger,
+        task: &mut Task,
     ) -> Result<()> {
         match status {
             HealthStatus::Error { message, .. } => {
                 if message.contains("missing from cache") {
-                    log.step(&format!("Restoring missing `fzf` theme file..."), 2)
-                        .done(true);
-
-                    return self.apply(p, paths, templater, &Logger::quiet());
+                    return task.log.action("Restored missing theme file", || {
+                        self.apply(p, paths, templater, &mut task.as_quiet())
+                    });
                 }
 
                 if message.contains("not sourced") {
-                    log.step(
-                        &format!("Injecting source line into {}...", ".zshrc".magenta()),
-                        2,
-                    )
-                    .done(true);
-                    self.inject_source_line(paths)?;
+                    return task.log.action(
+                        &format!("Injected source line into {}", ".zshrc".magenta()),
+                        || self.inject_source_line(paths),
+                    );
                 }
 
-                self.apply(p, paths, templater, &Logger::quiet())
+                task.log.action(
+                    &format!("Re-applied `{}` configuration", self.name().bold()),
+                    || self.apply(p, paths, templater, &mut task.as_quiet()),
+                )
             }
 
-            _ => {
-                log.step(
-                    &format!("Re-applying `{}` configuration...", self.name().bold()),
-                    2,
-                )
-                .done(true);
-                self.apply(p, paths, templater, &Logger::quiet())
-            }
+            _ => task.log.action(
+                &format!("Re-applied `{}` configuration", self.name().bold()),
+                || self.apply(p, paths, templater, &mut task.as_quiet()),
+            ),
         }
     }
 }
@@ -229,8 +225,9 @@ mod tests {
         let generator = FzfGenerator;
         let p = Palette::mock();
 
+        let mut task = ctx.log.step("Test", true).as_quiet();
         generator
-            .apply(&p, &ctx.paths, &ctx.templater, &ctx.log)
+            .apply(&p, &ctx.paths, &ctx.templater, &mut task)
             .unwrap();
 
         let zshrc_path = generator.link_path(&ctx.paths, "");
@@ -310,7 +307,8 @@ mod tests {
         let generator = FzfGenerator;
         let p = Palette::mock();
 
-        let result = generator.apply(&p, &ctx.paths, &ctx.templater, &ctx.log);
+        let mut task = ctx.log.step("Test", false).as_quiet();
+        let result = generator.apply(&p, &ctx.paths, &ctx.templater, &mut task);
         assert!(
             result.is_ok(),
             "Apply should be successful, but got: {:?}",
@@ -335,8 +333,9 @@ mod tests {
         let zshrc = root.join(".zshrc");
         fs::write(&zshrc, "# Initial zshrc\n").unwrap();
 
+        let mut task = ctx.log.step("Test", false).as_quiet();
         generator
-            .apply(&p, &ctx.paths, &ctx.templater, &ctx.log)
+            .apply(&p, &ctx.paths, &ctx.templater, &mut task)
             .unwrap();
         let status = generator.health_check(&ctx.paths, &p.name);
         assert!(
@@ -346,7 +345,7 @@ mod tests {
         );
 
         generator
-            .fix(&status, &p, &ctx.paths, &ctx.templater, &ctx.log)
+            .fix(&status, &p, &ctx.paths, &ctx.templater, &mut task)
             .expect("Fix failed");
         let updated_content = fs::read_to_string(&zshrc).unwrap();
         let cache_file = generator.cache_path(&ctx.paths, &p.name);
@@ -382,8 +381,9 @@ mod tests {
             fix_hint: None,
         };
 
+        let mut task = ctx.log.step("Test", false).as_quiet();
         generator
-            .fix(&status, &p, &ctx.paths, &ctx.templater, &ctx.log)
+            .fix(&status, &p, &ctx.paths, &ctx.templater, &mut task)
             .expect("Fix failed");
         assert!(cache_file.exists(), "Cache file should be recreated");
 

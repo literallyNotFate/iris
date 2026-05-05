@@ -1,4 +1,4 @@
-use crate::{ui::Logger, utils};
+use crate::{log::Reporter, utils};
 use colored::*;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -235,19 +235,25 @@ impl NvimStrategy {
     }
 
     /// Chooses, which strategy to use based on CLI arguments
-    pub fn choose(strategy: Option<Self>, detect: bool, log: &Logger) -> anyhow::Result<Self> {
+    pub fn choose(strategy: Option<Self>, detect: bool, log: &Reporter) -> anyhow::Result<Self> {
         if detect {
-            println!();
-            let mut d = log.step("Scanning environment", 1);
-            let res = Self::detect_strategy();
-            d.done(true);
+            let res = log.action("Auto-detected environment strategy", || {
+                Ok::<Self, anyhow::Error>(Self::detect_strategy())
+            })?;
 
-            println!("      {}  Auto-detected: {}", "󰛔".cyan().bold(), res);
+            log.success(&format!(
+                "Active strategy: {}",
+                res.to_string().cyan().bold()
+            ));
+
             return Ok(res);
         }
 
         if let Some(s) = strategy {
-            println!("\n  {}  Manual selection: {}", "󰁕".yellow().bold(), s);
+            log.info(&format!(
+                "Manual selection: {}",
+                s.to_string().yellow().bold()
+            ));
             return Ok(s);
         }
 

@@ -3,7 +3,7 @@ use colored::Colorize;
 
 /// Helper function to render header for generators
 pub(super) fn render_header(title: &str, icon: &str) {
-    println!("\n {}  {}\n", icon.green().bold(), title.bold());
+    println!("\n{}  {}\n", icon.green().bold(), title.bold());
 }
 
 /// Helper function to render list header for generators list
@@ -14,7 +14,7 @@ pub(super) fn render_list_header(is_filtered: bool) {
         "".into()
     };
     println!(
-        "\n {}  {} {}",
+        "{}  {} {}",
         "󰒓".yellow().bold(),
         "Registry of Generators".bold(),
         suffix
@@ -75,7 +75,7 @@ pub(super) fn render_list_footer(total: usize, enabled: usize, no_filter: bool) 
         " ──────────────────────────────────────────────────────────".dimmed()
     );
     println!(
-        " {} {} {} {} {} {}",
+        " {} {} {} {} {} {}\n",
         "󰛵".blue(),
         "Showing:".dimmed(),
         total.to_string().bold().cyan(),

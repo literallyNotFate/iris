@@ -1,8 +1,8 @@
 use crate::{
     core::{IrisPaths, Templater},
+    log::Task,
     models::{HealthStatus, Palette},
     modules::{Generator, GeneratorType},
-    ui::Logger,
     utils::{self},
 };
 use anyhow::{Context, Result};
@@ -45,9 +45,9 @@ impl Generator for AlacrittyGenerator {
         p: &Palette,
         paths: &IrisPaths,
         templater: &Templater,
-        log: &Logger,
+        task: &mut Task,
     ) -> Result<()> {
-        log.info(&format!(
+        task.info(&format!(
             "Generating {} theme for {}",
             utils::capitalize(&p.name).yellow(),
             self.name().bold().cyan(),
@@ -56,14 +56,14 @@ impl Generator for AlacrittyGenerator {
         let cache_file: PathBuf = self.ensure_cache_file(p, paths, templater)?;
         let link_path: PathBuf = self.link_path(paths, &p.name);
 
-        log.info(&format!(
+        task.info(&format!(
             "Linking {} theme to {}...",
             self.name().bold(),
             utils::pretty_path(&link_path).magenta(),
         ));
         self.ensure_symlink(&cache_file, &link_path)?;
 
-        log.info(&format!(
+        task.info(&format!(
             "{} theme applied to {}",
             utils::capitalize(&p.name).yellow(),
             self.name().bold().cyan()
@@ -137,52 +137,47 @@ impl Generator for AlacrittyGenerator {
         p: &Palette,
         paths: &IrisPaths,
         templater: &Templater,
-        log: &Logger,
+        task: &mut Task,
     ) -> Result<()> {
         match status {
             HealthStatus::Error { message, .. } => {
                 let message_low = message.to_lowercase();
-                if message_low.contains("link missing") {
-                    log.step("Restoring `alacritty` theme symlink...", 2)
-                        .done(true);
 
-                    let cache = self.cache_path(paths, "");
-                    let link = self.link_path(paths, "");
-                    self.ensure_symlink(&cache, &link)?;
+                if message_low.contains("link missing") {
+                    task.log.action("Restored `alacritty` theme symlink", || {
+                        let cache = self.cache_path(paths, "");
+                        let link = self.link_path(paths, "");
+                        self.ensure_symlink(&cache, &link)
+                    })?;
                 }
 
                 if message_low.contains("import") {
-                    log.step("Injecting theme import into alacritty.toml...", 2)
-                        .done(true);
-
-                    self.inject_import_line(paths)?;
+                    task.log
+                        .action("Injected theme import into alacritty.toml", || {
+                            self.inject_import_line(paths)
+                        })?;
                 }
 
-                self.apply(p, paths, templater, &Logger::quiet())
+                self.apply(p, paths, templater, &mut task.as_quiet())
             }
 
             HealthStatus::Warning(msg) => {
                 let msg_low = msg.to_lowercase();
 
                 if msg_low.contains("unexpected") || msg_low.contains("old") {
-                    log.step("Updating `alacritty` symlink target...", 2)
-                        .done(true);
+                    task.log.action("Updated `alacritty` symlink target", || {
+                        self.apply(p, paths, templater, &mut task.as_quiet())
+                    })
                 } else {
-                    log.step(&format!("Fixing `alacritty` warning: {}...", msg), 2)
-                        .done(true);
+                    task.info(&format!("Fixing `alacritty` warning: {}", msg));
+                    self.apply(p, paths, templater, &mut task.as_quiet())
                 }
-
-                self.apply(p, paths, templater, &Logger::quiet())
             }
 
-            _ => {
-                log.step(
-                    &format!("Re-applying `{}` configuration...", self.name().bold()),
-                    2,
-                )
-                .done(true);
-                self.apply(p, paths, templater, &Logger::quiet())
-            }
+            _ => task.log.action(
+                &format!("Re-applied `{}` configuration", self.name().bold()),
+                || self.apply(p, paths, templater, &mut task.as_quiet()),
+            ),
         }
     }
 }
@@ -339,9 +334,10 @@ mod tests {
         let generator = AlacrittyGenerator;
         let p = Palette::mock();
 
+        let mut task = ctx.log.step("Test", false).as_quiet();
         ctx.state.current_theme = p.name.clone();
         generator
-            .apply(&p, &ctx.paths, &ctx.templater, &ctx.log)
+            .apply(&p, &ctx.paths, &ctx.templater, &mut task)
             .unwrap();
 
         let alacritty_dir = generator.resolve_config_directory(&ctx.paths);
@@ -362,9 +358,10 @@ mod tests {
         let generator = AlacrittyGenerator;
         let p = Palette::mock();
 
+        let mut task = ctx.log.step("Test", false).as_quiet();
         ctx.state.current_theme = p.name.clone();
         generator
-            .apply(&p, &ctx.paths, &ctx.templater, &ctx.log)
+            .apply(&p, &ctx.paths, &ctx.templater, &mut task)
             .unwrap();
 
         let main_config = generator
@@ -387,9 +384,10 @@ mod tests {
         let generator = AlacrittyGenerator;
         let p = Palette::mock();
 
+        let mut task = ctx.log.step("Test", false).as_quiet();
         ctx.state.current_theme = p.name.clone();
         generator
-            .apply(&p, &ctx.paths, &ctx.templater, &ctx.log)
+            .apply(&p, &ctx.paths, &ctx.templater, &mut task)
             .unwrap();
 
         let main_config = generator
@@ -409,7 +407,8 @@ mod tests {
         let generator = AlacrittyGenerator;
         let p = Palette::mock();
 
-        let result = generator.apply(&p, &ctx.paths, &ctx.templater, &ctx.log);
+        let mut task = ctx.log.step("Test", false).as_quiet();
+        let result = generator.apply(&p, &ctx.paths, &ctx.templater, &mut task);
         assert!(result.is_ok(), "Apply failed: {:?}", result.err());
 
         let cache_file = ctx
@@ -443,8 +442,9 @@ mod tests {
         fs::create_dir_all(&alacritty_dir).unwrap();
         let config_path = alacritty_dir.join("alacritty.toml");
 
+        let mut task = ctx.log.step("Test", false).as_quiet();
         generator
-            .apply(&p, &ctx.paths, &ctx.templater, &ctx.log)
+            .apply(&p, &ctx.paths, &ctx.templater, &mut task)
             .unwrap();
         fs::write(&config_path, "[window]\ndecorations = \"none\"").unwrap();
 
@@ -457,7 +457,7 @@ mod tests {
         }
 
         generator
-            .fix(&status, &p, &ctx.paths, &ctx.templater, &ctx.log)
+            .fix(&status, &p, &ctx.paths, &ctx.templater, &mut task)
             .expect("Fix failed");
 
         let content = fs::read_to_string(&config_path).unwrap();
@@ -490,8 +490,9 @@ mod tests {
         )
         .unwrap();
 
+        let mut task = ctx.log.step("Test", false).as_quiet();
         generator
-            .apply(&p, &ctx.paths, &ctx.templater, &ctx.log)
+            .apply(&p, &ctx.paths, &ctx.templater, &mut task)
             .unwrap();
 
         let link_path = generator.link_path(&ctx.paths, "");
@@ -507,7 +508,7 @@ mod tests {
         );
 
         generator
-            .fix(&status, &p, &ctx.paths, &ctx.templater, &ctx.log)
+            .fix(&status, &p, &ctx.paths, &ctx.templater, &mut task)
             .expect("Fix failed");
 
         let final_status = generator.health_check(&ctx.paths, &p.name);

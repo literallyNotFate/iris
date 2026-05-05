@@ -58,6 +58,7 @@ pub fn exec(ctx: &IrisContext) -> anyhow::Result<()> {
         "iris preview".cyan().bold()
     );
 
+    println!();
     Ok(())
 }
 

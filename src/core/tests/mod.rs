@@ -1,8 +1,8 @@
 use crate::{
     core::{IrisContext, IrisPaths, Templater},
+    log::Reporter,
     models::State,
     modules::GeneratorRegistry,
-    ui::Logger,
 };
 use std::fs;
 use tempdir::TempDir;
@@ -36,7 +36,7 @@ pub fn create_test_context() -> (TempDir, IrisContext) {
         paths,
         state: State::default(),
         registry: GeneratorRegistry::default(),
-        log: Logger::quiet(),
+        log: Reporter::quiet(),
         templater: Templater::new(Some(user_templates_path)),
     };
 

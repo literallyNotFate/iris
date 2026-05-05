@@ -1,9 +1,9 @@
 use super::rules::RULES;
 use crate::{
     core::{IrisPaths, Templater},
+    log::Task,
     models::{HealthStatus, Palette},
     modules::{Generator, GeneratorType},
-    ui::Logger,
     utils::{self},
 };
 use anyhow::{Context, Result};
@@ -45,9 +45,9 @@ impl Generator for BatGenerator {
         p: &Palette,
         paths: &IrisPaths,
         templater: &Templater,
-        log: &Logger,
+        task: &mut Task,
     ) -> Result<()> {
-        log.info(&format!(
+        task.info(&format!(
             "Generating {} theme for {}...",
             utils::capitalize(&p.name).yellow(),
             self.name().bold().cyan()
@@ -56,7 +56,7 @@ impl Generator for BatGenerator {
         let cache_theme: PathBuf = self.ensure_theme_cache(p, paths, templater)?;
         let link_path: PathBuf = self.link_path(paths, &p.name);
 
-        log.info(&format!(
+        task.info(&format!(
             "Linking {} theme to {}...",
             self.name().bold(),
             utils::pretty_path(&link_path).magenta(),
@@ -64,9 +64,9 @@ impl Generator for BatGenerator {
         self.ensure_symlink(&cache_theme, &link_path)?;
 
         self.ensure_config(p, paths)?;
-        self.rebuild_bat_cache(log)?;
+        self.rebuild_bat_cache(task)?;
 
-        log.info(&format!(
+        task.info(&format!(
             "{} theme applied to {}",
             utils::capitalize(&p.name).yellow(),
             self.name().bold().cyan()
@@ -162,28 +162,41 @@ impl Generator for BatGenerator {
         p: &Palette,
         paths: &IrisPaths,
         templater: &Templater,
-        log: &Logger,
+        task: &mut Task,
     ) -> Result<()> {
         match status {
             HealthStatus::Error { message, .. } => {
-                if message.contains("missing") || message.contains("not linked") {
-                    log.step("Restoring missing symlink...", 2).done(true);
+                let msg_low: String = message.to_lowercase();
 
-                    let cache = self.cache_path(paths, &p.name);
-                    let link = self.link_path(paths, &p.name);
-                    self.ensure_symlink(&cache, &link)?;
+                if msg_low.contains("missing") || msg_low.contains("not linked") {
+                    let result = task.log.action(
+                        &format!("Repaired `{}` theme and configuration", self.name().bold()),
+                        || {
+                            self.ensure_theme_cache(p, paths, templater)?;
+                            self.ensure_config(p, paths)?;
+                            let cache = self.cache_path(paths, &p.name);
+                            let link = self.link_path(paths, &p.name);
+                            self.ensure_symlink(&cache, &link)
+                        },
+                    );
+
+                    if result.is_ok() {
+                        self.rebuild_bat_cache(&mut task.as_quiet())?;
+                    }
+
+                    return result;
                 }
 
-                self.apply(p, paths, templater, &Logger::quiet())
-            }
-            _ => {
-                log.step(
-                    &format!("Re-applying `{}` configuration...", self.name().bold()),
-                    2,
+                task.log.action(
+                    &format!("Re-applied `{}` configuration", self.name().bold()),
+                    || self.apply(p, paths, templater, &mut task.as_quiet()),
                 )
-                .done(true);
-                self.apply(p, paths, templater, &Logger::quiet())
             }
+
+            _ => task.log.action(
+                &format!("Re-applied `{}` configuration", self.name().bold()),
+                || self.apply(p, paths, templater, &mut task.as_quiet()),
+            ),
         }
     }
 }
@@ -265,8 +278,8 @@ impl BatGenerator {
         Ok(())
     }
 
-    fn rebuild_bat_cache(&self, log: &Logger) -> Result<()> {
-        log.info("Rebuilding `bat` cache...");
+    fn rebuild_bat_cache(&self, task: &mut Task) -> Result<()> {
+        let task = task.log.step("Rebuilding `bat` cache...", false);
         let output = Command::new("bat")
             .arg("cache")
             .arg("--build")
@@ -278,6 +291,7 @@ impl BatGenerator {
             anyhow::bail!("`bat` cache rebuild failed: {}", err.trim());
         }
 
+        task.done_with("Cache rebuilt!");
         Ok(())
     }
 }
@@ -323,9 +337,10 @@ mod tests {
         let generator = BatGenerator;
         let p = Palette::mock();
 
+        let mut task = ctx.log.step("Test", false).as_quiet();
         ctx.state.current_theme = p.name.clone();
         generator
-            .apply(&p, &ctx.paths, &ctx.templater, &ctx.log)
+            .apply(&p, &ctx.paths, &ctx.templater, &mut task)
             .unwrap();
         let expected_config = ctx.paths.generators.join(generator.name()).join("bat.conf");
 
@@ -360,7 +375,8 @@ mod tests {
         let expected_file_name: String = generator.target_file_name(&p.name);
         let expected_theme_name: String = utils::capitalize(&p.name);
 
-        let result = generator.apply(&p, &ctx.paths, &ctx.templater, &ctx.log);
+        let mut task = ctx.log.step("Test", false).as_quiet();
+        let result = generator.apply(&p, &ctx.paths, &ctx.templater, &mut task);
         assert!(result.is_ok(), "Apply failed: {:?}", result.err());
 
         let cache_theme_path: PathBuf = ctx.paths.generators.join("bat").join(&expected_file_name);
@@ -391,8 +407,9 @@ mod tests {
         let generator = BatGenerator;
         let p = Palette::mock();
 
+        let mut task = ctx.log.step("Test", false).as_quiet();
         generator
-            .apply(&p, &ctx.paths, &ctx.templater, &ctx.log)
+            .apply(&p, &ctx.paths, &ctx.templater, &mut task)
             .unwrap();
         let link = generator.link_path(&ctx.paths, &p.name);
         fs::remove_file(&link).unwrap();
@@ -401,7 +418,7 @@ mod tests {
         assert!(matches!(status, HealthStatus::Error { .. }));
 
         generator
-            .fix(&status, &p, &ctx.paths, &ctx.templater, &ctx.log)
+            .fix(&status, &p, &ctx.paths, &ctx.templater, &mut task)
             .expect("Fix failed");
         assert!(link.exists());
     }

@@ -1,8 +1,8 @@
 use crate::{
     core::{IrisPaths, Templater},
+    log::Task,
     models::{HealthStatus, Palette},
     modules::{Generator, GeneratorType},
-    ui::Logger,
     utils,
 };
 use anyhow::{Context, Result};
@@ -46,9 +46,9 @@ impl Generator for StarshipGenerator {
         p: &Palette,
         paths: &IrisPaths,
         templater: &Templater,
-        log: &Logger,
+        task: &mut Task,
     ) -> Result<()> {
-        log.info(&format!(
+        task.info(&format!(
             "Writing {} theme to {}",
             utils::capitalize(&p.name).yellow(),
             self.name().bold().cyan(),
@@ -57,7 +57,7 @@ impl Generator for StarshipGenerator {
 
         self.update_config_file(&config_path, p, templater)?;
 
-        log.info(&format!(
+        task.info(&format!(
             "{} theme applied to {}",
             utils::capitalize(&p.name).yellow(),
             self.name().bold().cyan()
@@ -122,18 +122,14 @@ impl Generator for StarshipGenerator {
         p: &Palette,
         paths: &IrisPaths,
         templater: &Templater,
-        log: &Logger,
+        task: &mut Task,
     ) -> Result<()> {
         match status {
-            HealthStatus::Error { .. } | HealthStatus::Warning(_) => {
-                log.step(
-                    &format!("Re-applying `{}` configuration...", self.name().bold()),
-                    2,
-                )
-                .done(true);
+            HealthStatus::Error { .. } | HealthStatus::Warning(_) => task.log.action(
+                &format!("Re-applied `{}` configuration", self.name().bold()),
+                || self.apply(p, paths, templater, &mut task.as_quiet()),
+            ),
 
-                self.apply(p, paths, templater, &Logger::quiet())
-            }
             _ => Ok(()),
         }
     }
@@ -252,8 +248,9 @@ mod tests {
         fs::write(&config_path, initial_content).unwrap();
 
         temp_env::with_var("STARSHIP_CONFIG", Some(&config_path), || {
+            let mut task = ctx.log.step("Test", false).as_quiet();
             generator
-                .apply(&p, &ctx.paths, &ctx.templater, &ctx.log)
+                .apply(&p, &ctx.paths, &ctx.templater, &mut task)
                 .expect("Failed to apply");
             let result = fs::read_to_string(&config_path).unwrap();
 
@@ -280,8 +277,9 @@ mod tests {
 
         temp_env::with_var("STARSHIP_CONFIG", Some(&config_path), || {
             ctx.state.current_theme = p.name.clone();
+            let mut task = ctx.log.step("Test", false).as_quiet();
             generator
-                .apply(&p, &ctx.paths, &ctx.templater, &ctx.log)
+                .apply(&p, &ctx.paths, &ctx.templater, &mut task)
                 .unwrap();
 
             let status = generator.health_check(&ctx.paths, &p.name);
@@ -302,9 +300,10 @@ mod tests {
         let config_path = root.join("starship.toml");
 
         temp_env::with_var("STARSHIP_CONFIG", Some(&config_path), || {
+            let mut task = ctx.log.step("Test", false).as_quiet();
             ctx.state.current_theme = p.name.clone();
             generator
-                .apply(&p, &ctx.paths, &ctx.templater, &ctx.log)
+                .apply(&p, &ctx.paths, &ctx.templater, &mut task)
                 .unwrap();
 
             let content = fs::read_to_string(&config_path).unwrap();
@@ -330,9 +329,10 @@ mod tests {
         let config_path = root.join("starship.toml");
 
         temp_env::with_var("STARSHIP_CONFIG", Some(&config_path), || {
+            let mut task = ctx.log.step("Test", false).as_quiet();
             ctx.state.current_theme = p.name.clone();
             generator
-                .apply(&p, &ctx.paths, &ctx.templater, &ctx.log)
+                .apply(&p, &ctx.paths, &ctx.templater, &mut task)
                 .unwrap();
 
             let content = fs::read_to_string(&config_path).unwrap();
@@ -366,7 +366,8 @@ mod tests {
         temp_env::with_var("STARSHIP_CONFIG", Some(&config_path), || {
             fs::write(&config_path, "[directory]\nstyle = \"blue\"\n").unwrap();
 
-            let result = generator.apply(&p, &ctx.paths, &ctx.templater, &ctx.log);
+            let mut task = ctx.log.step("Test", false).as_quiet();
+            let result = generator.apply(&p, &ctx.paths, &ctx.templater, &mut task);
             assert!(result.is_ok());
 
             let final_content = fs::read_to_string(&config_path).unwrap();
