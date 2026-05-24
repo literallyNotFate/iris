@@ -28,6 +28,17 @@ impl Generator for StarshipGenerator {
         "starship.toml".into()
     }
 
+    fn resolve_config_directory(&self, paths: &IrisPaths) -> PathBuf {
+        paths.config.clone()
+    }
+
+    fn cache_path(&self, paths: &IrisPaths, theme: &str) -> PathBuf {
+        paths
+            .generators
+            .join(self.name())
+            .join(format!("{}_block.toml", theme))
+    }
+
     fn link_path(&self, paths: &IrisPaths, _theme: &str) -> PathBuf {
         if let Some(env_path) = self.env_config_directory() {
             return env_path;
@@ -48,18 +59,34 @@ impl Generator for StarshipGenerator {
         templater: &Templater,
         task: &mut Task,
     ) -> Result<()> {
-        task.info(&format!(
-            "Writing {} theme to {}",
-            utils::capitalize(&p.name).yellow(),
-            self.name().bold().cyan(),
-        ));
-        let config_path: PathBuf = self.link_path(paths, &p.name);
+        let theme_name: String = p.name.to_lowercase();
 
-        self.update_config_file(&config_path, p, templater)?;
+        task.info(&format!(
+            "Generating {} theme for {}...",
+            utils::capitalize(&theme_name).yellow(),
+            self.name().bold().cyan()
+        ));
+
+        let cache_file: PathBuf = self.cache_path(paths, &theme_name);
+        let link_path: PathBuf = self.link_path(paths, &theme_name);
+
+        let render_ctx = self.build_render_context(p);
+        let palette_block: String = templater
+            .render(&self.template_path(), &render_ctx)
+            .context("Failed to render starship palette block")?;
+
+        if let Some(parent) = cache_file.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        fs::write(&cache_file, &palette_block).with_context(|| {
+            format!("Failed to write palette cache to {}", cache_file.display())
+        })?;
+
+        self.update_config_file(&link_path, &link_path, p, &palette_block)?;
 
         task.info(&format!(
             "{} theme applied to {}",
-            utils::capitalize(&p.name).yellow(),
+            utils::capitalize(&theme_name).yellow(),
             self.name().bold().cyan()
         ));
         Ok(())
@@ -131,28 +158,61 @@ impl Generator for StarshipGenerator {
             ),
 
             _ => Ok(()),
+    fn clear(&self, paths: &IrisPaths) -> Result<()> {
+        let name: &str = self.name();
+        let config_path: PathBuf = self.link_path(paths, "");
+        self.remove_palette_block(&config_path)
+            .context("Failed to clean up starship.toml during clear")?;
+
+        let gen_cache_dir: PathBuf = paths.generators.join(name);
+        if gen_cache_dir.exists() {
+            fs::remove_dir_all(&gen_cache_dir).with_context(|| {
+                format!(
+                    "Failed to remove generator directory for {}: {}",
+                    name,
+                    utils::pretty_path(&gen_cache_dir)
+                )
+            })?;
         }
+
+        Ok(())
+    }
+
+    fn remove_theme(&self, paths: &IrisPaths, theme_name: &str) -> Result<()> {
+        let theme_name_lower: String = theme_name.to_lowercase();
+        let config_path: PathBuf = self.link_path(paths, "");
+
+        if config_path.exists() {
+            let content = fs::read_to_string(&config_path)?;
+            let active_palette_line = format!("palette = \"{}\"", theme_name_lower);
+
+            if content.contains(&active_palette_line) {
+                self.remove_palette_block(&config_path)
+                    .context("Failed to remove active palette from starship.toml")?;
+            }
+        }
+
+        let theme_cache_file: PathBuf = self.cache_path(paths, &theme_name_lower);
+        if theme_cache_file.exists() {
+            fs::remove_file(&theme_cache_file).with_context(|| {
+                format!(
+                    "Failed to remove theme cache: {}",
+                    theme_cache_file.display()
+                )
+            })?;
+        }
+        Ok(())
     }
 }
 
 impl StarshipGenerator {
-    fn update_config_file(&self, path: &Path, p: &Palette, templater: &Templater) -> Result<()> {
-        let render_ctx = self.build_render_context(p);
-        let new_palette_block: String = templater.render(&self.template_path(), &render_ctx)?;
-
-        let content = if path.exists() {
-            fs::read_to_string(path)
-                .with_context(|| format!("Failed to read `starship` config: {}", path.display()))?
-        } else {
-            String::new()
-        };
-
+    fn clean_config_content(&self, content: &str) -> Vec<String> {
         let mut clean_lines: Vec<String> = Vec::new();
         let mut skip_block = false;
 
         for line in content.lines() {
-            let trimmed = line.trim();
-            if trimmed.starts_with("palette =") {
+            let trimmed: &str = line.trim();
+            if trimmed.replace(" ", "").starts_with("palette=") {
                 continue;
             }
 
@@ -160,6 +220,7 @@ impl StarshipGenerator {
                 skip_block = true;
                 continue;
             }
+
             if skip_block && trimmed.starts_with('[') && !trimmed.starts_with("[palettes.") {
                 skip_block = false;
             }
@@ -169,25 +230,66 @@ impl StarshipGenerator {
             }
         }
 
-        let mut final_content = format!(
-            "palette = \"{}\"\n\n{}",
-            p.name,
-            clean_lines.join("\n").trim()
-        );
-        final_content.push_str("\n\n");
-        final_content.push_str(&new_palette_block);
+        clean_lines
+    }
 
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent).with_context(|| {
+    fn update_config_file(
+        &self,
+        target_path: &Path,
+        write_path: &Path,
+        p: &Palette,
+        palette_block: &str,
+    ) -> Result<()> {
+        let content = if target_path.exists() {
+            fs::read_to_string(target_path).with_context(|| {
                 format!(
-                    "Failed to create directory for `starship` config: {}",
-                    parent.display()
+                    "Failed to read `starship` config: {}",
+                    target_path.display()
                 )
-            })?;
+            })?
+        } else {
+            String::new()
+        };
+
+        let clean_lines = self.clean_config_content(&content);
+        let mut final_content = String::new();
+        final_content.push_str(&format!("palette = \"{}\"\n\n", p.name));
+
+        let body = clean_lines.join("\n").trim().to_string();
+        if !body.is_empty() {
+            final_content.push_str(&body);
+            final_content.push_str("\n\n");
         }
 
-        fs::write(path, final_content)
-            .with_context(|| format!("Failed to write `starship` config: {}", path.display()))?;
+        final_content.push_str(palette_block);
+        if let Some(parent) = write_path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+
+        fs::write(write_path, final_content.trim()).with_context(|| {
+            format!(
+                "Failed to write `starship` config: {}",
+                write_path.display()
+            )
+        })?;
+
+        Ok(())
+    }
+
+    pub fn remove_palette_block(&self, target_path: &Path) -> Result<()> {
+        if !target_path.exists() {
+            return Ok(());
+        }
+
+        let content: String = fs::read_to_string(target_path)?;
+        let clean_lines: Vec<String> = self.clean_config_content(&content);
+
+        fs::write(target_path, clean_lines.join("\n").trim()).with_context(|| {
+            format!(
+                "Failed to write cleaned `starship` config: {}",
+                target_path.display()
+            )
+        })?;
 
         Ok(())
     }
