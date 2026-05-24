@@ -119,6 +119,7 @@ impl Palette {
                 .output()
                 .context("Failed to execute `nvim`")
         })?;
+        println!();
 
         if !output.status.success() {
             let error_msg = String::from_utf8_lossy(&output.stderr);
@@ -131,11 +132,13 @@ impl Palette {
         })?;
 
         palette.name = theme.to_string();
+        println!();
 
         if save {
             main_task.log.action("Saved palette to cache", || {
                 Self::save_to_cache(&cache_path, &palette)
             })?;
+            println!();
         }
 
         main_task.done_with(&format!(
