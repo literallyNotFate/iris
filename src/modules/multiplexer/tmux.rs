@@ -101,18 +101,18 @@ impl Generator for TmuxGenerator {
         }
 
         let tmux_conf: PathBuf = self.resolve_tmux_conf_path(paths);
+        let config_status = HealthStatus::check_file(&tmux_conf, "tmux.conf");
 
-        if !tmux_conf.exists() {
-            return HealthStatus::Error {
-                message: "tmux.conf missing".into(),
-                fix_hint: Some("Create ~/.config/tmux/tmux.conf".into()),
-            };
+        if config_status.is_error() {
+            return HealthStatus::error(
+                "tmux.conf missing",
+                Some("Create ~/.config/tmux/tmux.conf"),
+            );
         }
 
         if !theme.is_empty() {
             let content: String = fs::read_to_string(&tmux_conf).unwrap_or_default();
-            let marker = "# iris-theme";
-
+            let marker: &str = "# iris-theme";
             if !content.contains(marker) {
                 return HealthStatus::Warning(format!(
                     "Theme is not sourced in {}. Run `iris sync` or `iris health --fix` to source.",
@@ -120,22 +120,20 @@ impl Generator for TmuxGenerator {
                 ));
             }
 
-            let expected_file = format!("{}.conf", theme);
+            let expected_file: String = format!("{}.conf", theme);
             if !content.contains(&expected_file) {
                 return HealthStatus::Warning(format!(
-                    "tmux.conf sources a different theme, not `{}`",
-                    theme
+                    "tmux.conf sources a different theme, not `{theme}`"
                 ));
             }
 
             let link: PathBuf = self.link_path(paths, theme);
-            if !link.exists() {
-                return HealthStatus::Error {
-                    message: format!("Theme link missing: {}", link.display()),
-                    fix_hint: Some(
-                        "Run `iris sync` or `iris health --fix` to restore symlink".into(),
-                    ),
-                };
+            let link_status = HealthStatus::check_symlink(&link, "Theme link");
+            if link_status.is_error() {
+                return HealthStatus::error(
+                    format!("Theme link missing: {}", link.display()),
+                    Some("Run `iris health --fix` to restore symlink"),
+                );
             }
         }
 
@@ -150,27 +148,39 @@ impl Generator for TmuxGenerator {
         templater: &Templater,
         task: &mut Task,
     ) -> Result<()> {
-        match status {
-            HealthStatus::Error { message, .. } if message.contains("Theme link missing") => {
-                task.log.action("Restored `tmux` theme symlink", || {
-                    self.apply(p, paths, templater, &mut task.as_quiet())
-                })
-            }
-
-            HealthStatus::Warning(msg)
-                if msg.contains("not sourced") || msg.contains("different theme") =>
-            {
-                task.log.action("Repaired tmux.conf source line", || {
-                    let conf_path = self.resolve_tmux_conf_path(paths);
-                    self.update_tmux_conf(&conf_path, &p.name)
-                })
-            }
-
-            _ => task.log.action(
+        if !status.is_error() && !status.is_warning() {
+            return task.log.action(
                 &format!("Re-applied `{}` configuration", self.name().bold()),
                 || self.apply(p, paths, templater, &mut task.as_quiet()),
-            ),
+            );
         }
+
+        let mut fixed = false;
+        if status.contains("not sourced") || status.contains("different theme") {
+            task.log.action("Repaired tmux.conf source line", || {
+                let conf_path: PathBuf = self.resolve_tmux_conf_path(paths);
+                self.update_tmux_conf(&conf_path, &p.name)
+            })?;
+            fixed = true;
+        }
+
+        if status.contains("Theme link missing") {
+            task.log.action("Restored `tmux` theme symlink", || {
+                let cache: PathBuf = self.cache_path(paths, &p.name);
+                let link: PathBuf = self.link_path(paths, &p.name);
+                self.ensure_symlink(&cache, &link)
+            })?;
+            fixed = true;
+        }
+
+        if !fixed {
+            task.log
+                .action("Regenerated complete `tmux` configuration", || {
+                    self.apply(p, paths, templater, &mut task.as_quiet())
+                })?;
+        }
+
+        Ok(())
     }
 }
 
@@ -373,11 +383,7 @@ mod tests {
             .expect("Apply failed");
 
         let status = generator.health_check(&ctx.paths, &p.name);
-        assert!(
-            matches!(status, HealthStatus::Ok),
-            "Expected Ok, got {:?}",
-            status
-        );
+        assert!(status.is_ok(), "Expected Ok, got: {status}");
     }
 
     #[test]
@@ -413,10 +419,10 @@ mod tests {
 
         let status = generator.health_check(&ctx.paths, &p.name);
         assert!(
-            matches!(status, HealthStatus::Error { ref message, .. } if message.contains("Theme link missing")),
-            "Expected Theme link missing, got {:?}",
-            status
+            status.is_error(),
+            "Expected Error due to missing link, got: {status}"
         );
+        assert!(status.contains("Theme link missing"));
     }
 
     #[test]
@@ -439,10 +445,10 @@ mod tests {
 
         let status = generator.health_check(&ctx.paths, &p.name);
         assert!(
-            matches!(&status, HealthStatus::Warning(msg) if msg.contains("sources a different theme")),
-            "Expected Warning for wrong theme, got {:?}",
-            status
+            status.is_warning(),
+            "Expected Warning for wrong theme file, got: {status}"
         );
+        assert!(status.contains("sources a different theme"));
     }
 
     #[test]
@@ -475,10 +481,10 @@ mod tests {
 
         let status = generator.health_check(&ctx.paths, &p.name);
         assert!(
-            matches!(status, HealthStatus::Error { ref message, .. } if message.contains("Theme link missing")),
-            "Expected link missing error, got {:?}",
-            status
+            status.is_error(),
+            "Expected Error for deleted symlink, got: {status}"
         );
+        assert!(status.contains("Theme link missing"));
     }
 
     #[test]
@@ -501,9 +507,7 @@ mod tests {
 
         assert!(
             content.contains("# iris-theme"),
-            "Marker missing. Content: \n{}\nPath: {:?}",
-            content,
-            tmux_conf
+            "Marker missing in tmux.conf"
         );
         assert!(content.contains(&p.name));
     }
@@ -530,71 +534,132 @@ mod tests {
         let theme_pos = lines
             .iter()
             .position(|l| l.contains("# iris-theme"))
-            .expect("No theme line");
+            .expect("No theme line injected");
         let tpm_pos = lines
             .iter()
             .position(|l| l.contains("tpm"))
-            .expect("No tpm line");
+            .expect("No tpm line found");
 
         assert!(theme_pos < tpm_pos, "Theme should be before TPM");
     }
 
     #[test]
     fn should_fix_wrong_theme_issue_for_tmux() {
-        let (tmp_dir, mut ctx) = create_test_context();
+        let (_, mut ctx) = create_test_context();
         let generator = TmuxGenerator;
         let p = Palette::mock();
-        let root = tmp_dir.path();
-
         ctx.state.current_theme = p.name.clone();
-
-        let tmux_dir = root.join(".config").join("tmux");
-        let tmux_conf = tmux_dir.join("tmux.conf");
-        fs::create_dir_all(&tmux_dir).unwrap();
-        fs::write(
-            &tmux_conf,
-            "source-file \"~/.config/tmux/themes/wrong.conf\" # iris-theme",
-        )
-        .unwrap();
-
-        let status = generator.health_check(&ctx.paths, &p.name);
-
-        assert!(
-            matches!(status, HealthStatus::Warning(_)),
-            "Expected Warning, got {:?}",
-            status
-        );
-
-        let mut task = ctx.log.step("Test", false).as_quiet();
-        generator
-            .fix(&status, &p, &ctx.paths, &ctx.templater, &mut task)
-            .expect("Fix failed");
-
-        let content = fs::read_to_string(&tmux_conf).unwrap();
-        assert!(content.contains(&p.name));
-        assert!(!content.contains("wrong.conf"));
-    }
-
-    #[test]
-    fn should_fix_broken_symlink_for_tmux() {
-        let (_, ctx) = create_test_context();
-        let generator = TmuxGenerator;
-        let p = Palette::mock();
 
         let mut task = ctx.log.step("Test", false).as_quiet();
         generator
             .apply(&p, &ctx.paths, &ctx.templater, &mut task)
             .unwrap();
-        let link_path = generator.link_path(&ctx.paths, &p.name);
 
-        fs::remove_file(&link_path).unwrap();
+        let tmux_conf = generator.resolve_tmux_conf_path(&ctx.paths);
+        fs::write(&tmux_conf, "source-file wrong_theme.conf").unwrap();
 
         let status = generator.health_check(&ctx.paths, &p.name);
-        assert!(matches!(status, HealthStatus::Error { .. }));
+        assert!(
+            status.is_warning() || status.is_error(),
+            "Expected Warning/Error for wrong theme, got: {status}"
+        );
 
         generator
             .fix(&status, &p, &ctx.paths, &ctx.templater, &mut task)
             .expect("Fix failed");
-        assert!(link_path.exists());
+        assert!(generator.health_check(&ctx.paths, &p.name).is_ok());
+    }
+
+    #[test]
+    fn should_fix_broken_symlink_for_tmux() {
+        let (_, mut ctx) = create_test_context();
+        let generator = TmuxGenerator;
+        let p = Palette::mock();
+        ctx.state.current_theme = p.name.clone();
+
+        let mut task = ctx.log.step("Test", false).as_quiet();
+        generator
+            .apply(&p, &ctx.paths, &ctx.templater, &mut task)
+            .unwrap();
+        let tmux_conf = generator.resolve_tmux_conf_path(&ctx.paths);
+        if let Some(parent) = tmux_conf.parent() {
+            fs::create_dir_all(parent).unwrap();
+        }
+        let mock_content = format!("# iris-theme\nsource-file {}.conf", p.name);
+        fs::write(&tmux_conf, mock_content).unwrap();
+
+        let link_path = generator.link_path(&ctx.paths, &p.name);
+        if link_path.exists() {
+            fs::remove_file(&link_path).unwrap();
+        }
+
+        let status = generator.health_check(&ctx.paths, &p.name);
+        assert!(
+            status.is_error(),
+            "Expected Error for broken link, got: {status}"
+        );
+        assert!(status.contains("Theme link missing"));
+
+        generator
+            .fix(&status, &p, &ctx.paths, &ctx.templater, &mut task)
+            .expect("Fix failed");
+        assert!(link_path.exists(), "Symlink should be recreated after fix");
+        assert!(generator.health_check(&ctx.paths, &p.name).is_ok());
+    }
+
+    #[test]
+    fn should_clear_generated_files_for_tmux() {
+        let (_, ctx) = create_test_context();
+        let generator = TmuxGenerator;
+
+        let cache_dir = ctx.paths.generators.join(generator.name());
+        fs::create_dir_all(&cache_dir).unwrap();
+
+        let test_file = cache_dir.join("test.conf");
+        fs::write(&test_file, "theme content").unwrap();
+
+        assert!(
+            cache_dir.exists(),
+            "Cache directory should exist before clearing"
+        );
+
+        generator.clear(&ctx.paths).unwrap();
+
+        assert!(
+            !cache_dir.exists(),
+            "Clear should remove the entire generator cache directory"
+        );
+    }
+
+    #[test]
+    fn should_remove_theme_for_tmux() {
+        let (_, ctx) = create_test_context();
+        let generator = TmuxGenerator;
+
+        let cache_file = generator.cache_path(&ctx.paths, "test");
+        let link_file = generator.theme_path(&ctx.paths, "test");
+
+        fs::create_dir_all(cache_file.parent().unwrap()).unwrap();
+        fs::create_dir_all(link_file.parent().unwrap()).unwrap();
+
+        fs::write(&cache_file, "theme content").unwrap();
+        fs::write(&link_file, "theme content").unwrap();
+
+        assert!(
+            cache_file.exists(),
+            "Cache file should exist before removal"
+        );
+        assert!(link_file.exists(), "Theme file should exist before removal");
+
+        generator.remove_theme(&ctx.paths, "test").unwrap();
+
+        assert!(
+            !cache_file.exists(),
+            "remove_theme should delete the cache file"
+        );
+        assert!(
+            !link_file.exists(),
+            "remove_theme should delete the target theme file"
+        );
     }
 }

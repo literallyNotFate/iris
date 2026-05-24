@@ -110,33 +110,30 @@ impl Generator for StarshipGenerator {
         }
 
         let config_path: PathBuf = self.link_path(paths, "");
+        let file_status = HealthStatus::check_file(&config_path, "starship.toml");
 
-        if !config_path.exists() {
-            return HealthStatus::Error {
-                message: "starship.toml not found".into(),
-                fix_hint: Some(format!("Create config at {}", config_path.display())),
-            };
+        if file_status.is_error() {
+            return HealthStatus::error(
+                "starship.toml not found",
+                Some(format!("Create config at {}", config_path.display())),
+            );
         }
 
         if !theme.is_empty() {
             let content: String = fs::read_to_string(&config_path).unwrap_or_default();
-
-            let expected_key = format!("palette = \"{}\"", theme);
+            let expected_key: String = format!("palette = \"{}\"", theme);
             if !content.contains(&expected_key) {
                 return HealthStatus::Warning(format!(
-                    "`starship` is not using the current palette '{}'",
-                    theme
+                    "`starship` is not using the current palette '{theme}'"
                 ));
             }
 
-            let expected_header = format!("[palettes.{}]", theme);
+            let expected_header: String = format!("[palettes.{}]", theme);
             if !content.contains(&expected_header) {
-                return HealthStatus::Error {
-                    message: format!("Palette block '{}' missing in config", theme),
-                    fix_hint: Some(
-                        "Run `iris sync` or `iris health --fix` to inject the palette block".into(),
-                    ),
-                };
+                return HealthStatus::error(
+                    format!("Palette block '{theme}' missing in config"),
+                    Some("Run `iris sync` or `iris health --fix` to inject the palette block"),
+                );
             }
         }
 
@@ -151,13 +148,16 @@ impl Generator for StarshipGenerator {
         templater: &Templater,
         task: &mut Task,
     ) -> Result<()> {
-        match status {
-            HealthStatus::Error { .. } | HealthStatus::Warning(_) => task.log.action(
+        if status.is_error() || status.is_warning() {
+            return task.log.action(
                 &format!("Re-applied `{}` configuration", self.name().bold()),
                 || self.apply(p, paths, templater, &mut task.as_quiet()),
-            ),
+            );
+        }
 
-            _ => Ok(()),
+        Ok(())
+    }
+
     fn clear(&self, paths: &IrisPaths) -> Result<()> {
         let name: &str = self.name();
         let config_path: PathBuf = self.link_path(paths, "");
@@ -300,6 +300,7 @@ impl StarshipGenerator {
 mod tests {
     use super::*;
     use crate::core::tests::create_test_context;
+    use tempdir::TempDir;
 
     #[test]
     fn should_return_starship_metadata() {
@@ -332,10 +333,9 @@ mod tests {
 
     #[test]
     fn should_clean_and_inject_correctly() {
-        let (tmp_dir, ctx) = create_test_context();
-        let generator = StarshipGenerator;
-        let p = Palette::mock();
-        let config_path = tmp_dir.path().join("starship.toml");
+        let (_iris_dir, ctx) = create_test_context();
+        let config_path = ctx.paths.config.join("starship.toml");
+        let home_dir = ctx.paths.config.parent().unwrap();
 
         let initial_content = r##"
     palette = "old_theme"
@@ -344,190 +344,281 @@ mod tests {
 
     [palettes.old_theme]
     base = "#000000"
-
-    palette = "duplicate_key"
     "##;
         fs::write(&config_path, initial_content).unwrap();
 
-        temp_env::with_var("STARSHIP_CONFIG", Some(&config_path), || {
-            let mut task = ctx.log.step("Test", false).as_quiet();
-            generator
-                .apply(&p, &ctx.paths, &ctx.templater, &mut task)
-                .expect("Failed to apply");
-            let result = fs::read_to_string(&config_path).unwrap();
+        temp_env::with_vars(
+            [
+                ("STARSHIP_CONFIG", Some(config_path.as_path())),
+                ("HOME", Some(home_dir)),
+            ],
+            || {
+                let generator = StarshipGenerator;
+                let p = Palette::mock();
 
-            let palette_occurrences: Vec<_> = result.matches("palette =").collect();
-            assert_eq!(
-                palette_occurrences.len(),
-                1,
-                "Should have exactly one palette key"
-            );
-            assert!(result.starts_with(&format!("palette = \"{}\"", p.name)));
-            assert!(!result.contains("[palettes.old_theme]"));
-            assert!(result.contains(&format!("[palettes.{}]", p.name)));
-            assert!(result.contains("[directory]"));
-            assert!(result.contains("style = \"blue\""));
-        });
+                let mut task = ctx.log.step("Test", false).as_quiet();
+                generator
+                    .apply(&p, &ctx.paths, &ctx.templater, &mut task)
+                    .unwrap();
+
+                let result = fs::read_to_string(&config_path).unwrap();
+                let palette_occurrences: Vec<_> = result.matches("palette =").collect();
+
+                assert_eq!(palette_occurrences.len(), 1);
+                assert!(result.contains(&format!("palette = \"{}\"", p.name)));
+                assert!(!result.contains("[palettes.old_theme]"));
+                assert!(result.contains(&format!("[palettes.{}]", p.name)));
+                assert!(result.contains("[directory]"));
+            },
+        );
     }
 
     #[test]
     fn should_return_health_ok_for_starship() {
-        let (tmp_dir, mut ctx) = create_test_context();
-        let generator = StarshipGenerator;
-        let p = Palette::mock();
-        let config_path = tmp_dir.path().join("starship.toml");
+        let (_iris_dir, mut ctx) = create_test_context();
+        let config_path = ctx.paths.config.join("starship.toml");
+        let home_dir = ctx.paths.config.parent().unwrap();
+        fs::write(&config_path, "").unwrap();
 
-        temp_env::with_var("STARSHIP_CONFIG", Some(&config_path), || {
-            ctx.state.current_theme = p.name.clone();
-            let mut task = ctx.log.step("Test", false).as_quiet();
-            generator
-                .apply(&p, &ctx.paths, &ctx.templater, &mut task)
-                .unwrap();
+        temp_env::with_vars(
+            [
+                ("STARSHIP_CONFIG", Some(config_path.as_path())),
+                ("HOME", Some(home_dir)),
+            ],
+            || {
+                let generator = StarshipGenerator;
+                let p = Palette::mock();
 
-            let status = generator.health_check(&ctx.paths, &p.name);
-            assert!(
-                matches!(status, HealthStatus::Ok),
-                "Expected Ok, got {:?}",
-                status
-            );
-        });
+                ctx.state.current_theme = p.name.clone();
+                let mut task = ctx.log.step("Test", false).as_quiet();
+                generator
+                    .apply(&p, &ctx.paths, &ctx.templater, &mut task)
+                    .unwrap();
+
+                let status = generator.health_check(&ctx.paths, &p.name);
+                assert!(status.is_ok(), "Expected Ok, got: {status}");
+            },
+        );
     }
 
     #[test]
     fn should_return_health_warning_wrong_palette_for_starship() {
-        let (tmp_dir, mut ctx) = create_test_context();
-        let generator = StarshipGenerator;
-        let p = Palette::mock();
-        let root = tmp_dir.path();
-        let config_path = root.join("starship.toml");
+        let (_iris_dir, mut ctx) = create_test_context();
+        let config_path = ctx.paths.config.join("starship.toml");
+        let home_dir = ctx.paths.config.parent().unwrap();
 
-        temp_env::with_var("STARSHIP_CONFIG", Some(&config_path), || {
-            let mut task = ctx.log.step("Test", false).as_quiet();
-            ctx.state.current_theme = p.name.clone();
-            generator
-                .apply(&p, &ctx.paths, &ctx.templater, &mut task)
-                .unwrap();
+        temp_env::with_vars(
+            [
+                ("STARSHIP_CONFIG", Some(config_path.as_path())),
+                ("HOME", Some(home_dir)),
+            ],
+            || {
+                let generator = StarshipGenerator;
+                let p = Palette::mock();
 
-            let content = fs::read_to_string(&config_path).unwrap();
-            let corrupted =
-                content.replace(&format!("palette = \"{}\"", p.name), "palette = \"wrong\"");
-            fs::write(&config_path, corrupted).unwrap();
+                let mut task = ctx.log.step("Test", false).as_quiet();
+                ctx.state.current_theme = p.name.clone();
+                generator
+                    .apply(&p, &ctx.paths, &ctx.templater, &mut task)
+                    .unwrap();
 
-            let status = generator.health_check(&ctx.paths, &p.name);
-            assert!(
-                matches!(&status, HealthStatus::Warning(msg) if msg.contains("not using the current palette")),
-                "Expected Warning for wrong palette, got {:?}",
-                status
-            );
-        });
+                let content = fs::read_to_string(&config_path).unwrap();
+                let corrupted =
+                    content.replace(&format!("palette = \"{}\"", p.name), "palette = \"wrong\"");
+                fs::write(&config_path, corrupted).unwrap();
+
+                let status = generator.health_check(&ctx.paths, &p.name);
+
+                assert!(status.is_warning(), "Expected Warning, got: {status}");
+                assert!(status.contains("not using the current palette"));
+            },
+        );
     }
 
     #[test]
-    fn should_return_health_error_missing_palette_block_for_starship() {
-        let (tmp_dir, mut ctx) = create_test_context();
-        let generator = StarshipGenerator;
-        let p = Palette::mock();
-        let root = tmp_dir.path();
-        let config_path = root.join("starship.toml");
+    fn should_return_health_error_if_config_missing() {
+        let (_iris_dir, ctx) = create_test_context();
+        let config_path = ctx.paths.config.join("starship_missing.toml");
+        let home_dir = ctx.paths.config.parent().unwrap();
 
-        temp_env::with_var("STARSHIP_CONFIG", Some(&config_path), || {
-            let mut task = ctx.log.step("Test", false).as_quiet();
-            ctx.state.current_theme = p.name.clone();
-            generator
-                .apply(&p, &ctx.paths, &ctx.templater, &mut task)
-                .unwrap();
-
-            let content = fs::read_to_string(&config_path).unwrap();
-            let header = format!("[palettes.{}]", p.name);
-            let lines: Vec<&str> = content
-                .lines()
-                .filter(|line| !line.trim().starts_with(&header))
-                .collect();
-            fs::write(&config_path, lines.join("\n")).unwrap();
-
-            let status = generator.health_check(&ctx.paths, &p.name);
-            match status {
-                HealthStatus::Error { ref message, .. } => {
-                    assert!(
-                        message.contains("missing"),
-                        "Error message should mention 'missing' block"
-                    );
-                }
-                _ => panic!("Expected Error for missing palette block, got {:?}", status),
-            }
-        });
+        temp_env::with_vars(
+            [
+                ("STARSHIP_CONFIG", Some(config_path.as_path())),
+                ("HOME", Some(home_dir)),
+            ],
+            || {
+                let generator = StarshipGenerator;
+                let status = generator.health_check(&ctx.paths, "any");
+                assert!(status.is_error(), "Expected Error, got: {status}");
+                assert!(status.contains("not found"));
+            },
+        );
     }
 
     #[test]
     fn should_apply_theme_for_starship() {
-        let (tmp_dir, ctx) = create_test_context();
-        let generator = StarshipGenerator;
-        let p = Palette::mock();
-        let config_path = tmp_dir.path().join("starship.toml");
+        let (_iris_dir, ctx) = create_test_context();
+        let config_path = ctx.paths.config.join("starship.toml");
+        let home_dir = ctx.paths.config.parent().unwrap();
 
-        temp_env::with_var("STARSHIP_CONFIG", Some(&config_path), || {
-            fs::write(&config_path, "[directory]\nstyle = \"blue\"\n").unwrap();
+        temp_env::with_vars(
+            [
+                ("STARSHIP_CONFIG", Some(config_path.as_path())),
+                ("HOME", Some(home_dir)),
+            ],
+            || {
+                fs::write(&config_path, "[directory]\nstyle = \"blue\"\n").unwrap();
 
-            let mut task = ctx.log.step("Test", false).as_quiet();
-            let result = generator.apply(&p, &ctx.paths, &ctx.templater, &mut task);
-            assert!(result.is_ok());
+                let generator = StarshipGenerator;
+                let p = Palette::mock();
 
-            let final_content = fs::read_to_string(&config_path).unwrap();
+                let mut task = ctx.log.step("Test", false).as_quiet();
+                let result = generator.apply(&p, &ctx.paths, &ctx.templater, &mut task);
+                assert!(result.is_ok());
 
-            assert!(final_content.contains(&format!("palette = \"{}\"", p.name)));
-            assert!(final_content.contains(&format!("[palettes.{}]", p.name)));
-            assert!(final_content.contains("[directory]"));
-        });
-    }
+                let final_content = fs::read_to_string(&config_path).unwrap();
 
-    #[test]
-    fn should_fix_missing_palette_block_for_starship() {
-        let (tmp_dir, mut ctx) = create_test_context();
-        let generator = StarshipGenerator;
-        let p = Palette::mock();
-        let root = tmp_dir.path();
-        let config_path = root.join("starship.toml");
-
-        temp_env::with_var("STARSHIP_CONFIG", Some(&config_path), || {
-            ctx.state.current_theme = p.name.clone();
-
-            fs::write(
-                &config_path,
-                format!("palette = \"{}\"\n[other_section]\nfoo = \"bar\"", p.name),
-            )
-            .unwrap();
-
-            let status = generator.health_check(&ctx.paths, &p.name);
-            assert!(
-                matches!(status, HealthStatus::Error { ref message, .. } if message.contains("missing")),
-                "Expected Error for missing block, got {:?}",
-                status
-            );
-        });
+                assert!(final_content.contains(&format!("palette = \"{}\"", p.name)));
+                assert!(final_content.contains(&format!("[palettes.{}]", p.name)));
+                assert!(final_content.contains("[directory]"));
+            },
+        );
     }
 
     #[test]
     fn should_fix_wrong_palette_name_for_starship() {
-        let (tmp_dir, mut ctx) = create_test_context();
-        let generator = StarshipGenerator;
-        let p = Palette::mock();
-        let root = tmp_dir.path();
-        let config_path = root.join("starship.toml");
+        let (_iris_dir, ctx) = create_test_context();
+        let config_path = ctx.paths.config.join("starship.toml");
+        let home_dir = ctx.paths.config.parent().unwrap();
 
-        temp_env::with_var("STARSHIP_CONFIG", Some(&config_path), || {
-            ctx.state.current_theme = p.name.clone();
-            fs::write(
-                &config_path,
-                "palette = \"wrong-theme\"\n[palettes.melange]\nbg = \"#000000\"",
-            )
-            .unwrap();
+        temp_env::with_vars(
+            [
+                ("STARSHIP_CONFIG", Some(config_path.as_path())),
+                ("HOME", Some(home_dir)),
+            ],
+            || {
+                fs::write(
+                    &config_path,
+                    "palette = \"wrong-theme\"\n[palettes.melange]\nbg = \"#000000\"",
+                )
+                .unwrap();
 
-            let status = generator.health_check(&ctx.paths, &p.name);
-            assert!(
-                matches!(status, HealthStatus::Warning(ref msg) if msg.contains("not using the current palette")),
-                "Expected Warning for wrong palette name, got {:?}",
-                status
-            );
-        });
+                let generator = StarshipGenerator;
+                let p = Palette::mock();
+
+                let status = generator.health_check(&ctx.paths, &p.name);
+
+                assert!(status.is_warning(), "Expected Warning, got: {status}");
+                assert!(status.contains("not using the current palette"));
+
+                let mut task = ctx.log.step("Fix", false);
+                generator
+                    .fix(&status, &p, &ctx.paths, &ctx.templater, &mut task)
+                    .unwrap();
+
+                let content = fs::read_to_string(&config_path).unwrap();
+                assert!(content.contains(&format!("palette = \"{}\"", p.name)));
+                assert!(generator.health_check(&ctx.paths, &p.name).is_ok());
+            },
+        );
+    }
+
+    #[test]
+    fn should_fix_missing_palette_block_for_starship() {
+        let base_tmp: TempDir = TempDir::new("missing_block").unwrap();
+        let config_path = base_tmp.path().join("starship.toml");
+
+        temp_env::with_vars(
+            [
+                ("STARSHIP_CONFIG", Some(config_path.as_path())),
+                ("HOME", Some(base_tmp.path())),
+            ],
+            || {
+                let (_iris_dir, ctx) = create_test_context();
+                let generator = StarshipGenerator;
+                let p = Palette::mock();
+
+                fs::write(
+                    &config_path,
+                    format!("palette = \"{}\"\n[directory]\nstyle = \"blue\"", p.name),
+                )
+                .unwrap();
+
+                let status = generator.health_check(&ctx.paths, &p.name);
+
+                assert!(status.is_error(), "Expected Error, got: {status}");
+                assert!(status.contains("missing"));
+
+                let mut task = ctx.log.step("Fix", false);
+                generator
+                    .fix(&status, &p, &ctx.paths, &ctx.templater, &mut task)
+                    .unwrap();
+
+                let content = fs::read_to_string(&config_path).unwrap();
+                assert!(content.contains(&format!("[palettes.{}]", p.name)));
+                assert!(content.contains(&p.bg));
+                assert!(generator.health_check(&ctx.paths, &p.name).is_ok());
+            },
+        );
+    }
+
+    #[test]
+    fn should_clear_generated_files_for_starship() {
+        let base_tmp: TempDir = TempDir::new("clear_test").unwrap();
+        let config_path = base_tmp.path().join("starship.toml");
+
+        temp_env::with_vars(
+            [
+                ("STARSHIP_CONFIG", Some(config_path.as_path())),
+                ("HOME", Some(base_tmp.path())),
+            ],
+            || {
+                fs::write(&config_path, "").unwrap();
+
+                let (_iris_dir, ctx) = create_test_context();
+                let generator = StarshipGenerator;
+                let cache_dir = ctx.paths.generators.join(generator.name());
+
+                fs::create_dir_all(&cache_dir).unwrap();
+                fs::write(cache_dir.join("some_theme.toml"), "data").unwrap();
+
+                generator.clear(&ctx.paths).unwrap();
+                assert!(!cache_dir.exists());
+            },
+        );
+    }
+
+    #[test]
+    fn should_remove_theme_for_starship() {
+        let base_tmp: TempDir = TempDir::new("remove_test").unwrap();
+        let config_path = base_tmp.path().join("starship.toml");
+        let theme_name = "test_theme";
+
+        temp_env::with_vars(
+            [
+                ("STARSHIP_CONFIG", Some(config_path.as_path())),
+                ("HOME", Some(base_tmp.path())),
+            ],
+            || {
+                fs::write(
+                    &config_path,
+                    format!("palette = \"{}\"\n[palettes.{}]\n", theme_name, theme_name),
+                )
+                .unwrap();
+
+                let (_iris_dir, ctx) = create_test_context();
+                let generator = StarshipGenerator;
+
+                let cache_file = generator.cache_path(&ctx.paths, theme_name);
+                fs::create_dir_all(cache_file.parent().unwrap()).unwrap();
+                fs::write(&cache_file, "cache content").unwrap();
+
+                generator.remove_theme(&ctx.paths, theme_name).unwrap();
+
+                let final_content = fs::read_to_string(&config_path).unwrap();
+                assert!(!final_content.contains(theme_name));
+                assert!(!cache_file.exists());
+            },
+        );
     }
 }

@@ -1,7 +1,7 @@
 use super::rules::RULES;
 use crate::{
     core::{IrisPaths, Templater},
-    log::Task,
+    log::{Reporter, Task},
     models::{HealthStatus, Palette},
     modules::{Generator, GeneratorType},
     utils::{self},
@@ -129,27 +129,23 @@ impl Generator for BatGenerator {
         let current_env: String = env::var("BAT_CONFIG_PATH").unwrap_or_default();
 
         if current_env != expected_env.to_string_lossy() {
-            return HealthStatus::Error {
-                message: "BAT_CONFIG_PATH is not set correctly".into(),
-                fix_hint: Some(format!(
+            return HealthStatus::error(
+                "BAT_CONFIG_PATH is not set correctly",
+                Some(format!(
                     "Add 'export BAT_CONFIG_PATH=\"{}\"' to your shell config",
                     expected_env.display()
                 )),
-            };
+            );
         }
 
         if !theme.is_empty() {
             let link = self.link_path(paths, theme);
-            if !link.exists() {
-                return HealthStatus::Error {
-                    message: format!(
-                        "Theme file '{}.tmTheme' is missing in bat themes directory",
-                        theme
-                    ),
-                    fix_hint: Some(
-                        "Run `iris sync` or `iris health --fix` to relink and rebuild cache".into(),
-                    ),
-                };
+            let theme_status = HealthStatus::check_file(&link, "Theme file");
+            if theme_status.is_error() {
+                return HealthStatus::error(
+                    format!("Theme file `{theme}.tmTheme` is missing in bat themes directory"),
+                    Some("Run `iris sync` or `iris health --fix` to relink and rebuild cache"),
+                );
             }
         }
 
@@ -164,40 +160,57 @@ impl Generator for BatGenerator {
         templater: &Templater,
         task: &mut Task,
     ) -> Result<()> {
-        match status {
-            HealthStatus::Error { message, .. } => {
-                let msg_low: String = message.to_lowercase();
-
-                if msg_low.contains("missing") || msg_low.contains("not linked") {
-                    let result = task.log.action(
-                        &format!("Repaired `{}` theme and configuration", self.name().bold()),
-                        || {
-                            self.ensure_theme_cache(p, paths, templater)?;
-                            self.ensure_config(p, paths)?;
-                            let cache = self.cache_path(paths, &p.name);
-                            let link = self.link_path(paths, &p.name);
-                            self.ensure_symlink(&cache, &link)
-                        },
-                    );
-
-                    if result.is_ok() {
-                        self.rebuild_bat_cache(&mut task.as_quiet())?;
-                    }
-
-                    return result;
-                }
-
-                task.log.action(
-                    &format!("Re-applied `{}` configuration", self.name().bold()),
-                    || self.apply(p, paths, templater, &mut task.as_quiet()),
-                )
-            }
-
-            _ => task.log.action(
+        if !status.is_error() && !status.is_warning() {
+            return task.log.action(
                 &format!("Re-applied `{}` configuration", self.name().bold()),
-                || self.apply(p, paths, templater, &mut task.as_quiet()),
-            ),
+                || {
+                    self.apply(p, paths, templater, &mut task.as_quiet())?;
+                    self.rebuild_bat_cache(&mut task.as_quiet())
+                },
+            );
         }
+
+        let mut fixed = false;
+        if status.contains("missing") || status.contains("not linked") {
+            task.log.action(
+                &format!("Repaired `{}` theme and configuration", self.name().bold()),
+                || {
+                    self.ensure_theme_cache(p, paths, templater)?;
+                    self.ensure_config(p, paths)?;
+                    let cache = self.cache_path(paths, &p.name);
+                    let link = self.link_path(paths, &p.name);
+                    self.ensure_symlink(&cache, &link)
+                },
+            )?;
+            fixed = true;
+        }
+
+        if !fixed {
+            task.log
+                .action("Regenerated complete `bat` configuration", || {
+                    self.apply(p, paths, templater, &mut task.as_quiet())
+                })?;
+        }
+
+        self.rebuild_bat_cache(&mut task.as_quiet())?;
+        Ok(())
+    }
+
+    fn remove_theme(&self, paths: &IrisPaths, theme_name: &str) -> Result<()> {
+        let theme_lower: String = theme_name.to_lowercase();
+
+        let cache_file: PathBuf = self.cache_path(paths, &theme_lower);
+        if cache_file.exists() {
+            fs::remove_file(cache_file)?;
+        }
+
+        let link_file: PathBuf = self.theme_path(paths, &theme_lower);
+        if link_file.exists() {
+            fs::remove_file(link_file)?;
+        }
+
+        self.rebuild_bat_cache(&mut Reporter::quiet().as_task())?;
+        Ok(())
     }
 }
 
@@ -302,6 +315,7 @@ mod tests {
     use super::*;
     use crate::core::tests::create_test_context;
     use temp_env;
+    use tempdir::TempDir;
 
     #[test]
     fn should_return_bat_metadata() {
@@ -346,7 +360,7 @@ mod tests {
 
         temp_env::with_var("BAT_CONFIG_PATH", Some(expected_config), || {
             let status = generator.health_check(&ctx.paths, &p.name);
-            assert!(matches!(status, HealthStatus::Ok));
+            assert!(status.is_ok(), "Expected Ok, got: {status}");
         });
     }
 
@@ -357,12 +371,11 @@ mod tests {
 
         temp_env::with_var("BAT_CONFIG_PATH", Some("/wrong/path/to/bat/config"), || {
             let status = generator.health_check(&ctx.paths, &ctx.state.current_theme);
-            match status {
-                HealthStatus::Error { message, .. } => {
-                    assert!(message.contains("BAT_CONFIG_PATH"));
-                }
-                _ => panic!("Expected env error because BAT_CONFIG_PATH points to nowhere"),
-            }
+            assert!(
+                status.is_error(),
+                "Expected Error due to invalid env, got: {status}"
+            );
+            assert!(status.contains("BAT_CONFIG_PATH"));
         });
     }
 
@@ -403,6 +416,40 @@ mod tests {
 
     #[test]
     fn should_fix_missing_link_for_bat() {
+        let base_tmp: TempDir = TempDir::new("missing_test").unwrap();
+        let home_dir = base_tmp.path();
+
+        temp_env::with_vars([("HOME", Some(home_dir))], || {
+            let (_iris_dir, ctx) = create_test_context();
+            let generator = BatGenerator;
+            let p = Palette::mock();
+            let expected_env = ctx.paths.generators.join(generator.name()).join("bat.conf");
+
+            temp_env::with_var("BAT_CONFIG_PATH", Some(expected_env.as_os_str()), || {
+                let mut task = ctx.log.step("Test", false).as_quiet();
+                generator
+                    .apply(&p, &ctx.paths, &ctx.templater, &mut task)
+                    .unwrap();
+
+                let link = generator.link_path(&ctx.paths, &p.name);
+                if link.exists() {
+                    fs::remove_file(&link).unwrap();
+                }
+
+                let status = generator.health_check(&ctx.paths, &p.name);
+                assert!(status.is_error(), "Expected Error, got: {status}");
+                assert!(status.contains("missing"));
+
+                generator
+                    .fix(&status, &p, &ctx.paths, &ctx.templater, &mut task)
+                    .unwrap();
+                assert!(generator.health_check(&ctx.paths, &p.name).is_ok());
+            });
+        });
+    }
+
+    #[test]
+    fn should_clear_generated_files_for_bat() {
         let (_, ctx) = create_test_context();
         let generator = BatGenerator;
         let p = Palette::mock();
@@ -411,15 +458,50 @@ mod tests {
         generator
             .apply(&p, &ctx.paths, &ctx.templater, &mut task)
             .unwrap();
-        let link = generator.link_path(&ctx.paths, &p.name);
-        fs::remove_file(&link).unwrap();
 
-        let status = generator.health_check(&ctx.paths, &p.name);
-        assert!(matches!(status, HealthStatus::Error { .. }));
+        let cache_dir: PathBuf = ctx.paths.generators.join(generator.name());
+        assert!(
+            cache_dir.exists(),
+            "Cache directory should exist before clearing"
+        );
 
+        generator.clear(&ctx.paths).unwrap();
+
+        assert!(
+            !cache_dir.exists(),
+            "Clear should remove the entire generator cache directory"
+        );
+    }
+
+    #[test]
+    fn should_remove_theme_for_bat() {
+        let (_, ctx) = create_test_context();
+        let generator = BatGenerator;
+        let p = Palette::mock();
+
+        let mut task = ctx.log.step("Test", false).as_quiet();
         generator
-            .fix(&status, &p, &ctx.paths, &ctx.templater, &mut task)
-            .expect("Fix failed");
-        assert!(link.exists());
+            .apply(&p, &ctx.paths, &ctx.templater, &mut task)
+            .unwrap();
+
+        let cache_file = generator.cache_path(&ctx.paths, &p.name);
+        let link_file = generator.theme_path(&ctx.paths, &p.name);
+
+        assert!(
+            cache_file.exists(),
+            "Cache file should exist before removal"
+        );
+        assert!(link_file.exists(), "Theme file should exist before removal");
+
+        generator.remove_theme(&ctx.paths, &p.name).unwrap();
+
+        assert!(
+            !cache_file.exists(),
+            "remove_theme should delete the cache file"
+        );
+        assert!(
+            !link_file.exists(),
+            "remove_theme should delete the target theme file"
+        );
     }
 }

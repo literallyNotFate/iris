@@ -115,17 +115,18 @@ impl Generator for BtopGenerator {
 
         let themes_dir: PathBuf = self.resolve_config_directory(paths);
         let conf_path: PathBuf = themes_dir.parent().unwrap_or(&themes_dir).join("btop.conf");
+        let config_status = HealthStatus::check_file(&conf_path, "btop.conf");
 
-        if !conf_path.exists() {
-            return HealthStatus::Error {
-                message: "btop.conf missing".into(),
-                fix_hint: Some("Run `btop` once to generate default config".into()),
-            };
+        if config_status.is_error() {
+            return HealthStatus::error(
+                "btop.conf missing",
+                Some("Run `btop` once to generate default config"),
+            );
         }
 
         if !theme.is_empty() {
             let content: String = fs::read_to_string(&conf_path).unwrap_or_default();
-            let expected_line = format!("color_theme = \"{}\"", theme);
+            let expected_line: String = format!("color_theme = \"{}\"", theme);
 
             if !content.contains(&expected_line) {
                 return HealthStatus::Warning(format!(
@@ -134,14 +135,13 @@ impl Generator for BtopGenerator {
                 ));
             }
 
-            let link = self.link_path(paths, theme);
-            if !link.exists() {
-                return HealthStatus::Error {
-                    message: format!("Theme file {}.theme missing in btop themes folder", theme),
-                    fix_hint: Some(
-                        "Run `iris sync` or `iris health --fix` to restore the theme link".into(),
-                    ),
-                };
+            let link: PathBuf = self.link_path(paths, theme);
+            let link_status = HealthStatus::check_symlink(&link, "Theme file");
+            if link_status.is_error() {
+                return HealthStatus::error(
+                    format!("Theme file `{theme}.theme` missing in btop themes folder"),
+                    Some("Run `iris sync` or `iris health --fix` to restore the theme link"),
+                );
             }
         }
 
@@ -156,36 +156,41 @@ impl Generator for BtopGenerator {
         templater: &Templater,
         task: &mut Task,
     ) -> Result<()> {
-        match status {
-            HealthStatus::Error { message, .. } => {
-                if message.contains("missing") {
-                    task.log.action("Restored `btop` theme symlink", || {
-                        let cache = self.cache_path(paths, &p.name);
-                        let link = self.link_path(paths, &p.name);
-                        self.ensure_symlink(&cache, &link)
-                    })?;
-                }
-
-                self.apply(p, paths, templater, &mut task.as_quiet())
-            }
-
-            HealthStatus::Warning(msg) if msg.contains("not using the current theme") => task
-                .log
-                .action("Updated btop.conf to use the correct theme", || {
-                    let conf_path = self
-                        .resolve_config_directory(paths)
-                        .parent()
-                        .unwrap_or(&self.resolve_config_directory(paths))
-                        .join("btop.conf");
-
-                    self.update_btop_conf(&conf_path, &p.name)
-                }),
-
-            _ => task.log.action(
+        if !status.is_error() && !status.is_warning() {
+            return task.log.action(
                 &format!("Re-applied `{}` configuration", self.name().bold()),
                 || self.apply(p, paths, templater, &mut task.as_quiet()),
-            ),
+            );
         }
+
+        let mut fixed = false;
+        if status.contains("missing in btop themes folder") {
+            task.log.action("Restored `btop` theme symlink", || {
+                let cache = self.cache_path(paths, &p.name);
+                let link = self.link_path(paths, &p.name);
+                self.ensure_symlink(&cache, &link)
+            })?;
+            fixed = true;
+        }
+
+        if status.contains("not using the current theme") {
+            task.log
+                .action("Updated btop.conf to use the correct theme", || {
+                    let base_dir = self.resolve_config_directory(paths);
+                    let conf_path = base_dir.parent().unwrap_or(&base_dir).join("btop.conf");
+                    self.update_btop_conf(&conf_path, &p.name)
+                })?;
+            fixed = true;
+        }
+
+        if !fixed {
+            task.log
+                .action("Regenerated complete `btop` configuration", || {
+                    self.apply(p, paths, templater, &mut task.as_quiet())
+                })?;
+        }
+
+        Ok(())
     }
 }
 
@@ -372,25 +377,20 @@ mod tests {
         .unwrap();
 
         let status = generator.health_check(&ctx.paths, &p.name);
-        assert!(
-            matches!(status, HealthStatus::Ok),
-            "Expected Ok, got {:?}",
-            status
-        );
+        assert!(status.is_ok(), "Expected Ok, got: {status}");
     }
 
     #[test]
     fn should_return_health_error_missing_conf_for_btop() {
         let (_, ctx) = create_test_context();
         let generator = BtopGenerator;
-
         let status = generator.health_check(&ctx.paths, &ctx.state.current_theme);
-        match status {
-            HealthStatus::Error { ref message, .. } => {
-                assert!(message.contains("btop.conf missing"));
-            }
-            _ => panic!("Expected Error for missing btop.conf, got {:?}", status),
-        }
+
+        assert!(
+            status.is_error(),
+            "Expected Error for missing btop.conf, got: {status}"
+        );
+        assert!(status.contains("btop.conf missing"));
     }
 
     #[test]
@@ -414,12 +414,12 @@ mod tests {
         fs::write(btop_dir.join("btop.conf"), "color_theme = \"default\"").unwrap();
 
         let status = generator.health_check(&ctx.paths, &p.name);
-        match status {
-            HealthStatus::Warning(msg) => {
-                assert!(msg.contains("not using the current theme"));
-            }
-            _ => panic!("Expected Warning for wrong theme line, got {:?}", status),
-        }
+
+        assert!(
+            status.is_warning(),
+            "Expected Warning for wrong theme line, got: {status}"
+        );
+        assert!(status.contains("not using the current theme"));
     }
 
     #[test]
@@ -472,18 +472,20 @@ mod tests {
 
         let status = generator.health_check(&ctx.paths, &p.name);
 
-        if let HealthStatus::Warning(msg) = &status {
-            assert!(msg.contains("not using the current theme"));
+        assert!(
+            status.is_warning(),
+            "Expected Warning for mismatched theme, got: {status}"
+        );
+        assert!(status.contains("not using the current theme"));
 
-            let mut task = ctx.log.step("Test", false).as_quiet();
-            generator
-                .fix(&status, &p, &ctx.paths, &ctx.templater, &mut task)
-                .expect("Fix failed");
+        let mut task = ctx.log.step("Test", false).as_quiet();
+        generator
+            .fix(&status, &p, &ctx.paths, &ctx.templater, &mut task)
+            .expect("Fix failed");
 
-            let content = fs::read_to_string(&conf_path).unwrap();
-            assert!(content.contains(&format!("color_theme = \"{}\"", p.name)));
-            assert!(content.contains("other_setting = true"));
-        }
+        let content = fs::read_to_string(&conf_path).unwrap();
+        assert!(content.contains(&format!("color_theme = \"{}\"", p.name)));
+        assert!(content.contains("other_setting = true"));
     }
 
     #[test]
@@ -515,14 +517,71 @@ mod tests {
 
         let status = generator.health_check(&ctx.paths, &p.name);
         assert!(
-            matches!(status, HealthStatus::Error { .. }),
-            "Expected Error due to missing theme file, got {:?}",
-            status
+            status.is_error(),
+            "Expected Error due to missing theme file, got: {status}"
         );
 
         generator
             .fix(&status, &p, &ctx.paths, &ctx.templater, &mut task)
             .expect("Fix failed");
+
         assert!(link_path.exists(), "Fix should restore the symlink");
+        assert!(generator.health_check(&ctx.paths, &p.name).is_ok());
+    }
+
+    #[test]
+    fn should_clear_generated_files_for_btop() {
+        let (_, ctx) = create_test_context();
+        let generator = BtopGenerator;
+
+        let cache_dir = ctx.paths.generators.join(generator.name());
+        fs::create_dir_all(&cache_dir).unwrap();
+
+        let test_file = cache_dir.join("test.theme");
+        fs::write(&test_file, "theme content").unwrap();
+
+        assert!(
+            cache_dir.exists(),
+            "Cache directory should exist before clearing"
+        );
+
+        generator.clear(&ctx.paths).unwrap();
+
+        assert!(
+            !cache_dir.exists(),
+            "Clear should remove the entire generator cache directory"
+        );
+    }
+
+    #[test]
+    fn should_remove_theme_for_btop() {
+        let (_, ctx) = create_test_context();
+        let generator = BtopGenerator;
+
+        let cache_file = generator.cache_path(&ctx.paths, "test");
+        let link_file = generator.theme_path(&ctx.paths, "test");
+
+        fs::create_dir_all(cache_file.parent().unwrap()).unwrap();
+        fs::create_dir_all(link_file.parent().unwrap()).unwrap();
+
+        fs::write(&cache_file, "theme content").unwrap();
+        fs::write(&link_file, "theme content").unwrap();
+
+        assert!(
+            cache_file.exists(),
+            "Cache file should exist before removal"
+        );
+        assert!(link_file.exists(), "Theme file should exist before removal");
+
+        generator.remove_theme(&ctx.paths, "test").unwrap();
+
+        assert!(
+            !cache_file.exists(),
+            "remove_theme should delete the cache file"
+        );
+        assert!(
+            !link_file.exists(),
+            "remove_theme should delete the target theme file"
+        );
     }
 }

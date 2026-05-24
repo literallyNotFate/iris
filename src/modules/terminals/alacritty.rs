@@ -91,12 +91,13 @@ impl Generator for AlacrittyGenerator {
         let main_config: PathBuf = alacritty_dir.join("alacritty.toml");
         let link_path: PathBuf = self.link_path(paths, "");
         let expected_cache: PathBuf = self.cache_path(paths, "");
+        let symlink_status = HealthStatus::check_symlink(&link_path, "Theme link");
 
-        if !link_path.exists() && !link_path.is_symlink() {
-            return HealthStatus::Error {
-                message: "Theme link missing in `alacritty` config directory".into(),
-                fix_hint: Some("run `iris sync` or `iris health --fix` to regenerate".into()),
-            };
+        if symlink_status.is_error() {
+            return HealthStatus::error(
+                "Theme link missing in `alacritty` config directory",
+                Some("run `iris sync` or `iris health --fix` to regenerate"),
+            );
         }
 
         #[cfg(unix)]
@@ -115,16 +116,14 @@ impl Generator for AlacrittyGenerator {
         match fs::read_to_string(&main_config) {
             Ok(content) => {
                 if !content.contains("current_theme.toml") {
-                    return HealthStatus::Error {
-                        message: "Theme is not imported in alacritty.toml".into(),
-                        fix_hint: Some(
-                            "Add `import = [\"~/.config/alacritty/current_theme.toml\"]`".into(),
-                        ),
-                    };
+                    return HealthStatus::error(
+                        "Theme is not imported in alacritty.toml",
+                        Some("Add `import = [\"~/.config/alacritty/current_theme.toml\"]`"),
+                    );
                 }
             }
             Err(e) => {
-                return HealthStatus::Warning(format!("Could not read alacritty.toml: {}", e));
+                return HealthStatus::Warning(format!("Could not read alacritty.toml: {e}"));
             }
         }
 
@@ -139,46 +138,47 @@ impl Generator for AlacrittyGenerator {
         templater: &Templater,
         task: &mut Task,
     ) -> Result<()> {
-        match status {
-            HealthStatus::Error { message, .. } => {
-                let message_low = message.to_lowercase();
-
-                if message_low.contains("link missing") {
-                    task.log.action("Restored `alacritty` theme symlink", || {
-                        let cache = self.cache_path(paths, "");
-                        let link = self.link_path(paths, "");
-                        self.ensure_symlink(&cache, &link)
-                    })?;
-                }
-
-                if message_low.contains("import") {
-                    task.log
-                        .action("Injected theme import into alacritty.toml", || {
-                            self.inject_import_line(paths)
-                        })?;
-                }
-
-                self.apply(p, paths, templater, &mut task.as_quiet())
-            }
-
-            HealthStatus::Warning(msg) => {
-                let msg_low = msg.to_lowercase();
-
-                if msg_low.contains("unexpected") || msg_low.contains("old") {
-                    task.log.action("Updated `alacritty` symlink target", || {
-                        self.apply(p, paths, templater, &mut task.as_quiet())
-                    })
-                } else {
-                    task.info(&format!("Fixing `alacritty` warning: {}", msg));
-                    self.apply(p, paths, templater, &mut task.as_quiet())
-                }
-            }
-
-            _ => task.log.action(
+        if !status.is_error() && !status.is_warning() {
+            return task.log.action(
                 &format!("Re-applied `{}` configuration", self.name().bold()),
                 || self.apply(p, paths, templater, &mut task.as_quiet()),
-            ),
+            );
         }
+
+        let mut fixed = false;
+        if status.contains("link missing") {
+            task.log.action("Restored `alacritty` theme symlink", || {
+                let cache = self.cache_path(paths, "");
+                let link = self.link_path(paths, "");
+                self.ensure_symlink(&cache, &link)
+            })?;
+            fixed = true;
+        }
+
+        if status.contains("import") {
+            task.log
+                .action("Injected theme import into alacritty.toml", || {
+                    self.inject_import_line(paths)
+                })?;
+            fixed = true;
+        }
+
+        if status.contains("unexpected") || status.contains("old") {
+            fixed = false;
+        }
+
+        if !fixed {
+            if status.is_warning() && !status.contains("unexpected") && !status.contains("old") {
+                task.info(&format!("Fixing `alacritty` warning: {status}"));
+            }
+
+            task.log
+                .action("Regenerating complete `alacritty` configuration", || {
+                    self.apply(p, paths, templater, &mut task.as_quiet())
+                })?;
+        }
+
+        Ok(())
     }
 }
 
@@ -345,11 +345,7 @@ mod tests {
         fs::write(&main_config, "import = [\"current_theme.toml\"]").unwrap();
 
         let status = generator.health_check(&ctx.paths, &p.name);
-        assert!(
-            matches!(status, HealthStatus::Ok),
-            "Expected Ok, got {:?}",
-            status
-        );
+        assert!(status.is_ok(), "Expected Ok, got: {status}");
     }
 
     #[test]
@@ -370,12 +366,12 @@ mod tests {
         fs::write(&main_config, "[window]\ndecorations = \"none\"").unwrap();
 
         let status = generator.health_check(&ctx.paths, &p.name);
-        match status {
-            HealthStatus::Error { ref message, .. } => {
-                assert!(message.contains("not imported"));
-            }
-            _ => panic!("Expected Error for missing import, got {:?}", status),
-        }
+
+        assert!(
+            status.is_error(),
+            "Expected Error for missing import, got: {status}"
+        );
+        assert!(status.contains("not imported"));
     }
 
     #[test]
@@ -398,7 +394,12 @@ mod tests {
         }
 
         let status = generator.health_check(&ctx.paths, &p.name);
-        assert!(matches!(status, HealthStatus::Warning(msg) if msg.contains("not found")));
+
+        assert!(
+            status.is_warning(),
+            "Expected Warning for missing file, got: {status}"
+        );
+        assert!(status.contains("not found"));
     }
 
     #[test]
@@ -424,7 +425,6 @@ mod tests {
             link_path.exists(),
             "Symlink missing in Alacritty config dir"
         );
-        assert!(cache_file.exists());
 
         let content = fs::read_to_string(cache_file).unwrap();
         assert!(content.contains(&format!("background = \"{}\"", p.bg)));
@@ -450,11 +450,11 @@ mod tests {
 
         let status = generator.health_check(&ctx.paths, &p.name);
 
-        match status {
-            HealthStatus::Error { ref message, .. }
-                if message.to_lowercase().contains("import") => {}
-            _ => panic!("Expected Import Error, but got: {:?}", status),
-        }
+        assert!(
+            status.is_error(),
+            "Expected Import Error, but got: {status}"
+        );
+        assert!(status.contains("import"));
 
         generator
             .fix(&status, &p, &ctx.paths, &ctx.templater, &mut task)
@@ -465,13 +465,7 @@ mod tests {
             content.contains("current_theme.toml"),
             "Import line missing after fix!"
         );
-
-        let final_status = generator.health_check(&ctx.paths, &p.name);
-        assert!(
-            final_status.is_ok(),
-            "Final status should be Ok, but got: {:?}",
-            final_status
-        );
+        assert!(generator.health_check(&ctx.paths, &p.name).is_ok());
     }
 
     #[test]
@@ -501,11 +495,7 @@ mod tests {
         }
 
         let status = generator.health_check(&ctx.paths, &p.name);
-        assert!(
-            matches!(status, HealthStatus::Error { .. }),
-            "Should be Error, got: {:?}",
-            status
-        );
+        assert!(status.is_error(), "Should be Error, got: {status}");
 
         generator
             .fix(&status, &p, &ctx.paths, &ctx.templater, &mut task)
@@ -514,8 +504,61 @@ mod tests {
         let final_status = generator.health_check(&ctx.paths, &p.name);
         assert!(
             final_status.is_ok(),
-            "Health check failed after fix: {:?}",
-            final_status
+            "Health check failed after fix: {final_status}"
+        );
+    }
+
+    #[test]
+    fn should_clear_generated_files_for_alacritty() {
+        let (_, ctx) = create_test_context();
+        let generator = AlacrittyGenerator;
+
+        let cache_dir = ctx.paths.generators.join(generator.name());
+        fs::create_dir_all(&cache_dir).unwrap();
+        let file = cache_dir.join(generator.target_file_name(""));
+        fs::write(&file, "test").unwrap();
+
+        assert!(
+            cache_dir.exists(),
+            "Cache directory should exist before clearing"
+        );
+
+        generator.clear(&ctx.paths).unwrap();
+
+        assert!(
+            !cache_dir.exists(),
+            "Clear should remove the entire generator cache directory"
+        );
+    }
+
+    #[test]
+    fn should_remove_theme_for_alacritty() {
+        let (_, ctx) = create_test_context();
+        let generator = AlacrittyGenerator;
+
+        let cache_file = generator.cache_path(&ctx.paths, "");
+        let link_file = generator.link_path(&ctx.paths, "");
+
+        fs::create_dir_all(cache_file.parent().unwrap()).unwrap();
+        fs::create_dir_all(link_file.parent().unwrap()).unwrap();
+        fs::write(&cache_file, "test").unwrap();
+        fs::write(&link_file, "test").unwrap();
+
+        assert!(
+            cache_file.exists(),
+            "Cache file should exist before removal"
+        );
+        assert!(link_file.exists(), "Link file should exist before removal");
+
+        generator.remove_theme(&ctx.paths, "").unwrap();
+
+        assert!(
+            !cache_file.exists(),
+            "remove_theme should delete the cache file"
+        );
+        assert!(
+            !link_file.exists(),
+            "remove_theme should delete the target link file"
         );
     }
 }

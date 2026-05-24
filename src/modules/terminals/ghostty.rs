@@ -83,7 +83,7 @@ impl Generator for GhosttyGenerator {
         c
     }
 
-    fn health_check(&self, paths: &IrisPaths, _theme: &str) -> HealthStatus {
+    fn health_check(&self, paths: &IrisPaths, theme: &str) -> HealthStatus {
         if !self.is_installed() {
             return HealthStatus::Warning("`ghostty` binary not found".into());
         }
@@ -93,28 +93,29 @@ impl Generator for GhosttyGenerator {
         let link_path: PathBuf = self.link_path(paths, "");
         let expected_cache: PathBuf = self.cache_path(paths, "");
 
-        if !link_path.exists() {
-            return HealthStatus::Error {
-                message: "current_theme.conf missing".into(),
-                fix_hint: Some("run `iris sync` or `iris health --fix` to create the link".into()),
-            };
+        let config_status = HealthStatus::check_file(&config_path, "`ghostty` config file");
+        if config_status.is_error() {
+            return HealthStatus::error(
+                "`ghostty` config file missing",
+                Some(format!("Create {}", config_path.display())),
+            );
         }
 
-        if !config_path.exists() {
-            return HealthStatus::Error {
-                message: "`ghostty` config file missing".into(),
-                fix_hint: Some(format!("Create {}", config_path.display())),
-            };
-        }
-
-        let content = fs::read_to_string(&config_path).unwrap_or_default();
-        let import_line = format!("config-file = {}", self.target_file_name(""));
-
+        let content: String = fs::read_to_string(&config_path).unwrap_or_default();
+        let import_line: String = format!("config-file = {}", self.target_file_name(theme));
         if !content.contains(&import_line) {
             return HealthStatus::Warning(format!(
                 "Theme is generated but not imported in {}",
                 config_path.display()
             ));
+        }
+
+        let symlink_status = HealthStatus::check_symlink(&link_path, "current_theme.conf link");
+        if symlink_status.is_error() {
+            return HealthStatus::error(
+                "current_theme.conf missing or invalid",
+                Some("run `iris sync` or `iris health --fix` to recreate the link"),
+            );
         }
 
         #[cfg(unix)]
@@ -135,44 +136,49 @@ impl Generator for GhosttyGenerator {
         templater: &Templater,
         task: &mut Task,
     ) -> Result<()> {
-        match status {
-            HealthStatus::Error { message, .. } => {
-                let msg_low: String = message.to_lowercase();
-                if msg_low.contains("config file missing") {
-                    return task.log.action("Created `ghostty` config file", || {
-                        self.inject_import_line(paths)
-                    });
-                }
-
-                if msg_low.contains("missing") || msg_low.contains("not found") {
-                    return task
-                        .log
-                        .action("Repaired `ghostty` configuration and paths", || {
-                            self.ensure_cache_file(p, paths, templater)?;
-
-                            let cache = self.cache_path(paths, &p.name);
-                            let link = self.link_path(paths, &p.name);
-                            self.ensure_symlink(&cache, &link)
-                        });
-                }
-
-                task.log.action(
-                    &format!("Re-applied `{}` configuration", self.name().bold()),
-                    || self.apply(p, paths, templater, &mut task.as_quiet()),
-                )
-            }
-
-            HealthStatus::Warning(msg) if msg.contains("not imported") => {
-                task.log.action("Injected import line into `ghostty`", || {
-                    self.inject_import_line(paths)
-                })
-            }
-
-            _ => task.log.action(
+        if !status.is_error() && !status.is_warning() {
+            return task.log.action(
                 &format!("Re-applied `{}` configuration", self.name().bold()),
                 || self.apply(p, paths, templater, &mut task.as_quiet()),
-            ),
+            );
         }
+
+        let mut fixed = false;
+        if status.contains("config file missing") {
+            task.log
+                .action("Created missing `ghostty` config file", || {
+                    self.inject_import_line(paths)
+                })?;
+            fixed = true;
+        }
+
+        if status.contains("not imported") {
+            task.log
+                .action("Injected theme import line into `ghostty` config", || {
+                    self.inject_import_line(paths)
+                })?;
+            fixed = true;
+        }
+
+        if status.contains("missing or invalid") || status.contains("different cache") {
+            task.log
+                .action("Repaired `ghostty` theme files and symlinks", || {
+                    self.ensure_cache_file(p, paths, templater)?;
+                    let cache: PathBuf = self.cache_path(paths, &p.name);
+                    let link: PathBuf = self.link_path(paths, &p.name);
+                    self.ensure_symlink(&cache, &link)
+                })?;
+            fixed = true;
+        }
+
+        if !fixed {
+            task.log
+                .action("Regenerated complete `ghostty` configuration", || {
+                    self.apply(p, paths, templater, &mut task.as_quiet())
+                })?;
+        }
+
+        Ok(())
     }
 }
 
@@ -331,49 +337,18 @@ mod tests {
         fs::write(&config_path, import_line).unwrap();
 
         let status = generator.health_check(&ctx.paths, &p.name);
-        assert!(
-            matches!(status, HealthStatus::Ok),
-            "Expected Ok, got {:?}",
-            status
-        );
+        assert!(status.is_ok(), "Expected Ok, got: {status}");
     }
 
     #[test]
     fn should_return_health_error_missing_config_for_ghostty() {
-        let (tmp_dir, ctx) = create_test_context();
+        let (_, ctx) = create_test_context();
         let generator = GhosttyGenerator;
-        let root = tmp_dir.path();
+        let p = Palette::mock();
 
-        let config_dir = generator.resolve_config_directory(&ctx.paths);
-        let theme_link = generator.link_path(&ctx.paths, "");
-
-        assert!(
-            config_dir.starts_with(root),
-            "Config dir {:?} is outside of root {:?}",
-            config_dir,
-            root
-        );
-
-        fs::create_dir_all(theme_link.parent().unwrap()).unwrap();
-        fs::create_dir_all(&config_dir).unwrap();
-        fs::write(&theme_link, "palette = []").unwrap();
-
-        let config_path = config_dir.join("config");
-        if config_path.exists() {
-            fs::remove_file(&config_path).unwrap();
-        }
-
-        let status = generator.health_check(&ctx.paths, &ctx.state.current_theme);
-        match status {
-            HealthStatus::Error { ref message, .. } => {
-                assert!(
-                    message.to_lowercase().contains("config"),
-                    "Message was: {}",
-                    message
-                );
-            }
-            _ => panic!("Expected Error for missing config, but got: {:?}", status),
-        }
+        let status = generator.health_check(&ctx.paths, &p.name);
+        assert!(status.is_error(), "Expected Error, got: {status}");
+        assert!(status.contains("config file missing"));
     }
 
     #[test]
@@ -394,12 +369,12 @@ mod tests {
         fs::write(&config_path, "font-family = JetBrainsMono").unwrap();
 
         let status = generator.health_check(&ctx.paths, &p.name);
-        match status {
-            HealthStatus::Warning(msg) => {
-                assert!(msg.contains("not imported"));
-            }
-            _ => panic!("Expected Warning for missing import line, got {:?}", status),
-        }
+
+        assert!(
+            status.is_warning(),
+            "Expected Warning for missing import line, got: {status}"
+        );
+        assert!(status.contains("not imported"));
     }
 
     #[test]
@@ -453,44 +428,94 @@ mod tests {
 
     #[test]
     fn should_fix_broken_link_for_ghostty() {
-        let (_, ctx) = create_test_context();
+        let (_, mut ctx) = create_test_context();
         let generator = GhosttyGenerator;
         let p = Palette::mock();
-        let config_dir = generator.resolve_config_directory(&ctx.paths);
-        fs::create_dir_all(&config_dir).unwrap();
+        ctx.state.current_theme = p.name.clone();
 
         let mut task = ctx.log.step("Test", false).as_quiet();
+        let ghostty_dir = generator.resolve_config_directory(&ctx.paths);
+        let config_path = ghostty_dir.join("config");
+        fs::create_dir_all(&ghostty_dir).unwrap();
+
+        let import_line = format!("config-file = {}", generator.target_file_name(&p.name));
+        fs::write(&config_path, import_line).unwrap();
+
         generator
             .apply(&p, &ctx.paths, &ctx.templater, &mut task)
             .unwrap();
 
-        let config_path = config_dir.join("config");
-        fs::write(&config_path, "config-import = current_theme.conf").unwrap();
+        let link_path_empty = generator.link_path(&ctx.paths, "");
+        if link_path_empty.exists() {
+            fs::remove_file(&link_path_empty).unwrap();
+        }
 
-        let link_path = generator.link_path(&ctx.paths, "");
-        if link_path.exists() || link_path.is_symlink() {
-            fs::remove_file(&link_path).unwrap();
+        let link_path_theme = generator.link_path(&ctx.paths, &p.name);
+        if link_path_theme.exists() && link_path_theme != link_path_empty {
+            fs::remove_file(&link_path_theme).unwrap();
         }
 
         let status = generator.health_check(&ctx.paths, &p.name);
-        assert!(
-            matches!(status, HealthStatus::Error { .. }),
-            "Expected Error, got {:?}",
-            status
-        );
+        assert!(status.is_error());
+        assert!(status.contains("missing or invalid"));
 
         generator
             .fix(&status, &p, &ctx.paths, &ctx.templater, &mut task)
-            .expect("Fix failed");
+            .unwrap();
+        assert!(generator.health_check(&ctx.paths, &p.name).is_ok());
+    }
 
-        let final_status = generator.health_check(&ctx.paths, &p.name);
-        assert!(link_path.exists(), "Link should exist");
+    #[test]
+    fn should_clear_generated_files_for_ghostty() {
+        let (_, ctx) = create_test_context();
+        let generator = GhosttyGenerator;
 
-        match final_status {
-            HealthStatus::Error { message, .. } => {
-                panic!("Fix failed, still have Error: {}", message)
-            }
-            _ => {}
-        }
+        let cache_dir = ctx.paths.generators.join(generator.name());
+        fs::create_dir_all(&cache_dir).unwrap();
+        let file = cache_dir.join(generator.target_file_name(""));
+        fs::write(&file, "test").unwrap();
+
+        assert!(
+            cache_dir.exists(),
+            "Cache directory should exist before clearing"
+        );
+
+        generator.clear(&ctx.paths).unwrap();
+
+        assert!(
+            !cache_dir.exists(),
+            "Clear should remove the entire generator cache directory"
+        );
+    }
+
+    #[test]
+    fn should_remove_theme_for_ghostty() {
+        let (_, ctx) = create_test_context();
+        let generator = GhosttyGenerator;
+
+        let cache_file = generator.cache_path(&ctx.paths, "");
+        let link_file = generator.link_path(&ctx.paths, "");
+
+        fs::create_dir_all(cache_file.parent().unwrap()).unwrap();
+        fs::create_dir_all(link_file.parent().unwrap()).unwrap();
+        fs::write(&cache_file, "test").unwrap();
+        fs::write(&link_file, "test").unwrap();
+
+        assert!(
+            cache_file.exists(),
+            "Cache file should exist before removal"
+        );
+        assert!(link_file.exists(), "Link file should exist before removal");
+
+        generator.remove_theme(&ctx.paths, "").unwrap();
+
+        assert!(
+            !cache_file.exists(),
+            "remove_theme should delete the cache file"
+        );
+        assert!(
+            !link_file.exists(),
+            "remove_theme should delete the target link file"
+        );
     }
 }
