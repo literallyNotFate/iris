@@ -334,7 +334,14 @@ mod tests {
         state.enable_generator("zsh");
         state.enable_generator("kitty");
 
-        let array = reg.active(&state);
-        assert_eq!(array, "alacritty, zsh, kitty");
+        let array: String = reg.active(&state);
+        let expected: String = format!(
+            "{}, {}, {}",
+            "alacritty".cyan(),
+            "kitty".cyan(),
+            "zsh".cyan()
+        );
+
+        assert_eq!(array, expected);
     }
 }
