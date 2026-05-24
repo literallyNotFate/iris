@@ -25,7 +25,11 @@ pub fn exec(ctx: &IrisContext) -> anyhow::Result<()> {
         "󰏘".red(),
         current.bold().blue()
     );
-    println!("  {}  Plugin Manager:  {}", "⚙".magenta(), ctx.state.nvim);
+    println!(
+        "  {}  Plugin Manager:  {}",
+        "⚙".magenta(),
+        ctx.state.manager
+    );
 
     let cache_size: u64 = ctx.paths.get_size(&ctx.paths.palettes);
     let cached_count: usize = std::fs::read_dir(&ctx.paths.palettes)
@@ -136,7 +140,7 @@ fn render_quiet(ctx: &IrisContext, current: &str, nvim_theme: &str, is_sync: boo
         "\n{} Theme: {}\nPlugin manager: {}\nGenerators: {}",
         sync_icon,
         current.cyan().bold(),
-        ctx.state.nvim,
+        ctx.state.manager,
         if gens.is_empty() {
             "none".dimmed().to_string()
         } else {

@@ -1,3 +1,4 @@
+use crate::models::PluginManager;
 use anyhow::{Context, Result};
 use std::{
     fs,
@@ -104,6 +105,37 @@ impl IrisPaths {
         }
 
         0
+    }
+
+    /// Get Neovim root path with XDG_DATA_HOME
+    pub fn nvim_data_dir(&self) -> PathBuf {
+        if cfg!(test) {
+            self.cache.join("nvim_data")
+        } else {
+            std::env::var("XDG_DATA_HOME")
+                .map(PathBuf::from)
+                .unwrap_or_else(|_| dirs::home_dir().unwrap_or_default().join(".local/share"))
+                .join("nvim")
+        }
+    }
+
+    /// Get system path for Neovim config (~/.config/nvim)
+    pub fn nvim_config_dir(&self) -> PathBuf {
+        if cfg!(test) {
+            self.config.join("nvim_config")
+        } else {
+            std::env::var("XDG_CONFIG_HOME")
+                .map(PathBuf::from)
+                .unwrap_or_else(|_| dirs::home_dir().unwrap_or_default().join(".config"))
+                .join("nvim")
+        }
+    }
+
+    /// Resolves plugin manager relative path to absolute
+    pub fn resolve_plugin_path(&self, manager: &PluginManager) -> Option<PathBuf> {
+        manager
+            .plugin_subdirectory()
+            .map(|sub| self.nvim_data_dir().join(sub))
     }
 
     /// Checks whether requested palette is already cached

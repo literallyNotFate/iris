@@ -1,7 +1,7 @@
 use crate::{
-    core::IrisContext,
+    core::{Client, IrisContext},
     log::Task,
-    models::{NvimStrategy, Palette},
+    models::{Palette, PluginManager},
     utils,
 };
 use anyhow::{Context as _, Result};
@@ -51,19 +51,19 @@ impl IrisSetup {
             return Ok(());
         }
 
-        task.info("Detecting Neovim configuration style...");
-        let strategy: NvimStrategy = NvimStrategy::detect_strategy();
+        task.info("Detecting Neovim plugin manager...");
+        let manager: PluginManager = Client::detect_manager(&ctx.paths);
 
-        if strategy != NvimStrategy::Default {
-            let count: usize = strategy.count_plugins();
+        if manager != PluginManager::Default {
+            let count: usize = Client::count_plugins(&ctx.paths, &manager);
             task.info(&format!(
                 "Found {} with {} plugins installed.",
-                strategy,
+                manager,
                 count.to_string().yellow().bold()
             ));
         }
 
-        ctx.state.nvim = strategy;
+        ctx.state.manager = manager;
         task.info("Detecting active Neovim theme...");
         let current_theme = Palette::current().unwrap_or_else(|_| "".to_string());
 
@@ -227,7 +227,7 @@ mod tests {
                     ctx.paths.state_file.exists(),
                     "state.json should be created"
                 );
-                assert!(matches!(ctx.state.nvim, NvimStrategy::Default));
+                assert!(matches!(ctx.state.manager, PluginManager::Default));
 
                 let zshrc_content = fs::read_to_string(fake_home.join(".zshrc")).unwrap();
                 assert!(zshrc_content.contains("Iris FZF Sync"));

@@ -1,13 +1,13 @@
-use crate::models::NvimStrategy;
+use crate::models::PluginManager;
 use clap::Subcommand;
 
 #[derive(Subcommand)]
 pub enum ConfigAction {
     /// Configure Neovim integration
     Nvim {
-        /// Force a specific strategy (lazy, packer, default)
+        /// Force a specific plugin manager (lazy, packer, default)
         #[clap(long, short)]
-        strategy: Option<NvimStrategy>,
+        manager: Option<PluginManager>,
 
         /// Run auto-detection and update state
         #[clap(long, short)]

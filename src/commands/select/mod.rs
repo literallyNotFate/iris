@@ -2,9 +2,9 @@ pub(crate) mod item;
 
 use crate::{
     commands::apply_theme,
-    core::IrisContext,
+    core::{Client, IrisContext},
     log::Reporter,
-    models::{NvimStrategy, Palette},
+    models::Palette,
     utils::colors::select_theme,
 };
 use colored::Colorize;
@@ -15,9 +15,9 @@ use item::ThemeItem;
 pub fn exec(ctx: &mut IrisContext) -> anyhow::Result<()> {
     println!("\n{}  Scanning Neovim themes...", "󱑠".yellow());
 
-    let builtins: Vec<String> = NvimStrategy::get_builtin_themes();
+    let builtins: Vec<String> = Client::get_builtin_themes();
     let cached: Vec<String> = ctx.paths.get_cached_themes().unwrap_or_default();
-    let all_names: Vec<String> = NvimStrategy::get_all_themes()?;
+    let all_names: Vec<String> = Client::get_all_themes()?;
 
     let items: Vec<ThemeItem> = all_names
         .into_iter()

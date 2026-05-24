@@ -1,16 +1,20 @@
-use crate::{cli::ConfigAction, core::IrisContext, models::NvimStrategy};
+use crate::{
+    cli::ConfigAction,
+    core::{Client, IrisContext},
+    models::PluginManager,
+};
 use colored::*;
 
 /// Handle application config command
 pub fn exec(action: ConfigAction, ctx: &mut IrisContext) -> anyhow::Result<()> {
     match action {
-        ConfigAction::Nvim { strategy, detect } => {
+        ConfigAction::Nvim { manager, detect } => {
             render_config_header("Neovim Configuration", "⚙");
 
-            let selected: NvimStrategy = NvimStrategy::choose(strategy, detect, &ctx.log)?;
-            selected.validate()?;
+            let selected: PluginManager = Client::choose(&ctx.paths, manager, detect, &ctx.log)?;
+            Client::validate(&ctx.paths, &selected)?;
 
-            let count = selected.count_plugins();
+            let count: usize = Client::count_plugins(&ctx.paths, &selected);
             if count > 0 {
                 println!(
                     "{} found {} {} {}",
@@ -21,7 +25,7 @@ pub fn exec(action: ConfigAction, ctx: &mut IrisContext) -> anyhow::Result<()> {
                 );
             }
 
-            ctx.state.nvim = selected;
+            ctx.state.manager = selected;
         }
 
         ConfigAction::Fallback { name } => {

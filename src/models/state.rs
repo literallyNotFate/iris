@@ -1,7 +1,7 @@
-use crate::models::NvimStrategy;
 use anyhow::{Context, Result};
+use colored::Colorize;
 pub use serde::{Deserialize, Serialize};
-use std::{collections::BTreeSet, fs, path::PathBuf};
+use std::{collections::BTreeSet, fmt, fs, path::PathBuf};
 
 /// UI State of app which is being saved
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -13,7 +13,18 @@ pub struct State {
     pub fallback_theme: String,
 
     #[serde(default)]
-    pub nvim: NvimStrategy,
+    pub manager: PluginManager,
+}
+
+/// Plugin manager for nvim (to find themes)
+#[derive(Default, Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+#[serde(rename_all = "lowercase")]
+#[serde(tag = "type", content = "value")]
+pub enum PluginManager {
+    #[default]
+    Default,
+    Lazy,
+    Packer,
 }
 
 impl State {
@@ -68,12 +79,7 @@ impl State {
 
     /// Wrapper to get rtp command
     pub fn get_rtp_command(&self) -> Option<String> {
-        self.nvim.get_rtp_command()
-    }
-
-    /// Wrapper to path resolve for strategy
-    pub fn nvim_plugins_path(&self) -> Option<PathBuf> {
-        NvimStrategy::resolve_path(&self.nvim)
+        self.manager.get_rtp_command()
     }
 
     /// Save state to disk
@@ -107,23 +113,54 @@ impl State {
     }
 }
 
+/// Function to apply default fallback theme (for serde)
+fn retrobox() -> String {
+    "retrobox".to_string()
+}
+
 impl Default for State {
     fn default() -> Self {
         Self {
             current_theme: String::new(),
             enabled_generators: BTreeSet::new(),
             fallback_theme: retrobox(),
-            nvim: NvimStrategy::default(),
+            manager: PluginManager::default(),
         }
     }
 }
 
-/// Function to apply default fallback theme (for serde)
-fn retrobox() -> String {
-    "retrobox".to_string()
+impl PluginManager {
+    /// Returns relative subpath for plugins (clean string)
+    pub fn plugin_subdirectory(&self) -> Option<&'static str> {
+        match self {
+            PluginManager::Lazy => Some("lazy"),
+            PluginManager::Packer => Some("site/pack/packer/start"),
+            PluginManager::Default => None,
+        }
+    }
+
+    /// Generates Lua-command for runtimepath extension
+    pub fn get_rtp_command(&self) -> Option<String> {
+        let folder: &str = self.plugin_subdirectory()?;
+        Some(format!(
+            "lua local p = vim.fn.stdpath('data') .. '/{}' for _, dir in ipairs(vim.fn.expand(p .. '/*', false, true)) do vim.opt.rtp:append(dir) end",
+            folder
+        ))
+    }
 }
 
-/// Unit-tests for application state
+impl fmt::Display for PluginManager {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let text = match self {
+            PluginManager::Lazy => "Lazy.nvim".cyan().bold(),
+            PluginManager::Packer => "Packer.nvim".yellow().bold(),
+            PluginManager::Default => "Built-in".red().bold(),
+        };
+        write!(f, "{}", text)
+    }
+}
+
+/// Unit-tests for application state and plugin manager
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -153,7 +190,7 @@ mod tests {
             current_theme: "melange".into(),
             enabled_generators: BTreeSet::new(),
             fallback_theme: "retrobox".into(),
-            nvim: NvimStrategy::Default,
+            manager: PluginManager::Default,
         };
 
         state.enable_generator("kitty");
@@ -179,7 +216,7 @@ mod tests {
             State::load_from(&file_path).expect("Should parse even without new fields");
 
         assert_eq!(loaded.current_theme, "melange");
-        assert_eq!(loaded.nvim, NvimStrategy::Default);
+        assert_eq!(loaded.manager, PluginManager::Default);
         assert_eq!(loaded.fallback_theme, "retrobox");
     }
 
@@ -227,18 +264,30 @@ mod tests {
     }
 
     #[test]
-    fn should_persist_nvim_strategy() {
+    fn should_persist_nvim_manager() {
         let temp_dir: TempDir = TempDir::new("iris_enum_test").unwrap();
         let file_path: PathBuf = temp_dir.path().join("state.json");
 
         let mut state = State::default();
-        state.nvim = NvimStrategy::Lazy;
+        state.manager = PluginManager::Lazy;
         state.save_to(&file_path).unwrap();
 
         let content = fs::read_to_string(&file_path).unwrap();
         assert!(content.contains("lazy"));
 
         let loaded = State::load_from(&file_path).unwrap();
-        assert_eq!(loaded.nvim, NvimStrategy::Lazy);
+        assert_eq!(loaded.manager, PluginManager::Lazy);
+    }
+
+    #[test]
+    fn should_get_rtp_command_properly() {
+        let manager = PluginManager::Lazy;
+        let cmd = manager.get_rtp_command();
+
+        assert!(cmd.is_some());
+        assert!(cmd.unwrap().contains("rtp:append"));
+
+        let default_manager = PluginManager::Default;
+        assert!(default_manager.get_rtp_command().is_none());
     }
 }

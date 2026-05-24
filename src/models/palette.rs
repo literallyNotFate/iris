@@ -1,7 +1,7 @@
 use crate::{
-    core::IrisPaths,
+    core::{Client, IrisPaths},
     log::Reporter,
-    models::{NvimStrategy, State},
+    models::{PluginManager, State},
     utils::{self, CustomColor},
 };
 use anyhow::{Context, Result};
@@ -83,8 +83,8 @@ impl Palette {
             }
         }
 
-        if matches!(state.nvim, NvimStrategy::Default) {
-            let builtins = NvimStrategy::get_builtin_themes();
+        if matches!(state.manager, PluginManager::Default) {
+            let builtins = Client::get_builtin_themes();
             if !builtins.contains(&theme_lower) {
                 if cache_path.exists() {
                     if let Ok(content) = fs::read_to_string(&cache_path) {
@@ -159,8 +159,8 @@ impl Palette {
             return true;
         }
 
-        if matches!(state.nvim, NvimStrategy::Default) {
-            return NvimStrategy::get_builtin_themes().contains(&theme_lower);
+        if matches!(state.manager, PluginManager::Default) {
+            return Client::get_builtin_themes().contains(&theme_lower);
         }
 
         if which::which("nvim").is_err() {
@@ -212,8 +212,8 @@ impl Palette {
     fn build_base_args(state: &State) -> Vec<String> {
         let mut args: Vec<String> = vec!["--headless".to_string()];
 
-        match state.nvim {
-            NvimStrategy::Default => {
+        match state.manager {
+            PluginManager::Default => {
                 args.push("-u".into());
                 args.push("NONE".into());
             }
@@ -645,7 +645,7 @@ impl Palette {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{core::tests::create_test_context, models::NvimStrategy};
+    use crate::core::tests::create_test_context;
     use tempdir::TempDir;
 
     #[test]
@@ -783,7 +783,7 @@ mod tests {
     #[test]
     fn should_test_build_exists_args_case() {
         let (_temp, mut ctx) = create_test_context();
-        ctx.state.nvim = NvimStrategy::Lazy;
+        ctx.state.manager = PluginManager::Lazy;
         let args = Palette::build_exists_args("gruvbox", &ctx.state);
 
         assert!(args.contains(&"--headless".to_string()));
@@ -791,23 +791,23 @@ mod tests {
         assert!(args.iter().any(|a| a.contains("cquit 1")));
 
         let has_rtp = args.iter().any(|a| a.contains("vim.opt.rtp:append"));
-        assert!(has_rtp, "Lazy strategy must include RTP setup in arguments");
+        assert!(has_rtp, "Lazy must include RTP setup in arguments");
     }
 
     #[test]
-    fn should_test_build_args_without_rtp_for_default_strategy() {
+    fn should_test_build_args_without_rtp_for_default_manager() {
         let (_temp, mut ctx) = create_test_context();
-        ctx.state.nvim = NvimStrategy::Default;
+        ctx.state.manager = PluginManager::Default;
         let args = Palette::build_exists_args("default_theme", &ctx.state);
 
         let has_rtp = args.iter().any(|a| a.contains("vim.opt.rtp:append"));
-        assert!(!has_rtp, "Default strategy should NOT include RTP setup");
+        assert!(!has_rtp, "Default manager should NOT include RTP setup");
     }
 
     #[test]
-    fn should_read_from_cache_in_default_strategy_even_if_external() {
+    fn should_read_from_cache_in_default_manager_even_if_external() {
         let (_temp, mut ctx) = create_test_context();
-        ctx.state.nvim = NvimStrategy::Default;
+        ctx.state.manager = PluginManager::Default;
         let theme = "vesper";
         let cache_path = ctx.paths.palettes.join(format!("{}.json", theme));
 
@@ -826,7 +826,7 @@ mod tests {
     #[test]
     fn should_ignore_cache_when_force_is_true() {
         let (_temp, mut ctx) = create_test_context();
-        ctx.state.nvim = NvimStrategy::Lazy;
+        ctx.state.manager = PluginManager::Lazy;
 
         let theme = "habamax";
         let cache_path = ctx.paths.palettes.join(format!("{}.json", theme));

@@ -190,7 +190,7 @@ fn render_info(ctx: &IrisContext) -> Result<()> {
         ctx.state.current_theme.green().bold()
     );
     println!("    {:<12} {}", "Fallback", ctx.state.fallback_theme.blue());
-    println!("    {:<12} {}", "Strategy", ctx.state.nvim);
+    println!("    {:<12} {}", "Manager", ctx.state.manager);
 
     Ok(())
 }

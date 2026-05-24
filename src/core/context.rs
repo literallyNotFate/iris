@@ -1,8 +1,8 @@
 use super::IrisPaths;
 use crate::{
-    core::Templater,
+    core::{Client, Templater},
     log::Reporter,
-    models::{HealthStatus, NvimStrategy, Palette, State},
+    models::{HealthStatus, Palette, PluginManager, State},
     modules::{Generator, GeneratorRegistry},
     utils,
 };
@@ -115,8 +115,8 @@ impl IrisContext {
             return true;
         }
 
-        if matches!(self.state.nvim, NvimStrategy::Default) {
-            let is_builtin: bool = NvimStrategy::get_builtin_themes().iter().any(|t| t == name);
+        if matches!(self.state.manager, PluginManager::Default) {
+            let is_builtin: bool = Client::get_builtin_themes().iter().any(|t| t == name);
             return is_builtin || self.paths.palettes.join(format!("{}.json", name)).exists();
         }
 
@@ -255,7 +255,7 @@ mod tests {
     #[test]
     fn should_check_if_theme_available_builtin() {
         let (_temp, mut ctx) = create_test_context();
-        ctx.state.nvim = NvimStrategy::Default;
+        ctx.state.manager = PluginManager::Default;
 
         assert!(ctx.is_theme_available("habamax"));
         assert!(!ctx.is_theme_available("non-existent-theme-123"));
