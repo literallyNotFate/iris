@@ -82,7 +82,7 @@ fn handle_clear(all: bool, gen_name: Option<String>, ctx: &IrisContext) -> Resul
     }
 }
 
-/// Removes requested palette from the cache
+/// Removes requested palette from the cache along with theme config files for generator
 fn handle_remove(theme: &str, ctx: &IrisContext) -> Result<()> {
     let theme_lower = theme.to_lowercase();
     let path = ctx.paths.palettes.join(format!("{}.json", theme_lower));
@@ -110,6 +110,12 @@ fn handle_remove(theme: &str, ctx: &IrisContext) -> Result<()> {
         &format!("Removed `{}` from cache", utils::capitalize(theme).yellow()),
         || fs::remove_file(&path).context("Failed to delete theme file"),
     )?;
+
+    for generator in ctx.registry.all() {
+        let _ = generator.remove_theme(&ctx.paths, &theme_lower);
+    }
+
+    println!();
     Ok(())
 }
 

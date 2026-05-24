@@ -41,6 +41,11 @@ pub trait Generator: Send + Sync {
         format!("{}/{}", self.generator_type().label(), self.name())
     }
 
+    /// Path to the theme file (either in cache or link).
+    fn theme_path(&self, paths: &IrisPaths, theme: &str) -> PathBuf {
+        self.link_path(paths, theme)
+    }
+
     /// Checks whether this tool is installed
     fn is_installed(&self) -> bool {
         which::which(self.name()).is_ok()
@@ -123,6 +128,23 @@ pub trait Generator: Send + Sync {
                     bin_file.display()
                 )
             })?;
+        }
+
+        Ok(())
+    }
+
+    /// Removes cached files for generator of a certain theme
+    fn remove_theme(&self, paths: &IrisPaths, theme_name: &str) -> Result<()> {
+        let theme_name_lower: String = theme_name.to_lowercase();
+        let theme_file: PathBuf = self.theme_path(paths, &theme_name_lower);
+
+        if theme_file.exists() {
+            fs::remove_file(theme_file)?;
+        }
+
+        let cache_file: PathBuf = self.cache_path(paths, &theme_name_lower);
+        if cache_file.exists() {
+            fs::remove_file(cache_file)?;
         }
 
         Ok(())
