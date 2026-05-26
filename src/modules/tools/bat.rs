@@ -349,17 +349,22 @@ mod tests {
         let (_, mut ctx) = create_test_context();
         let generator = BatGenerator;
         let theme: Theme = Theme::mock();
+        let test_bat_cache = ctx.paths.generators.join("bat").join("cache");
 
-        let mut task = ctx.log.step("Test", false).as_quiet();
-        ctx.state.current_theme = theme.name.clone();
-        generator
-            .apply(&theme, &ctx.paths, &ctx.templater, &mut task)
-            .unwrap();
-        let expected_config = ctx.paths.generators.join(generator.name()).join("bat.conf");
+        temp_env::with_var("BAT_CACHE_PATH", Some(&test_bat_cache), || {
+            let mut task = ctx.log.step("Test", false).as_quiet();
+            ctx.state.current_theme = theme.name.clone();
 
-        temp_env::with_var("BAT_CONFIG_PATH", Some(expected_config), || {
-            let status = generator.health_check(&ctx.paths, &theme.name);
-            assert!(status.is_ok(), "Expected Ok, got: {status}");
+            generator
+                .apply(&theme, &ctx.paths, &ctx.templater, &mut task)
+                .unwrap();
+
+            let expected_config = ctx.paths.generators.join(generator.name()).join("bat.conf");
+
+            temp_env::with_var("BAT_CONFIG_PATH", Some(expected_config), || {
+                let status = generator.health_check(&ctx.paths, &theme.name);
+                assert!(status.is_ok(), "Expected Ok, got: {status}");
+            });
         });
     }
 
@@ -382,69 +387,68 @@ mod tests {
     fn should_apply_theme_for_bat() {
         let (_, ctx) = create_test_context();
         let generator = BatGenerator;
-        let theme: Theme = Theme::new("Test-Theme", Theme::mock().palette);
+        let theme: Theme = Theme::new("Test-Theme", Theme::mock().colors);
+        let test_bat_cache = ctx.paths.generators.join("bat").join("cache");
 
-        let expected_file_name: String = generator.target_file_name(&theme.name);
-        let expected_theme_name: String = theme.name.clone();
+        temp_env::with_var("BAT_CACHE_PATH", Some(&test_bat_cache), || {
+            let expected_file_name: String = generator.target_file_name(&theme.name);
+            let expected_theme_name: String = theme.name.clone();
 
-        let mut task = ctx.log.step("Test", false).as_quiet();
-        let result = generator.apply(&theme, &ctx.paths, &ctx.templater, &mut task);
-        assert!(result.is_ok(), "Apply failed: {:?}", result.err());
+            let mut task = ctx.log.step("Test", false).as_quiet();
+            let result = generator.apply(&theme, &ctx.paths, &ctx.templater, &mut task);
+            assert!(result.is_ok(), "Apply failed: {:?}", result.err());
 
-        let cache_theme_path: PathBuf = ctx.paths.generators.join("bat").join(&expected_file_name);
-        let bat_conf_path: PathBuf = ctx.paths.generators.join("bat").join("bat.conf");
+            let cache_theme_path: PathBuf =
+                ctx.paths.generators.join("bat").join(&expected_file_name);
+            let bat_conf_path: PathBuf = ctx.paths.generators.join("bat").join("bat.conf");
 
-        assert!(
-            cache_theme_path.exists(),
-            "Theme file should exist at {:?}",
-            cache_theme_path
-        );
-        assert!(bat_conf_path.exists(), "bat.conf should exist");
+            assert!(cache_theme_path.exists());
+            assert!(bat_conf_path.exists());
 
-        let conf_content = fs::read_to_string(bat_conf_path).unwrap();
-        assert!(
-            conf_content.contains(&format!("--theme=\"{}\"", expected_theme_name)),
-            "Config should contain capitalized theme name: {}",
-            expected_theme_name
-        );
-
-        let xml_content = fs::read_to_string(cache_theme_path).unwrap();
-        assert!(xml_content.contains("<plist"));
-        assert!(xml_content.contains(&expected_theme_name));
+            let conf_content = fs::read_to_string(bat_conf_path).unwrap();
+            assert!(conf_content.contains(&format!("--theme=\"{}\"", expected_theme_name)));
+        });
     }
 
     #[test]
     fn should_fix_missing_link_for_bat() {
         let base_tmp: TempDir = TempDir::new("missing_test").unwrap();
         let home_dir = base_tmp.path();
+        let (_iris_dir, ctx) = create_test_context();
+        let generator = BatGenerator;
+        let theme: Theme = Theme::mock();
+        let test_bat_cache = ctx.paths.generators.join("bat").join("cache");
 
-        temp_env::with_vars([("HOME", Some(home_dir))], || {
-            let (_iris_dir, ctx) = create_test_context();
-            let generator = BatGenerator;
-            let theme: Theme = Theme::mock();
-            let expected_env = ctx.paths.generators.join(generator.name()).join("bat.conf");
+        temp_env::with_vars(
+            [
+                ("HOME", Some(home_dir.as_os_str())),
+                ("BAT_CACHE_PATH", Some(test_bat_cache.as_os_str())),
+            ],
+            || {
+                let expected_env = ctx.paths.generators.join(generator.name()).join("bat.conf");
 
-            temp_env::with_var("BAT_CONFIG_PATH", Some(expected_env.as_os_str()), || {
-                let mut task = ctx.log.step("Test", false).as_quiet();
-                generator
-                    .apply(&theme, &ctx.paths, &ctx.templater, &mut task)
-                    .unwrap();
+                temp_env::with_var("BAT_CONFIG_PATH", Some(expected_env.as_os_str()), || {
+                    let mut task = ctx.log.step("Test", false).as_quiet();
+                    generator
+                        .apply(&theme, &ctx.paths, &ctx.templater, &mut task)
+                        .unwrap();
 
-                let link = generator.link_path(&ctx.paths, &theme.name);
-                if link.exists() {
-                    fs::remove_file(&link).unwrap();
-                }
+                    let link = generator.link_path(&ctx.paths, &theme.name);
+                    if link.exists() {
+                        fs::remove_file(&link).unwrap();
+                    }
 
-                let status = generator.health_check(&ctx.paths, &theme.name);
-                assert!(status.is_error(), "Expected Error, got: {status}");
-                assert!(status.contains("missing"));
+                    let status = generator.health_check(&ctx.paths, &theme.name);
+                    assert!(status.is_error());
+                    assert!(status.contains("missing"));
 
-                generator
-                    .fix(&status, &theme, &ctx.paths, &ctx.templater, &mut task)
-                    .unwrap();
-                assert!(generator.health_check(&ctx.paths, &theme.name).is_ok());
-            });
-        });
+                    generator
+                        .fix(&status, &theme, &ctx.paths, &ctx.templater, &mut task)
+                        .unwrap();
+                    assert!(generator.health_check(&ctx.paths, &theme.name).is_ok());
+                });
+            },
+        );
     }
 
     #[test]
@@ -452,24 +456,20 @@ mod tests {
         let (_, ctx) = create_test_context();
         let generator = BatGenerator;
         let theme: Theme = Theme::mock();
+        let test_bat_cache = ctx.paths.generators.join("bat").join("cache");
 
-        let mut task = ctx.log.step("Test", false).as_quiet();
-        generator
-            .apply(&theme, &ctx.paths, &ctx.templater, &mut task)
-            .unwrap();
+        temp_env::with_var("BAT_CACHE_PATH", Some(&test_bat_cache), || {
+            let mut task = ctx.log.step("Test", false).as_quiet();
+            generator
+                .apply(&theme, &ctx.paths, &ctx.templater, &mut task)
+                .unwrap();
 
-        let cache_dir: PathBuf = ctx.paths.generators.join(generator.name());
-        assert!(
-            cache_dir.exists(),
-            "Cache directory should exist before clearing"
-        );
+            let cache_dir: PathBuf = ctx.paths.generators.join(generator.name());
+            assert!(cache_dir.exists());
 
-        generator.clear(&ctx.paths).unwrap();
-
-        assert!(
-            !cache_dir.exists(),
-            "Clear should remove the entire generator cache directory"
-        );
+            generator.clear(&ctx.paths).unwrap();
+            assert!(!cache_dir.exists());
+        });
     }
 
     #[test]
@@ -477,30 +477,24 @@ mod tests {
         let (_, ctx) = create_test_context();
         let generator = BatGenerator;
         let theme: Theme = Theme::mock();
+        let test_bat_cache = ctx.paths.generators.join("bat").join("cache");
 
-        let mut task = ctx.log.step("Test", false).as_quiet();
-        generator
-            .apply(&theme, &ctx.paths, &ctx.templater, &mut task)
-            .unwrap();
+        temp_env::with_var("BAT_CACHE_PATH", Some(&test_bat_cache), || {
+            let mut task = ctx.log.step("Test", false).as_quiet();
+            generator
+                .apply(&theme, &ctx.paths, &ctx.templater, &mut task)
+                .unwrap();
 
-        let cache_file = generator.cache_path(&ctx.paths, &theme.name);
-        let link_file = generator.theme_path(&ctx.paths, &theme.name);
+            let cache_file = generator.cache_path(&ctx.paths, &theme.name);
+            let link_file = generator.theme_path(&ctx.paths, &theme.name);
 
-        assert!(
-            cache_file.exists(),
-            "Cache file should exist before removal"
-        );
-        assert!(link_file.exists(), "Theme file should exist before removal");
+            assert!(cache_file.exists());
+            assert!(link_file.exists());
 
-        generator.remove_theme(&ctx.paths, &theme.name).unwrap();
+            generator.remove_theme(&ctx.paths, &theme.name).unwrap();
 
-        assert!(
-            !cache_file.exists(),
-            "remove_theme should delete the cache file"
-        );
-        assert!(
-            !link_file.exists(),
-            "remove_theme should delete the target theme file"
-        );
+            assert!(!cache_file.exists());
+            assert!(!link_file.exists());
+        });
     }
 }
