@@ -1,4 +1,4 @@
-use crate::{cli::Commands, core::IrisContext, models::Palette, utils};
+use crate::{cli::Commands, core::IrisContext, models::Theme};
 
 pub mod apply;
 pub mod cache;
@@ -35,7 +35,7 @@ pub fn handle(command: Commands, ctx: &mut IrisContext) -> anyhow::Result<()> {
 }
 
 /// Helper function to apply theme
-pub(crate) fn apply_theme(palette: &Palette, ctx: &mut IrisContext) -> anyhow::Result<()> {
+pub(crate) fn apply_theme(theme: &Theme, ctx: &mut IrisContext) -> anyhow::Result<()> {
     use colored::*;
 
     let registry = &ctx.registry;
@@ -48,14 +48,14 @@ pub(crate) fn apply_theme(palette: &Palette, ctx: &mut IrisContext) -> anyhow::R
         println!(
             "{}  {}\n",
             "󰚔".green().bold(),
-            format!("Applying {}...", utils::capitalize(&palette.name)).bold()
+            format!("Applying {}...", theme.name).bold()
         );
     }
 
-    registry.apply_all(palette, state, paths, templater, &log)?;
-
-    let theme_name: String = palette.name.clone();
-    log.action("Updated local state", move || ctx.update(&theme_name))?;
+    registry.apply_all(theme, state, paths, templater, &log)?;
+    log.action("Updated local state", move || {
+        ctx.update(&theme.name.clone())
+    })?;
 
     println!("\n");
     Ok(())

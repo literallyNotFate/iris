@@ -84,21 +84,15 @@ fn handle_clear(all: bool, gen_name: Option<String>, ctx: &IrisContext) -> Resul
 
 /// Removes requested palette from the cache along with theme config files for generator
 fn handle_remove(theme: &str, ctx: &IrisContext) -> Result<()> {
-    let theme_lower = theme.to_lowercase();
-    let path = ctx.paths.palettes.join(format!("{}.json", theme_lower));
+    let theme_lower: String = theme.to_lowercase();
+    let path: PathBuf = ctx.paths.palette_cache_path(theme);
 
     if ctx.state.current_theme == theme_lower {
-        anyhow::bail!(
-            "Cannot remove active theme `{}`.",
-            utils::capitalize(theme).cyan().bold()
-        );
+        anyhow::bail!("Cannot remove active theme `{}`.", theme.cyan().bold());
     }
 
     if ctx.state.fallback_theme == theme_lower {
-        anyhow::bail!(
-            "Cannot remove fallback theme `{}`.",
-            utils::capitalize(theme).magenta().bold()
-        );
+        anyhow::bail!("Cannot remove fallback theme `{}`.", theme.magenta().bold());
     }
 
     if !path.exists() {
@@ -106,10 +100,10 @@ fn handle_remove(theme: &str, ctx: &IrisContext) -> Result<()> {
     }
 
     println!();
-    ctx.log.action(
-        &format!("Removed `{}` from cache", utils::capitalize(theme).yellow()),
-        || fs::remove_file(&path).context("Failed to delete theme file"),
-    )?;
+    ctx.log
+        .action(&format!("Removed `{}` from cache", theme.yellow()), || {
+            fs::remove_file(&path).context("Failed to delete theme file")
+        })?;
 
     for generator in ctx.registry.all() {
         let _ = generator.remove_theme(&ctx.paths, &theme_lower);
@@ -125,23 +119,24 @@ fn render_list(ctx: &IrisContext) -> Result<()> {
     let themes: Vec<String> = ctx.paths.get_cached_themes()?;
 
     for name in themes {
-        let file_path: PathBuf = ctx.paths.palettes.join(format!("{}.json", name));
+        let file_path: PathBuf = ctx.paths.palette_cache_path(&name);
         let size: u64 = fs::metadata(&file_path)?.len();
         let display_name: String = utils::capitalize(&name);
 
-        let mut line = format!(
-            "  • {:<15} {:>8}",
-            display_name,
-            utils::format_size(size).dimmed()
-        );
-
-        if name == ctx.state.current_theme {
-            line.push_str(&format!(" {}", "󰄬  (active)".green()));
+        let status = if name == ctx.state.current_theme {
+            "✓  (active)".green()
         } else if name == ctx.state.fallback_theme {
-            line.push_str(&format!(" {}", "󰁯  (fallback)".blue()));
-        }
+            "󰁯  (fallback)".blue()
+        } else {
+            "".into()
+        };
 
-        println!("{}", line);
+        println!(
+            "  • {:<15} {:>8}  {}",
+            display_name,
+            utils::format_size(size).dimmed(),
+            status
+        );
     }
 
     Ok(())
@@ -187,9 +182,13 @@ fn render_info(ctx: &IrisContext) -> Result<()> {
     println!(
         "    {:<12} {}",
         "Theme",
-        ctx.state.current_theme.green().bold()
+        utils::capitalize(&ctx.state.current_theme).green().bold()
     );
-    println!("    {:<12} {}", "Fallback", ctx.state.fallback_theme.blue());
+    println!(
+        "    {:<12} {}",
+        "Fallback",
+        utils::capitalize(&ctx.state.fallback_theme).blue()
+    );
     println!("    {:<12} {}", "Manager", ctx.state.manager);
 
     Ok(())

@@ -2,9 +2,9 @@ pub(crate) mod item;
 
 use crate::{
     commands::apply_theme,
-    core::{Client, IrisContext},
+    core::{IrisContext, NeovimBridge, ThemeOrchestrator},
     log::Reporter,
-    models::Palette,
+    models::{Palette, Theme},
     utils::colors::select_theme,
 };
 use colored::Colorize;
@@ -15,9 +15,9 @@ use item::ThemeItem;
 pub fn exec(ctx: &mut IrisContext) -> anyhow::Result<()> {
     println!("\n{}  Scanning Neovim themes...", "󱑠".yellow());
 
-    let builtins: Vec<String> = Client::get_builtin_themes();
+    let builtins: Vec<String> = NeovimBridge::get_builtin_themes();
     let cached: Vec<String> = ctx.paths.get_cached_themes().unwrap_or_default();
-    let all_names: Vec<String> = Client::get_all_themes()?;
+    let all_names: Vec<String> = NeovimBridge::get_all_themes()?;
 
     let items: Vec<ThemeItem> = all_names
         .into_iter()
@@ -33,6 +33,9 @@ pub fn exec(ctx: &mut IrisContext) -> anyhow::Result<()> {
     let labels: Vec<String> = items.iter().map(|i| i.render_label()).collect();
     let mut current_idx = items.iter().position(|i| i.is_active).unwrap_or(0);
     let term: Term = Term::stdout();
+
+    let quiet_logger: Reporter = Reporter::quiet();
+    let orchestrator = ThemeOrchestrator::new(&ctx.paths, &quiet_logger);
 
     loop {
         term.clear_screen()?;
@@ -60,16 +63,8 @@ pub fn exec(ctx: &mut IrisContext) -> anyhow::Result<()> {
                 ))?;
             }
 
-            let palette: Palette = Palette::fetch(
-                &item.name,
-                false,
-                false,
-                &ctx.paths,
-                &ctx.state,
-                &Reporter::quiet(),
-            )?;
-
-            render_preview_flow(&palette)?;
+            let theme_obj: Theme = orchestrator.load_theme(&item.name, false, false, &ctx.state)?;
+            render_preview_flow(&theme_obj.name, &theme_obj.palette)?;
             println!();
 
             let action: Option<usize> = Select::with_theme(&select_theme())
@@ -80,16 +75,10 @@ pub fn exec(ctx: &mut IrisContext) -> anyhow::Result<()> {
             match action {
                 Some(0) => {
                     term.clear_screen()?;
+                    let final_theme: Theme =
+                        orchestrator.load_theme(&item.name, false, true, &ctx.state)?;
 
-                    if !item.is_cached {
-                        let cache_path = ctx
-                            .paths
-                            .palettes
-                            .join(format!("{}.json", item.name.to_lowercase()));
-                        Palette::save_to_cache(&cache_path, &palette)?;
-                    }
-
-                    return apply_theme(&palette, ctx);
+                    return apply_theme(&final_theme, ctx);
                 }
                 Some(1) => continue,
                 _ => break,
@@ -103,9 +92,7 @@ pub fn exec(ctx: &mut IrisContext) -> anyhow::Result<()> {
 }
 
 /// Helper function to render theme preview
-fn render_preview_flow(palette: &Palette) -> anyhow::Result<()> {
-    let name = &palette.name;
-
+fn render_preview_flow(name: &str, palette: &Palette) -> anyhow::Result<()> {
     println!("\n  {}  Preview: {}", "".magenta(), name.bold());
     println!();
     palette.ansi_grid();

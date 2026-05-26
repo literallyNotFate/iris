@@ -1,38 +1,39 @@
-use crate::{core::IrisContext, log::Reporter, models::Palette, utils::CustomColor};
+use crate::{
+    core::{IrisContext, ThemeOrchestrator},
+    log::Reporter,
+    models::Theme,
+    utils::CustomColor,
+};
 use colored::*;
 
 /// Handle theme preview command
 pub fn exec(requested_theme: Option<String>, ctx: &IrisContext) -> anyhow::Result<()> {
     let (theme_name, is_fallback) = ctx.resolve_theme(requested_theme.clone(), true)?;
 
-    let palette: Palette = Palette::fetch(
-        &theme_name,
-        false,
-        false,
-        &ctx.paths,
-        &ctx.state,
-        &Reporter::quiet(),
-    )?;
-    println!();
-    render_header(&palette, is_fallback, requested_theme);
+    let quiet_logger: Reporter = Reporter::quiet();
+    let orchestrator = ThemeOrchestrator::new(&ctx.paths, &quiet_logger);
+    let theme_obj: Theme = orchestrator.load_theme(&theme_name, false, true, &ctx.state)?;
 
-    let label = |s: &str| s.bold().color_code_fg(&palette.comment);
+    println!();
+    render_header(&theme_obj.name, is_fallback, requested_theme);
+
+    let label = |s: &str| s.bold().color_code_fg(&theme_obj.palette.comment);
 
     println!("  {}", label("Core & Syntax:"));
-    palette.core_and_syntax_colors();
+    theme_obj.palette.core_and_syntax_colors();
 
     println!("\n  {}", label("Terminal ANSI Grid:"));
-    palette.ansi_grid();
+    theme_obj.palette.ansi_grid();
 
     println!("\n  {}", label("Syntax Highlight Preview:"));
-    palette.preview_code();
+    theme_obj.palette.preview_code();
 
     println!("\n");
     Ok(())
 }
 
 /// Helper function to render header for preview
-fn render_header(p: &Palette, fallback: bool, requested: Option<String>) {
+fn render_header(theme: &str, fallback: bool, requested: Option<String>) {
     if fallback {
         if let Some(req) = requested {
             println!(
@@ -41,7 +42,7 @@ fn render_header(p: &Palette, fallback: bool, requested: Option<String>) {
                 req.dimmed()
             );
         } else {
-            println!("     {} Showing active system theme", "󰄬".blue());
+            println!("     {} Showing active system theme", "✓".blue());
         }
     }
 
@@ -49,7 +50,7 @@ fn render_header(p: &Palette, fallback: bool, requested: Option<String>) {
         "{}  {} {}",
         "".magenta().bold(),
         "Theme Preview:".bold(),
-        p.name.magenta().bold()
+        theme.magenta().bold()
     );
 
     println!();

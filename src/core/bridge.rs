@@ -1,16 +1,13 @@
-use crate::{core::IrisPaths, log::Reporter, models::PluginManager};
-use anyhow::Result;
-use colored::Colorize;
-use std::{
-    fs,
-    path::{Path, PathBuf},
-    process::Command,
+use crate::{
+    core::IrisPaths,
+    models::{Palette, PluginManager, State},
 };
+use std::{fs, path::Path, process::Command};
 
 /// Infrastructure client to interact with Neovim and its filesystem environment
-pub struct Client;
+pub struct NeovimBridge;
 
-impl Client {
+impl NeovimBridge {
     /// Automatically detect plugin manager based on your config
     pub fn detect_manager(paths: &IrisPaths) -> PluginManager {
         if paths.nvim_config_dir().join("lazy-lock.json").exists() {
@@ -28,36 +25,7 @@ impl Client {
         PluginManager::Default
     }
 
-    /// Validates if manager can be applied
-    pub fn validate(paths: &IrisPaths, manager: &PluginManager) -> Result<()> {
-        if matches!(manager, PluginManager::Default) {
-            return Ok(());
-        }
-
-        let p: PathBuf = paths
-            .resolve_plugin_path(manager)
-            .ok_or_else(|| anyhow::anyhow!("Could not resolve plugin path"))?;
-
-        if !p.exists() {
-            anyhow::bail!(
-                "Validation failed. {} directory not found at {}",
-                manager,
-                p.display().to_string().cyan()
-            );
-        }
-
-        if !Self::has_plugins(&p) {
-            anyhow::bail!(
-                "Validation failed. {} exists, but no plugins were found in {}",
-                manager,
-                p.display().to_string().yellow()
-            );
-        }
-
-        Ok(())
-    }
-
-    /// Counts number of folder in plugin directory
+    /// Counts number of folders in plugin directory
     pub fn count_plugins(paths: &IrisPaths, manager: &PluginManager) -> usize {
         paths
             .resolve_plugin_path(manager)
@@ -136,8 +104,8 @@ impl Client {
         }
     }
 
-    // Get all themes installed in nvim
-    pub fn get_all_themes() -> Result<Vec<String>> {
+    /// Get all themes installed in nvim
+    pub fn get_all_themes() -> anyhow::Result<Vec<String>> {
         let output = Command::new("nvim")
             .args([
                 "--headless",
@@ -160,7 +128,7 @@ impl Client {
     }
 
     /// Helper function to check whether plugins are installed
-    fn has_plugins(path: &Path) -> bool {
+    pub(crate) fn has_plugins(path: &Path) -> bool {
         fs::read_dir(path)
             .map(|entries| {
                 entries
@@ -170,35 +138,57 @@ impl Client {
             .unwrap_or(false)
     }
 
-    /// Chooses which manager to use based on CLI arguments and logs the result
-    pub fn choose(
-        paths: &IrisPaths,
-        manager: Option<PluginManager>,
-        detect: bool,
-        log: &Reporter,
-    ) -> Result<PluginManager> {
-        if detect {
-            let res = log.action("Auto-detected plugin manager", || {
-                Ok::<PluginManager, anyhow::Error>(Self::detect_manager(paths))
-            })?;
+    /// Runs Neovim in headless mode to capture the colors of the selected theme
+    pub fn run_fetch_bridge(theme: &str, state: &State) -> anyhow::Result<String> {
+        let mut args: Vec<String> = Self::build_base_args(state);
+        args.extend([
+            "-c".into(),
+            format!("colorscheme {}", theme.to_lowercase()),
+            "-c".into(),
+            format!("lua {}", Palette::fetch_lua_script()),
+            "-c".into(),
+            "qa!".into(),
+        ]);
 
-            log.success(&format!(
-                "Active manager: {}",
-                res.to_string().cyan().bold()
-            ));
-
-            return Ok(res);
+        let output = Command::new("nvim").args(&args).output()?;
+        if !output.status.success() {
+            let error_msg = String::from_utf8_lossy(&output.stderr);
+            anyhow::bail!("Neovim failed to export palette: {}", error_msg.trim());
         }
 
-        if let Some(s) = manager {
-            log.info(&format!(
-                "Manual selection: {}",
-                s.to_string().yellow().bold()
-            ));
-            return Ok(s);
-        }
+        Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+    }
 
-        anyhow::bail!("Plugin manager required. Use `--manager <name>` or `--detect`")
+    /// Checks whether Neovim can apply theme without any errors
+    pub fn check_theme_exists(theme: &str, state: &State) -> bool {
+        let mut args: Vec<String> = Self::build_base_args(state);
+        args.extend([
+            "-c".into(),
+            format!(
+                "try | colorscheme {} | qa! | catch | cquit 1 | endtry",
+                theme.to_lowercase()
+            ),
+        ]);
+
+        match Command::new("nvim").args(&args).output() {
+            Ok(o) => o.status.success(),
+            _ => false,
+        }
+    }
+
+    /// Helper to build flags for Neovim
+    fn build_base_args(state: &State) -> Vec<String> {
+        let mut args: Vec<String> = vec!["--headless".to_string()];
+        args.push("-u".into());
+        args.push("NONE".into());
+
+        if state.manager != PluginManager::Default {
+            if let Some(rtp_cmd) = state.get_rtp_command() {
+                args.push("-c".into());
+                args.push(rtp_cmd);
+            }
+        }
+        args
     }
 }
 
@@ -216,27 +206,8 @@ mod tests {
         fs::create_dir_all(&config_nvim).unwrap();
         fs::write(config_nvim.join("lazy-lock.json"), "{}").unwrap();
 
-        let manager: PluginManager = Client::detect_manager(&ctx.paths);
+        let manager: PluginManager = NeovimBridge::detect_manager(&ctx.paths);
         assert_eq!(manager, PluginManager::Lazy);
-    }
-
-    #[test]
-    fn should_fail_validation_if_no_plugins_found() {
-        let (_temp, ctx) = create_test_context();
-        let packer_dir = ctx
-            .paths
-            .resolve_plugin_path(&PluginManager::Packer)
-            .unwrap();
-
-        fs::create_dir_all(&packer_dir).unwrap();
-
-        let res = Client::validate(&ctx.paths, &PluginManager::Packer);
-        assert!(res.is_err());
-        assert!(
-            res.unwrap_err()
-                .to_string()
-                .contains("no plugins were found")
-        );
     }
 
     #[test]
@@ -248,14 +219,40 @@ mod tests {
         fs::create_dir_all(lazy_dir.join("p2")).unwrap();
         fs::create_dir_all(lazy_dir.join("p3")).unwrap();
 
-        let count = Client::count_plugins(&ctx.paths, &PluginManager::Lazy);
+        let count = NeovimBridge::count_plugins(&ctx.paths, &PluginManager::Lazy);
         assert_eq!(count, 3);
     }
 
     #[test]
     fn should_return_at_least_basic_builtin_themes() {
-        let themes = Client::get_builtin_themes();
+        let themes = NeovimBridge::get_builtin_themes();
         assert!(!themes.is_empty());
         assert!(themes.contains(&"habamax".to_string()));
+    }
+
+    #[test]
+    fn should_test_build_args_for_lazy_manager() {
+        let (_temp, mut ctx) = create_test_context();
+        ctx.state.manager = PluginManager::Lazy;
+        let args = NeovimBridge::build_base_args(&ctx.state);
+
+        assert!(args.contains(&"--headless".to_string()));
+        assert!(args.contains(&"NONE".to_string()));
+
+        let has_rtp = args.iter().any(|a| a.contains("vim.opt.rtp:append"));
+        assert!(
+            has_rtp,
+            "Lazy manager must include RTP setup in base arguments"
+        );
+    }
+
+    #[test]
+    fn should_test_build_args_without_rtp_for_default_manager() {
+        let (_temp, mut ctx) = create_test_context();
+        ctx.state.manager = PluginManager::Default;
+        let args = NeovimBridge::build_base_args(&ctx.state);
+
+        let has_rtp = args.iter().any(|a| a.contains("vim.opt.rtp:append"));
+        assert!(!has_rtp, "Default manager should NOT include RTP setup");
     }
 }

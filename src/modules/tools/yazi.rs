@@ -1,7 +1,7 @@
 use crate::{
     core::{IrisPaths, Templater},
     log::Task,
-    models::{HealthStatus, Palette},
+    models::{HealthStatus, Theme},
     modules::{Generator, GeneratorType},
     utils,
 };
@@ -35,13 +35,13 @@ impl Generator for YaziGenerator {
 
     fn apply(
         &self,
-        p: &Palette,
+        theme: &Theme,
         paths: &IrisPaths,
         templater: &Templater,
         task: &mut Task,
     ) -> Result<()> {
-        let cache_file: PathBuf = self.ensure_cache_file(p, paths, templater)?;
-        let link_path: PathBuf = self.link_path(paths, &p.name);
+        let cache_file: PathBuf = self.ensure_cache_file(theme, paths, templater)?;
+        let link_path: PathBuf = self.link_path(paths, &theme.name.to_lowercase());
 
         task.info(&format!(
             "Linking {} theme to {}...",
@@ -52,44 +52,44 @@ impl Generator for YaziGenerator {
 
         task.info(&format!(
             "{} theme applied to {}",
-            utils::capitalize(&p.name).yellow(),
+            theme.name.yellow(),
             self.name().bold().cyan()
         ));
         Ok(())
     }
 
-    fn build_render_context(&self, p: &Palette) -> tera::Context {
+    fn build_render_context(&self, theme: &Theme) -> tera::Context {
         let mut c = tera::Context::new();
 
-        c.insert("theme_name", &utils::capitalize(&p.name));
-        c.insert("bg", &p.bg);
-        c.insert("fg", &p.fg);
-        c.insert("white", &p.white);
-        c.insert("comment", &p.comment);
-        c.insert("gutter_fg", &p.gutter_fg);
-        c.insert("ansi", &p.ansi);
-        c.insert("sel", &p.sel);
+        c.insert("theme_name", &theme.name);
+        c.insert("bg", &theme.palette.bg);
+        c.insert("fg", &theme.palette.fg);
+        c.insert("white", &theme.palette.white);
+        c.insert("comment", &theme.palette.comment);
+        c.insert("gutter_fg", &theme.palette.gutter_fg);
+        c.insert("ansi", &theme.palette.ansi);
+        c.insert("sel", &theme.palette.sel);
 
-        let line_hl = if p.line_hl == "#cccccc" {
-            &p.sel
+        let line_hl = if theme.palette.line_hl == "#cccccc" {
+            &theme.palette.sel
         } else {
-            &p.line_hl
+            &theme.palette.line_hl
         };
         c.insert("line_hl", line_hl);
 
-        c.insert("red", &p.ansi[1]);
-        c.insert("green", &p.ansi[2]);
-        c.insert("orange", &p.ansi[3]);
-        c.insert("blue", &p.ansi[4]);
-        c.insert("magenta", &p.ansi[5]);
-        c.insert("teal", &p.ansi[6]);
-        c.insert("tan", &p.ansi[7]);
-        c.insert("br_red", &p.ansi[9]);
-        c.insert("br_green", &p.ansi[10]);
-        c.insert("br_orange", &p.ansi[11]);
-        c.insert("br_blue", &p.ansi[12]);
-        c.insert("br_magenta", &p.ansi[13]);
-        c.insert("br_teal", &p.ansi[14]);
+        c.insert("red", &theme.palette.ansi[1]);
+        c.insert("green", &theme.palette.ansi[2]);
+        c.insert("orange", &theme.palette.ansi[3]);
+        c.insert("blue", &theme.palette.ansi[4]);
+        c.insert("magenta", &theme.palette.ansi[5]);
+        c.insert("teal", &theme.palette.ansi[6]);
+        c.insert("tan", &theme.palette.ansi[7]);
+        c.insert("br_red", &theme.palette.ansi[9]);
+        c.insert("br_green", &theme.palette.ansi[10]);
+        c.insert("br_orange", &theme.palette.ansi[11]);
+        c.insert("br_blue", &theme.palette.ansi[12]);
+        c.insert("br_magenta", &theme.palette.ansi[13]);
+        c.insert("br_teal", &theme.palette.ansi[14]);
 
         c
     }
@@ -135,7 +135,7 @@ impl Generator for YaziGenerator {
     fn fix(
         &self,
         status: &HealthStatus,
-        p: &Palette,
+        theme: &Theme,
         paths: &IrisPaths,
         templater: &Templater,
         task: &mut Task,
@@ -143,22 +143,22 @@ impl Generator for YaziGenerator {
         if !status.is_error() && !status.is_warning() {
             return task.log.action(
                 &format!("Re-applied `{}` configuration", self.name().bold()),
-                || self.apply(p, paths, templater, &mut task.as_quiet()),
+                || self.apply(theme, paths, templater, &mut task.as_quiet()),
             );
         }
 
         let mut fixed = false;
         if status.contains("cache file is missing") {
             task.log.action("Generated missing cache file", || {
-                self.ensure_cache_file(p, paths, templater)
+                self.ensure_cache_file(theme, paths, templater)
             })?;
             fixed = true;
         }
 
         if status.contains("link missing") || status.contains("unexpected location") {
             task.log.action("Restored correct theme symlink", || {
-                let cache = self.cache_path(paths, &p.name);
-                let link = self.link_path(paths, &p.name);
+                let cache = self.cache_path(paths, &theme.name.to_lowercase());
+                let link = self.link_path(paths, &theme.name.to_lowercase());
                 self.ensure_symlink(&cache, &link)
             })?;
             fixed = true;
@@ -167,7 +167,7 @@ impl Generator for YaziGenerator {
         if !fixed {
             task.log
                 .action("Regenerated complete `yazi` configuration", || {
-                    self.apply(p, paths, templater, &mut task.as_quiet())
+                    self.apply(theme, paths, templater, &mut task.as_quiet())
                 })?;
         }
 
@@ -178,12 +178,12 @@ impl Generator for YaziGenerator {
 impl YaziGenerator {
     fn ensure_cache_file(
         &self,
-        p: &Palette,
+        theme: &Theme,
         paths: &IrisPaths,
         templater: &Templater,
     ) -> Result<PathBuf> {
-        let cache_file: PathBuf = self.cache_path(paths, &p.name);
-        let render_ctx = self.build_render_context(p);
+        let cache_file: PathBuf = self.cache_path(paths, &theme.name.to_lowercase());
+        let render_ctx = self.build_render_context(theme);
         let content: String = templater.render(&self.template_path(), &render_ctx)?;
 
         if let Some(parent) = cache_file.parent() {
@@ -257,15 +257,15 @@ mod tests {
     #[test]
     fn should_build_valid_render_context() {
         let generator = YaziGenerator;
-        let mut p = Palette::mock();
+        let mut theme: Theme = Theme::mock();
 
-        p.line_hl = "#123456".to_string();
-        let ctx = generator.build_render_context(&p);
+        theme.palette.line_hl = "#123456".to_string();
+        let ctx = generator.build_render_context(&theme);
         assert_eq!(ctx.get("line_hl").unwrap().as_str().unwrap(), "#123456");
 
-        p.line_hl = "#cccccc".to_string();
-        p.sel = "#ff0000".to_string();
-        let ctx = generator.build_render_context(&p);
+        theme.palette.line_hl = "#cccccc".to_string();
+        theme.palette.sel = "#ff0000".to_string();
+        let ctx = generator.build_render_context(&theme);
 
         assert_eq!(ctx.get("line_hl").unwrap().as_str().unwrap(), "#ff0000");
         assert!(ctx.get("red").is_some());
@@ -276,15 +276,15 @@ mod tests {
     fn should_return_health_ok_for_yazi() {
         let (_, mut ctx) = create_test_context();
         let generator = YaziGenerator;
-        let p = Palette::mock();
+        let theme: Theme = Theme::mock();
 
-        ctx.state.current_theme = p.name.clone();
+        ctx.state.current_theme = theme.name.clone();
         let mut task = ctx.log.step("Test", false);
         generator
-            .apply(&p, &ctx.paths, &ctx.templater, &mut task)
+            .apply(&theme, &ctx.paths, &ctx.templater, &mut task)
             .unwrap();
 
-        let status = generator.health_check(&ctx.paths, &p.name);
+        let status = generator.health_check(&ctx.paths, &theme.name);
         assert!(status.is_ok(), "Expected Ok, got: {status}");
     }
 
@@ -307,17 +307,17 @@ mod tests {
     fn should_return_health_error_missing_cache_for_yazi() {
         let (_, mut ctx) = create_test_context();
         let generator = YaziGenerator;
-        let p = Palette::mock();
-        ctx.state.current_theme = p.name.clone();
+        let theme: Theme = Theme::mock();
+        ctx.state.current_theme = theme.name.clone();
 
         let mut task = ctx.log.step("Test", false).as_quiet();
         generator
-            .apply(&p, &ctx.paths, &ctx.templater, &mut task)
+            .apply(&theme, &ctx.paths, &ctx.templater, &mut task)
             .unwrap();
-        let cache_path = generator.cache_path(&ctx.paths, &p.name);
+        let cache_path = generator.cache_path(&ctx.paths, &theme.name);
         fs::remove_file(cache_path).unwrap();
 
-        let status = generator.health_check(&ctx.paths, &p.name);
+        let status = generator.health_check(&ctx.paths, &theme.name);
         assert!(status.is_error(), "Expected Error, got: {status}");
         assert!(status.contains("cache") && status.contains("missing"));
     }
@@ -326,11 +326,11 @@ mod tests {
     fn should_apply_theme_for_yazi() {
         let (_, ctx) = create_test_context();
         let generator = YaziGenerator;
-        let p = Palette::mock();
+        let theme: Theme = Theme::mock();
 
         let mut task = ctx.log.step("Test", false);
         generator
-            .apply(&p, &ctx.paths, &ctx.templater, &mut task)
+            .apply(&theme, &ctx.paths, &ctx.templater, &mut task)
             .unwrap();
 
         let expected_yazi_dir = generator.resolve_config_directory(&ctx.paths);
@@ -350,24 +350,24 @@ mod tests {
     fn should_fix_broken_symlink_for_yazi() {
         let (_, ctx) = create_test_context();
         let generator = YaziGenerator;
-        let p = Palette::mock();
+        let theme: Theme = Theme::mock();
 
         let mut task = ctx.log.step("Test", false);
         generator
-            .apply(&p, &ctx.paths, &ctx.templater, &mut task)
+            .apply(&theme, &ctx.paths, &ctx.templater, &mut task)
             .unwrap();
 
-        let link_path = generator.link_path(&ctx.paths, &p.name);
-        let cache_file = generator.cache_path(&ctx.paths, &p.name);
+        let link_path = generator.link_path(&ctx.paths, &theme.name);
+        let cache_file = generator.cache_path(&ctx.paths, &theme.name);
 
         fs::remove_file(&link_path).unwrap();
 
-        let status = generator.health_check(&ctx.paths, &p.name);
+        let status = generator.health_check(&ctx.paths, &theme.name);
         assert!(status.is_error());
         assert!(status.contains("link missing"));
 
         generator
-            .fix(&status, &p, &ctx.paths, &ctx.templater, &mut task)
+            .fix(&status, &theme, &ctx.paths, &ctx.templater, &mut task)
             .unwrap();
         assert!(link_path.exists(), "Fix should recreate the symlink");
 
@@ -380,43 +380,43 @@ mod tests {
             );
         }
 
-        assert!(generator.health_check(&ctx.paths, &p.name).is_ok());
+        assert!(generator.health_check(&ctx.paths, &theme.name).is_ok());
     }
 
     #[test]
     fn should_fix_missing_cache_for_yazi() {
         let (_, ctx) = create_test_context();
         let generator = YaziGenerator;
-        let p = Palette::mock();
+        let theme: Theme = Theme::mock();
         let mut task = ctx.log.step("Test", false).as_quiet();
 
         generator
-            .apply(&p, &ctx.paths, &ctx.templater, &mut task)
+            .apply(&theme, &ctx.paths, &ctx.templater, &mut task)
             .unwrap();
 
-        let cache_file = generator.cache_path(&ctx.paths, &p.name);
+        let cache_file = generator.cache_path(&ctx.paths, &theme.name);
         fs::remove_file(&cache_file).unwrap();
 
-        let status = generator.health_check(&ctx.paths, &p.name);
+        let status = generator.health_check(&ctx.paths, &theme.name);
         assert!(status.is_error());
         assert!(status.contains("cache") && status.contains("missing"));
 
         generator
-            .fix(&status, &p, &ctx.paths, &ctx.templater, &mut task)
+            .fix(&status, &theme, &ctx.paths, &ctx.templater, &mut task)
             .unwrap();
         assert!(cache_file.exists());
-        assert!(generator.health_check(&ctx.paths, &p.name).is_ok());
+        assert!(generator.health_check(&ctx.paths, &theme.name).is_ok());
     }
 
     #[test]
     fn should_clear_generated_files_for_yazi() {
         let (_, ctx) = create_test_context();
         let generator = YaziGenerator;
-        let p = Palette::mock();
+        let theme: Theme = Theme::mock();
 
         let mut task = ctx.log.step("Test", false);
         generator
-            .apply(&p, &ctx.paths, &ctx.templater, &mut task)
+            .apply(&theme, &ctx.paths, &ctx.templater, &mut task)
             .unwrap();
 
         let cache_dir = ctx.paths.generators.join(generator.name());
@@ -433,20 +433,20 @@ mod tests {
     fn should_remove_theme_for_yazi() {
         let (_, ctx) = create_test_context();
         let generator = YaziGenerator;
-        let p = Palette::mock();
+        let theme: Theme = Theme::mock();
 
         let mut task = ctx.log.step("Test", false);
         generator
-            .apply(&p, &ctx.paths, &ctx.templater, &mut task)
+            .apply(&theme, &ctx.paths, &ctx.templater, &mut task)
             .unwrap();
 
-        let cache_file = generator.cache_path(&ctx.paths, &p.name);
-        let link_file = generator.theme_path(&ctx.paths, &p.name);
+        let cache_file = generator.cache_path(&ctx.paths, &theme.name);
+        let link_file = generator.theme_path(&ctx.paths, &theme.name);
 
         assert!(cache_file.exists());
         assert!(link_file.exists());
 
-        generator.remove_theme(&ctx.paths, &p.name).unwrap();
+        generator.remove_theme(&ctx.paths, &theme.name).unwrap();
 
         assert!(!cache_file.exists());
         assert!(!link_file.exists());

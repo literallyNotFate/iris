@@ -1,7 +1,7 @@
 use crate::{
-    core::{Client, IrisContext},
+    core::{IrisContext, NeovimBridge, ThemeOrchestrator},
     log::Task,
-    models::{Palette, PluginManager},
+    models::PluginManager,
     utils,
 };
 use anyhow::{Context as _, Result};
@@ -9,6 +9,7 @@ use colored::Colorize;
 use std::{
     fs::{self, OpenOptions},
     io::Write,
+    path::PathBuf,
 };
 
 /// Struct for initializing state of application
@@ -52,10 +53,10 @@ impl IrisSetup {
         }
 
         task.info("Detecting Neovim plugin manager...");
-        let manager: PluginManager = Client::detect_manager(&ctx.paths);
+        let manager: PluginManager = NeovimBridge::detect_manager(&ctx.paths);
 
         if manager != PluginManager::Default {
-            let count: usize = Client::count_plugins(&ctx.paths, &manager);
+            let count: usize = NeovimBridge::count_plugins(&ctx.paths, &manager);
             task.info(&format!(
                 "Found {} with {} plugins installed.",
                 manager,
@@ -65,7 +66,11 @@ impl IrisSetup {
 
         ctx.state.manager = manager;
         task.info("Detecting active Neovim theme...");
-        let current_theme = Palette::current().unwrap_or_else(|_| "".to_string());
+
+        let orchestrator = ThemeOrchestrator::new(&ctx.paths, &task.log);
+        let current_theme = orchestrator
+            .get_current_theme()
+            .unwrap_or_else(|_| "".to_string());
 
         task.info("Scanning for compatible tools...");
         let installed = ctx.registry.installed();
@@ -90,8 +95,8 @@ impl IrisSetup {
     }
 
     pub fn setup_zsh_hook(ctx: &IrisContext, task: &Task) -> anyhow::Result<()> {
-        let home = dirs::home_dir().context("Home directory not found")?;
-        let zshrc = home.join(".zshrc");
+        let home: PathBuf = dirs::home_dir().context("Home directory not found")?;
+        let zshrc: PathBuf = home.join(".zshrc");
 
         if !zshrc.exists() {
             ctx.log.warn(".zshrc not found, skipping hook injection.");
@@ -107,7 +112,7 @@ impl IrisSetup {
             return Ok(());
         }
 
-        let cache_file = ctx.paths.cache.join("fzf.sh");
+        let cache_file: PathBuf = ctx.paths.cache.join("fzf.sh");
         task.info("Injecting synchronization hook into .zshrc...");
 
         let hook: String = format!(
@@ -227,7 +232,7 @@ mod tests {
                     ctx.paths.state_file.exists(),
                     "state.json should be created"
                 );
-                assert!(matches!(ctx.state.manager, PluginManager::Default));
+                assert_eq!(ctx.state.manager, PluginManager::Default);
 
                 let zshrc_content = fs::read_to_string(fake_home.join(".zshrc")).unwrap();
                 assert!(zshrc_content.contains("Iris FZF Sync"));

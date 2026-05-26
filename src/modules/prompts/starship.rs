@@ -1,7 +1,7 @@
 use crate::{
     core::{IrisPaths, Templater},
     log::Task,
-    models::{HealthStatus, Palette},
+    models::{HealthStatus, Theme},
     modules::{Generator, GeneratorType},
     utils,
 };
@@ -54,23 +54,21 @@ impl Generator for StarshipGenerator {
 
     fn apply(
         &self,
-        p: &Palette,
+        theme: &Theme,
         paths: &IrisPaths,
         templater: &Templater,
         task: &mut Task,
     ) -> Result<()> {
-        let theme_name: String = p.name.to_lowercase();
-
         task.info(&format!(
             "Generating {} theme for {}...",
-            utils::capitalize(&theme_name).yellow(),
+            theme.name.yellow(),
             self.name().bold().cyan()
         ));
 
-        let cache_file: PathBuf = self.cache_path(paths, &theme_name);
-        let link_path: PathBuf = self.link_path(paths, &theme_name);
+        let cache_file: PathBuf = self.cache_path(paths, &theme.name.to_lowercase());
+        let link_path: PathBuf = self.link_path(paths, &theme.name.to_lowercase());
 
-        let render_ctx = self.build_render_context(p);
+        let render_ctx = self.build_render_context(theme);
         let palette_block: String = templater
             .render(&self.template_path(), &render_ctx)
             .context("Failed to render starship palette block")?;
@@ -82,25 +80,25 @@ impl Generator for StarshipGenerator {
             format!("Failed to write palette cache to {}", cache_file.display())
         })?;
 
-        self.update_config_file(&link_path, &link_path, p, &palette_block)?;
+        self.update_config_file(&link_path, &link_path, theme, &palette_block)?;
 
         task.info(&format!(
             "{} theme applied to {}",
-            utils::capitalize(&theme_name).yellow(),
+            theme.name.yellow(),
             self.name().bold().cyan()
         ));
         Ok(())
     }
 
-    fn build_render_context(&self, p: &Palette) -> tera::Context {
+    fn build_render_context(&self, theme: &Theme) -> tera::Context {
         let mut c = tera::Context::new();
-        c.insert("theme_name", &p.name);
-        c.insert("bg", &p.bg);
-        c.insert("fg", &p.fg);
-        c.insert("sel", &p.sel);
-        c.insert("line_hl", &p.line_hl);
-        c.insert("gutter_fg", &p.gutter_fg);
-        c.insert("ansi", &p.ansi);
+        c.insert("theme_name", &theme.name.to_lowercase());
+        c.insert("bg", &theme.palette.bg);
+        c.insert("fg", &theme.palette.fg);
+        c.insert("sel", &theme.palette.sel);
+        c.insert("line_hl", &theme.palette.line_hl);
+        c.insert("gutter_fg", &theme.palette.gutter_fg);
+        c.insert("ansi", &theme.palette.ansi);
         c
     }
 
@@ -143,7 +141,7 @@ impl Generator for StarshipGenerator {
     fn fix(
         &self,
         status: &HealthStatus,
-        p: &Palette,
+        theme: &Theme,
         paths: &IrisPaths,
         templater: &Templater,
         task: &mut Task,
@@ -151,7 +149,7 @@ impl Generator for StarshipGenerator {
         if status.is_error() || status.is_warning() {
             return task.log.action(
                 &format!("Re-applied `{}` configuration", self.name().bold()),
-                || self.apply(p, paths, templater, &mut task.as_quiet()),
+                || self.apply(theme, paths, templater, &mut task.as_quiet()),
             );
         }
 
@@ -237,7 +235,7 @@ impl StarshipGenerator {
         &self,
         target_path: &Path,
         write_path: &Path,
-        p: &Palette,
+        theme: &Theme,
         palette_block: &str,
     ) -> Result<()> {
         let content = if target_path.exists() {
@@ -253,7 +251,7 @@ impl StarshipGenerator {
 
         let clean_lines = self.clean_config_content(&content);
         let mut final_content = String::new();
-        final_content.push_str(&format!("palette = \"{}\"\n\n", p.name));
+        final_content.push_str(&format!("palette = \"{}\"\n\n", theme.name.to_lowercase()));
 
         let body = clean_lines.join("\n").trim().to_string();
         if !body.is_empty() {
@@ -313,11 +311,17 @@ mod tests {
     #[test]
     fn should_build_valid_render_context() {
         let generator = StarshipGenerator;
-        let p = Palette::mock();
-        let ctx = generator.build_render_context(&p);
+        let theme: Theme = Theme::mock();
+        let ctx = generator.build_render_context(&theme);
 
-        assert_eq!(ctx.get("bg").expect("bg missing").as_str().unwrap(), p.bg);
-        assert_eq!(ctx.get("fg").expect("fg missing").as_str().unwrap(), p.fg);
+        assert_eq!(
+            ctx.get("bg").expect("bg missing").as_str().unwrap(),
+            theme.palette.bg
+        );
+        assert_eq!(
+            ctx.get("fg").expect("fg missing").as_str().unwrap(),
+            theme.palette.fg
+        );
 
         let ansi = ctx
             .get("ansi")
@@ -354,20 +358,20 @@ mod tests {
             ],
             || {
                 let generator = StarshipGenerator;
-                let p = Palette::mock();
+                let theme: Theme = Theme::mock();
 
                 let mut task = ctx.log.step("Test", false).as_quiet();
                 generator
-                    .apply(&p, &ctx.paths, &ctx.templater, &mut task)
+                    .apply(&theme, &ctx.paths, &ctx.templater, &mut task)
                     .unwrap();
 
                 let result = fs::read_to_string(&config_path).unwrap();
                 let palette_occurrences: Vec<_> = result.matches("palette =").collect();
 
                 assert_eq!(palette_occurrences.len(), 1);
-                assert!(result.contains(&format!("palette = \"{}\"", p.name)));
+                assert!(result.contains(&format!("palette = \"{}\"", theme.name)));
                 assert!(!result.contains("[palettes.old_theme]"));
-                assert!(result.contains(&format!("[palettes.{}]", p.name)));
+                assert!(result.contains(&format!("[palettes.{}]", theme.name)));
                 assert!(result.contains("[directory]"));
             },
         );
@@ -387,15 +391,15 @@ mod tests {
             ],
             || {
                 let generator = StarshipGenerator;
-                let p = Palette::mock();
+                let theme: Theme = Theme::mock();
 
-                ctx.state.current_theme = p.name.clone();
+                ctx.state.current_theme = theme.name.clone();
                 let mut task = ctx.log.step("Test", false).as_quiet();
                 generator
-                    .apply(&p, &ctx.paths, &ctx.templater, &mut task)
+                    .apply(&theme, &ctx.paths, &ctx.templater, &mut task)
                     .unwrap();
 
-                let status = generator.health_check(&ctx.paths, &p.name);
+                let status = generator.health_check(&ctx.paths, &theme.name);
                 assert!(status.is_ok(), "Expected Ok, got: {status}");
             },
         );
@@ -414,20 +418,22 @@ mod tests {
             ],
             || {
                 let generator = StarshipGenerator;
-                let p = Palette::mock();
+                let theme: Theme = Theme::mock();
 
                 let mut task = ctx.log.step("Test", false).as_quiet();
-                ctx.state.current_theme = p.name.clone();
+                ctx.state.current_theme = theme.name.clone();
                 generator
-                    .apply(&p, &ctx.paths, &ctx.templater, &mut task)
+                    .apply(&theme, &ctx.paths, &ctx.templater, &mut task)
                     .unwrap();
 
                 let content = fs::read_to_string(&config_path).unwrap();
-                let corrupted =
-                    content.replace(&format!("palette = \"{}\"", p.name), "palette = \"wrong\"");
+                let corrupted = content.replace(
+                    &format!("palette = \"{}\"", theme.name),
+                    "palette = \"wrong\"",
+                );
                 fs::write(&config_path, corrupted).unwrap();
 
-                let status = generator.health_check(&ctx.paths, &p.name);
+                let status = generator.health_check(&ctx.paths, &theme.name);
 
                 assert!(status.is_warning(), "Expected Warning, got: {status}");
                 assert!(status.contains("not using the current palette"));
@@ -470,16 +476,16 @@ mod tests {
                 fs::write(&config_path, "[directory]\nstyle = \"blue\"\n").unwrap();
 
                 let generator = StarshipGenerator;
-                let p = Palette::mock();
+                let theme: Theme = Theme::mock();
 
                 let mut task = ctx.log.step("Test", false).as_quiet();
-                let result = generator.apply(&p, &ctx.paths, &ctx.templater, &mut task);
+                let result = generator.apply(&theme, &ctx.paths, &ctx.templater, &mut task);
                 assert!(result.is_ok());
 
                 let final_content = fs::read_to_string(&config_path).unwrap();
 
-                assert!(final_content.contains(&format!("palette = \"{}\"", p.name)));
-                assert!(final_content.contains(&format!("[palettes.{}]", p.name)));
+                assert!(final_content.contains(&format!("palette = \"{}\"", theme.name)));
+                assert!(final_content.contains(&format!("[palettes.{}]", theme.name)));
                 assert!(final_content.contains("[directory]"));
             },
         );
@@ -504,21 +510,21 @@ mod tests {
                 .unwrap();
 
                 let generator = StarshipGenerator;
-                let p = Palette::mock();
+                let theme: Theme = Theme::mock();
 
-                let status = generator.health_check(&ctx.paths, &p.name);
+                let status = generator.health_check(&ctx.paths, &theme.name);
 
                 assert!(status.is_warning(), "Expected Warning, got: {status}");
                 assert!(status.contains("not using the current palette"));
 
                 let mut task = ctx.log.step("Fix", false);
                 generator
-                    .fix(&status, &p, &ctx.paths, &ctx.templater, &mut task)
+                    .fix(&status, &theme, &ctx.paths, &ctx.templater, &mut task)
                     .unwrap();
 
                 let content = fs::read_to_string(&config_path).unwrap();
-                assert!(content.contains(&format!("palette = \"{}\"", p.name)));
-                assert!(generator.health_check(&ctx.paths, &p.name).is_ok());
+                assert!(content.contains(&format!("palette = \"{}\"", theme.name)));
+                assert!(generator.health_check(&ctx.paths, &theme.name).is_ok());
             },
         );
     }
@@ -536,28 +542,31 @@ mod tests {
             || {
                 let (_iris_dir, ctx) = create_test_context();
                 let generator = StarshipGenerator;
-                let p = Palette::mock();
+                let theme: Theme = Theme::mock();
 
                 fs::write(
                     &config_path,
-                    format!("palette = \"{}\"\n[directory]\nstyle = \"blue\"", p.name),
+                    format!(
+                        "palette = \"{}\"\n[directory]\nstyle = \"blue\"",
+                        theme.name
+                    ),
                 )
                 .unwrap();
 
-                let status = generator.health_check(&ctx.paths, &p.name);
+                let status = generator.health_check(&ctx.paths, &theme.name);
 
                 assert!(status.is_error(), "Expected Error, got: {status}");
                 assert!(status.contains("missing"));
 
                 let mut task = ctx.log.step("Fix", false);
                 generator
-                    .fix(&status, &p, &ctx.paths, &ctx.templater, &mut task)
+                    .fix(&status, &theme, &ctx.paths, &ctx.templater, &mut task)
                     .unwrap();
 
                 let content = fs::read_to_string(&config_path).unwrap();
-                assert!(content.contains(&format!("[palettes.{}]", p.name)));
-                assert!(content.contains(&p.bg));
-                assert!(generator.health_check(&ctx.paths, &p.name).is_ok());
+                assert!(content.contains(&format!("[palettes.{}]", theme.name)));
+                assert!(content.contains(&theme.palette.bg));
+                assert!(generator.health_check(&ctx.paths, &theme.name).is_ok());
             },
         );
     }

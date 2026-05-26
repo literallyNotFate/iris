@@ -1,18 +1,17 @@
 use crate::{
-    core::IrisContext,
+    core::{IrisContext, ThemeOrchestrator},
     log::Reporter,
-    models::{HealthStatus, Palette},
+    models::{HealthStatus, Theme},
 };
-use colored::Colorize;
+use colored::*;
 use std::io::{self, Write};
 
 /// Handle application health command with fix option
 pub fn exec(fix: bool, ctx: &mut IrisContext) -> anyhow::Result<()> {
-    use colored::*;
     println!("\n{}\n", "󰓦  Iris System Health".bright_red().bold());
 
     let mut issues_found = false;
-    let mut palette = None;
+    let mut theme_obj: Option<Theme> = None;
 
     let mut healthy = Vec::new();
     let mut errors = Vec::new();
@@ -43,18 +42,19 @@ pub fn exec(fix: bool, ctx: &mut IrisContext) -> anyhow::Result<()> {
         }
 
         if !errors.is_empty() {
-            if palette.is_none() {
-                palette = Some(Palette::fetch(
+            if theme_obj.is_none() {
+                let quiet_logger: Reporter = Reporter::quiet();
+                let orchestrator = ThemeOrchestrator::new(&ctx.paths, &quiet_logger);
+
+                theme_obj = Some(orchestrator.load_theme(
                     &ctx.state.current_theme,
                     false,
                     true,
-                    &ctx.paths,
                     &ctx.state,
-                    &Reporter::quiet(),
                 )?);
             }
 
-            if let Some(p) = &palette {
+            if let Some(theme) = &theme_obj {
                 println!("  {}", "Applying fixes:".dimmed());
 
                 for (i, (generator, status)) in errors.iter().enumerate() {
@@ -62,13 +62,12 @@ pub fn exec(fix: bool, ctx: &mut IrisContext) -> anyhow::Result<()> {
                         println!();
                     }
 
-                    let name = generator.name().to_string();
+                    let name: String = generator.name().to_string();
                     print!("    {} Fixing {} ... ", "-> ".dimmed(), name.bold());
                     let _ = io::stdout().flush();
 
                     let mut task = ctx.log.as_task();
-
-                    generator.fix(&status, p, &ctx.paths, &ctx.templater, &mut task)?;
+                    generator.fix(&status, theme, &ctx.paths, &ctx.templater, &mut task)?;
                 }
 
                 println!();
@@ -137,7 +136,7 @@ fn render_status_line(name: &str, status: &HealthStatus, is_last: bool, log: &Re
             println!("{}", message.red());
 
             if let Some(hint) = fix_hint {
-                let indent = if is_last { "   " } else { "│  " };
+                let indent = if is_last { "    " } else { "│  " };
                 println!(
                     "{}   {}{} {}",
                     log.gutter,

@@ -1,7 +1,7 @@
 use crate::{
     core::{IrisPaths, Templater},
     log::Reporter,
-    models::{Palette, State},
+    models::{State, Theme},
     modules::{Generator, GeneratorType},
 };
 use anyhow::{Context, Result};
@@ -113,7 +113,7 @@ impl GeneratorRegistry {
     /// Apply themes to available programs (enabled generators)
     pub fn apply_all(
         &self,
-        palette: &Palette,
+        theme: &Theme,
         state: &State,
         paths: &IrisPaths,
         templater: &Templater,
@@ -131,10 +131,10 @@ impl GeneratorRegistry {
             return Ok(());
         }
 
-        let total = to_apply.len();
+        let total: usize = to_apply.len();
         let root = log.step_with_icon(
             "󰛓".blue().bold(),
-            &format!("Updating {} targets...", total.to_string().blue().bold()),
+            &format!("Updating {} targets ...", total.to_string().blue().bold()),
             true,
         );
 
@@ -154,7 +154,7 @@ impl GeneratorRegistry {
             );
 
             generator
-                .apply(palette, paths, templater, &mut task)
+                .apply(theme, paths, templater, &mut task)
                 .with_context(|| {
                     format!(
                         "Failed to apply theme to `{}`",
@@ -210,7 +210,7 @@ mod tests {
 
         fn apply(
             &self,
-            _: &Palette,
+            _: &Theme,
             _: &IrisPaths,
             _: &Templater,
             _: &mut Task,
@@ -218,14 +218,14 @@ mod tests {
             Ok(())
         }
 
-        fn build_render_context(&self, _: &Palette) -> tera::Context {
+        fn build_render_context(&self, _: &Theme) -> tera::Context {
             tera::Context::new()
         }
 
         fn fix(
             &self,
             _: &HealthStatus,
-            _: &Palette,
+            _: &Theme,
             _: &IrisPaths,
             _: &Templater,
             _: &mut Task,

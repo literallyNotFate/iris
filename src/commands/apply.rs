@@ -1,7 +1,9 @@
 use crate::{
-    cli::switch::ApplyArgs, core::IrisContext, models::Palette, modules::Generator, utils,
+    cli::switch::ApplyArgs,
+    core::{IrisContext, ThemeOrchestrator},
+    models::Theme,
+    modules::Generator,
 };
-use anyhow::Ok;
 use colored::Colorize;
 
 /// Handle application apply command
@@ -10,22 +12,23 @@ pub fn exec(args: ApplyArgs, ctx: &mut IrisContext) -> anyhow::Result<()> {
     render_header(&theme_name, args.theme.as_deref(), was_fallback);
     println!();
 
-    let palette = Palette::fetch(&theme_name, false, true, &ctx.paths, &ctx.state, &ctx.log)?;
-    let generator = ctx.resolve_generator(&args.generator)?;
+    let orchestrator = ThemeOrchestrator::new(&ctx.paths, &ctx.log);
+    let theme_obj: Theme = orchestrator.load_theme(&theme_name, false, true, &ctx.state)?;
 
-    ensure_generator_health(generator, &palette, ctx, false)?;
+    let generator = ctx.resolve_generator(&args.generator)?;
+    ensure_generator_health(generator, &theme_obj, ctx, false)?;
 
     let gen_color = generator.generator_type().color();
     let mut step = ctx.log.step_with_icon(
         generator.generator_type().icon().color(gen_color),
         &format!(
             "Applying {} to {}",
-            utils::capitalize(&theme_name).yellow().bold(),
+            theme_obj.name.yellow().bold(),
             generator.name().cyan().bold()
         ),
         true,
     );
-    let result = generator.apply(&palette, &ctx.paths, &ctx.templater, &mut step);
+    let result = generator.apply(&theme_obj, &ctx.paths, &ctx.templater, &mut step);
     step.done_with("Theme applied!");
     result?;
 
@@ -35,11 +38,11 @@ pub fn exec(args: ApplyArgs, ctx: &mut IrisContext) -> anyhow::Result<()> {
 /// Helper function to ensure generator health
 fn ensure_generator_health(
     g: &dyn Generator,
-    p: &Palette,
+    theme: &Theme,
     ctx: &IrisContext,
     is_last: bool,
 ) -> anyhow::Result<()> {
-    let status = g.health_check(&ctx.paths, &p.name);
+    let status = g.health_check(&ctx.paths, &theme.name);
 
     if !status.is_ok() {
         ctx.log.action(
@@ -50,7 +53,13 @@ fn ensure_generator_health(
             ),
             || {
                 let t = ctx.log.step(&format!("Fixing {}", g.name()), is_last);
-                let result = g.fix(&status, p, &ctx.paths, &ctx.templater, &mut t.as_quiet());
+                let result = g.fix(
+                    &status,
+                    theme,
+                    &ctx.paths,
+                    &ctx.templater,
+                    &mut t.as_quiet(),
+                );
 
                 t.done();
                 result

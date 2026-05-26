@@ -138,10 +138,16 @@ impl IrisPaths {
             .map(|sub| self.nvim_data_dir().join(sub))
     }
 
+    /// Returns absolute path to JSON palette theme cache
+    pub fn palette_cache_path(&self, theme_name: &str) -> PathBuf {
+        self.palettes
+            .join(theme_name.to_lowercase())
+            .with_extension("json")
+    }
+
     /// Checks whether requested palette is already cached
     pub fn is_palette_cached(&self, name: &str) -> bool {
-        let filename: String = format!("{}.json", name.to_lowercase());
-        self.palettes.join(filename).exists()
+        self.palette_cache_path(name).exists()
     }
 
     /// Returns a sorted list of theme names available in cache
@@ -363,5 +369,13 @@ mod tests {
         assert_eq!(themes[2], "tokyonight");
         assert!(!themes.contains(&"README".to_string()));
         assert!(!themes.contains(&"subfolder".to_string()));
+    }
+
+    #[test]
+    fn should_return_palette_cache_path() {
+        let paths = setup_paths();
+        let expected = paths.cache.join("core/palettes/melange.json");
+        let path = paths.palette_cache_path("melange");
+        assert_eq!(path, expected);
     }
 }

@@ -1,8 +1,8 @@
 use super::IrisPaths;
 use crate::{
-    core::{Client, Templater},
+    core::{NeovimBridge, Templater},
     log::Reporter,
-    models::{HealthStatus, Palette, PluginManager, State},
+    models::{PluginManager, State},
     modules::{Generator, GeneratorRegistry},
     utils,
 };
@@ -111,13 +111,13 @@ impl IrisContext {
 
     /// Check whether requested theme is available
     fn is_theme_available(&self, name: &str) -> bool {
-        if Palette::exists(name, &self.paths, &self.state) {
+        if NeovimBridge::check_theme_exists(name, &self.state) {
             return true;
         }
 
-        if matches!(self.state.manager, PluginManager::Default) {
-            let is_builtin: bool = Client::get_builtin_themes().iter().any(|t| t == name);
-            return is_builtin || self.paths.palettes.join(format!("{}.json", name)).exists();
+        if self.state.manager == PluginManager::Default {
+            let is_builtin: bool = NeovimBridge::get_builtin_themes().iter().any(|t| t == name);
+            return is_builtin || self.paths.is_palette_cached(name);
         }
 
         false
@@ -146,22 +146,11 @@ impl IrisContext {
         })
     }
 
-    /// Get theme sync status
-    pub fn get_sync_status(&self) -> (String, bool) {
-        let current: &String = &self.state.current_theme;
-        let nvim_theme: String = Palette::current().unwrap_or_default();
-        let is_sync: bool = nvim_theme.to_lowercase() == current.to_lowercase();
-
-        (nvim_theme, is_sync)
-    }
-
     /// Check if there are any generators with broken configs
     pub fn is_any_config_broken(&self) -> bool {
         self.registry.all().iter().any(|g| {
-            matches!(
-                g.health_check(&self.paths, &self.state.current_theme),
-                HealthStatus::Error { .. }
-            )
+            g.health_check(&self.paths, &self.state.current_theme)
+                .is_error()
         })
     }
 }

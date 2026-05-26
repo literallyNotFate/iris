@@ -1,7 +1,7 @@
 use crate::{
     core::{IrisPaths, Templater},
     log::Task,
-    models::{HealthStatus, Palette},
+    models::{HealthStatus, Theme},
     modules::{Generator, GeneratorType},
     utils::{self},
 };
@@ -42,18 +42,18 @@ impl Generator for GhosttyGenerator {
 
     fn apply(
         &self,
-        p: &Palette,
+        theme: &Theme,
         paths: &IrisPaths,
         templater: &Templater,
         task: &mut Task,
     ) -> Result<()> {
         task.info(&format!(
             "Generating {} theme for {}",
-            utils::capitalize(&p.name).yellow(),
+            theme.name.yellow(),
             self.name().bold().cyan(),
         ));
-        let cache_file: PathBuf = self.ensure_cache_file(p, paths, templater)?;
-        let link_path: PathBuf = self.link_path(paths, &p.name);
+        let cache_file: PathBuf = self.ensure_cache_file(theme, paths, templater)?;
+        let link_path: PathBuf = self.link_path(paths, &theme.name);
 
         task.info(&format!(
             "Linking {} theme to {}...",
@@ -65,21 +65,21 @@ impl Generator for GhosttyGenerator {
 
         task.info(&format!(
             "{} theme applied to {}",
-            utils::capitalize(&p.name).yellow(),
+            theme.name.yellow(),
             self.name().bold().cyan()
         ));
         Ok(())
     }
 
-    fn build_render_context(&self, p: &Palette) -> tera::Context {
+    fn build_render_context(&self, theme: &Theme) -> tera::Context {
         let mut c = tera::Context::new();
-        c.insert("theme_name", &utils::capitalize(&p.name));
-        c.insert("bg", &p.bg);
-        c.insert("fg", &p.fg);
-        c.insert("sel_bg", &p.sel);
-        c.insert("sel_fg", &p.bg);
-        c.insert("cursor", &p.white);
-        c.insert("ansi", &p.ansi);
+        c.insert("theme_name", &theme.name);
+        c.insert("bg", &theme.palette.bg);
+        c.insert("fg", &theme.palette.fg);
+        c.insert("sel_bg", &theme.palette.sel);
+        c.insert("sel_fg", &theme.palette.bg);
+        c.insert("cursor", &theme.palette.white);
+        c.insert("ansi", &theme.palette.ansi);
         c
     }
 
@@ -131,7 +131,7 @@ impl Generator for GhosttyGenerator {
     fn fix(
         &self,
         status: &HealthStatus,
-        p: &Palette,
+        theme: &Theme,
         paths: &IrisPaths,
         templater: &Templater,
         task: &mut Task,
@@ -139,7 +139,7 @@ impl Generator for GhosttyGenerator {
         if !status.is_error() && !status.is_warning() {
             return task.log.action(
                 &format!("Re-applied `{}` configuration", self.name().bold()),
-                || self.apply(p, paths, templater, &mut task.as_quiet()),
+                || self.apply(theme, paths, templater, &mut task.as_quiet()),
             );
         }
 
@@ -163,9 +163,9 @@ impl Generator for GhosttyGenerator {
         if status.contains("missing or invalid") || status.contains("different cache") {
             task.log
                 .action("Repaired `ghostty` theme files and symlinks", || {
-                    self.ensure_cache_file(p, paths, templater)?;
-                    let cache: PathBuf = self.cache_path(paths, &p.name);
-                    let link: PathBuf = self.link_path(paths, &p.name);
+                    self.ensure_cache_file(theme, paths, templater)?;
+                    let cache: PathBuf = self.cache_path(paths, &theme.name.to_lowercase());
+                    let link: PathBuf = self.link_path(paths, &theme.name.to_lowercase());
                     self.ensure_symlink(&cache, &link)
                 })?;
             fixed = true;
@@ -174,7 +174,7 @@ impl Generator for GhosttyGenerator {
         if !fixed {
             task.log
                 .action("Regenerated complete `ghostty` configuration", || {
-                    self.apply(p, paths, templater, &mut task.as_quiet())
+                    self.apply(theme, paths, templater, &mut task.as_quiet())
                 })?;
         }
 
@@ -185,12 +185,12 @@ impl Generator for GhosttyGenerator {
 impl GhosttyGenerator {
     fn ensure_cache_file(
         &self,
-        p: &Palette,
+        theme: &Theme,
         paths: &IrisPaths,
         templater: &Templater,
     ) -> Result<PathBuf> {
-        let cache_file: PathBuf = self.cache_path(paths, &p.name);
-        let render_ctx = self.build_render_context(p);
+        let cache_file: PathBuf = self.cache_path(paths, &theme.name.to_lowercase());
+        let render_ctx = self.build_render_context(theme);
         let content: String = templater.render(&self.template_path(), &render_ctx)?;
 
         if let Some(parent) = cache_file.parent() {
@@ -311,10 +311,10 @@ mod tests {
     #[test]
     fn should_build_valid_render_context() {
         let generator = GhosttyGenerator;
-        let p = Palette::mock();
-        let ctx = generator.build_render_context(&p);
+        let theme: Theme = Theme::mock();
+        let ctx = generator.build_render_context(&theme);
 
-        assert_eq!(ctx.get("bg").unwrap().as_str().unwrap(), p.bg);
+        assert_eq!(ctx.get("bg").unwrap().as_str().unwrap(), theme.palette.bg);
         assert!(ctx.get("ansi").unwrap().is_array());
     }
 
@@ -322,21 +322,21 @@ mod tests {
     fn should_return_health_ok_for_ghostty() {
         let (_, mut ctx) = create_test_context();
         let generator = GhosttyGenerator;
-        let p = Palette::mock();
+        let theme: Theme = Theme::mock();
 
         let mut task = ctx.log.step("Test", false).as_quiet();
-        ctx.state.current_theme = p.name.clone();
+        ctx.state.current_theme = theme.name.clone();
         generator
-            .apply(&p, &ctx.paths, &ctx.templater, &mut task)
+            .apply(&theme, &ctx.paths, &ctx.templater, &mut task)
             .unwrap();
 
         let config_path = generator
             .resolve_config_directory(&ctx.paths)
             .join("config");
-        let import_line = format!("config-file = {}", generator.target_file_name(&p.name));
+        let import_line = format!("config-file = {}", generator.target_file_name(&theme.name));
         fs::write(&config_path, import_line).unwrap();
 
-        let status = generator.health_check(&ctx.paths, &p.name);
+        let status = generator.health_check(&ctx.paths, &theme.name);
         assert!(status.is_ok(), "Expected Ok, got: {status}");
     }
 
@@ -344,9 +344,9 @@ mod tests {
     fn should_return_health_error_missing_config_for_ghostty() {
         let (_, ctx) = create_test_context();
         let generator = GhosttyGenerator;
-        let p = Palette::mock();
+        let theme: Theme = Theme::mock();
 
-        let status = generator.health_check(&ctx.paths, &p.name);
+        let status = generator.health_check(&ctx.paths, &theme.name);
         assert!(status.is_error(), "Expected Error, got: {status}");
         assert!(status.contains("config file missing"));
     }
@@ -355,12 +355,12 @@ mod tests {
     fn should_return_health_warning_no_import_for_ghostty() {
         let (_, mut ctx) = create_test_context();
         let generator = GhosttyGenerator;
-        let p = Palette::mock();
+        let theme: Theme = Theme::mock();
 
         let mut task = ctx.log.step("Test", false).as_quiet();
-        ctx.state.current_theme = p.name.clone();
+        ctx.state.current_theme = theme.name.clone();
         generator
-            .apply(&p, &ctx.paths, &ctx.templater, &mut task)
+            .apply(&theme, &ctx.paths, &ctx.templater, &mut task)
             .unwrap();
 
         let config_path = generator
@@ -368,7 +368,7 @@ mod tests {
             .join("config");
         fs::write(&config_path, "font-family = JetBrainsMono").unwrap();
 
-        let status = generator.health_check(&ctx.paths, &p.name);
+        let status = generator.health_check(&ctx.paths, &theme.name);
 
         assert!(
             status.is_warning(),
@@ -381,10 +381,10 @@ mod tests {
     fn should_apply_theme_for_ghostty() {
         let (_, ctx) = create_test_context();
         let generator = GhosttyGenerator;
-        let p = Palette::mock();
+        let theme: Theme = Theme::mock();
 
         let mut task = ctx.log.step("Test", false).as_quiet();
-        let result = generator.apply(&p, &ctx.paths, &ctx.templater, &mut task);
+        let result = generator.apply(&theme, &ctx.paths, &ctx.templater, &mut task);
         assert!(result.is_ok(), "Failed to apply: {:?}", result.err());
 
         let cache_file = ctx
@@ -404,7 +404,7 @@ mod tests {
     fn should_fix_inject_issue_for_ghostty() {
         let (_, ctx) = create_test_context();
         let generator = GhosttyGenerator;
-        let p = Palette::mock();
+        let theme: Theme = Theme::mock();
 
         let config_dir = generator.resolve_config_directory(&ctx.paths);
         fs::create_dir_all(&config_dir).unwrap();
@@ -412,37 +412,37 @@ mod tests {
 
         let mut task = ctx.log.step("Test", false).as_quiet();
         generator
-            .apply(&p, &ctx.paths, &ctx.templater, &mut task)
+            .apply(&theme, &ctx.paths, &ctx.templater, &mut task)
             .unwrap();
         fs::write(&config_path, "font-size = 12").unwrap();
 
-        let status = generator.health_check(&ctx.paths, &p.name);
+        let status = generator.health_check(&ctx.paths, &theme.name);
         generator
-            .fix(&status, &p, &ctx.paths, &ctx.templater, &mut task)
+            .fix(&status, &theme, &ctx.paths, &ctx.templater, &mut task)
             .expect("Fix failed");
 
         let content = fs::read_to_string(&config_path).unwrap();
         assert!(content.contains("current_theme.conf"));
-        assert!(generator.health_check(&ctx.paths, &p.name).is_ok());
+        assert!(generator.health_check(&ctx.paths, &theme.name).is_ok());
     }
 
     #[test]
     fn should_fix_broken_link_for_ghostty() {
         let (_, mut ctx) = create_test_context();
         let generator = GhosttyGenerator;
-        let p = Palette::mock();
-        ctx.state.current_theme = p.name.clone();
+        let theme: Theme = Theme::mock();
+        ctx.state.current_theme = theme.name.clone();
 
         let mut task = ctx.log.step("Test", false).as_quiet();
         let ghostty_dir = generator.resolve_config_directory(&ctx.paths);
         let config_path = ghostty_dir.join("config");
         fs::create_dir_all(&ghostty_dir).unwrap();
 
-        let import_line = format!("config-file = {}", generator.target_file_name(&p.name));
+        let import_line = format!("config-file = {}", generator.target_file_name(&theme.name));
         fs::write(&config_path, import_line).unwrap();
 
         generator
-            .apply(&p, &ctx.paths, &ctx.templater, &mut task)
+            .apply(&theme, &ctx.paths, &ctx.templater, &mut task)
             .unwrap();
 
         let link_path_empty = generator.link_path(&ctx.paths, "");
@@ -450,19 +450,19 @@ mod tests {
             fs::remove_file(&link_path_empty).unwrap();
         }
 
-        let link_path_theme = generator.link_path(&ctx.paths, &p.name);
+        let link_path_theme = generator.link_path(&ctx.paths, &theme.name);
         if link_path_theme.exists() && link_path_theme != link_path_empty {
             fs::remove_file(&link_path_theme).unwrap();
         }
 
-        let status = generator.health_check(&ctx.paths, &p.name);
+        let status = generator.health_check(&ctx.paths, &theme.name);
         assert!(status.is_error());
         assert!(status.contains("missing or invalid"));
 
         generator
-            .fix(&status, &p, &ctx.paths, &ctx.templater, &mut task)
+            .fix(&status, &theme, &ctx.paths, &ctx.templater, &mut task)
             .unwrap();
-        assert!(generator.health_check(&ctx.paths, &p.name).is_ok());
+        assert!(generator.health_check(&ctx.paths, &theme.name).is_ok());
     }
 
     #[test]

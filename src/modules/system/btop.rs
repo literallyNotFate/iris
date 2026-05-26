@@ -1,7 +1,7 @@
 use crate::{
     core::{IrisPaths, Templater},
     log::Task,
-    models::{HealthStatus, Palette},
+    models::{HealthStatus, Theme},
     modules::{Generator, GeneratorType},
     utils::{self},
 };
@@ -40,19 +40,19 @@ impl Generator for BtopGenerator {
 
     fn apply(
         &self,
-        p: &Palette,
+        theme: &Theme,
         paths: &IrisPaths,
         templater: &Templater,
         task: &mut Task,
     ) -> Result<()> {
         task.info(&format!(
             "Generating {} theme for {}",
-            utils::capitalize(&p.name).yellow(),
+            theme.name.yellow(),
             self.name().bold().cyan(),
         ));
 
-        let cache_file: PathBuf = self.ensure_cache_file(p, paths, templater)?;
-        let link_path: PathBuf = self.link_path(paths, &p.name);
+        let cache_file: PathBuf = self.ensure_cache_file(theme, paths, templater)?;
+        let link_path: PathBuf = self.link_path(paths, &theme.name.to_lowercase());
 
         task.info(&format!(
             "Linking {} theme to {}...",
@@ -70,40 +70,40 @@ impl Generator for BtopGenerator {
         if conf_path.exists() {
             task.info(&format!(
                 "Setting color_theme = \"{}\" in btop.conf",
-                p.name.bold().red()
+                theme.name.bold().red()
             ));
 
-            self.update_btop_conf(&conf_path, &p.name)?;
+            self.update_btop_conf(&conf_path, &theme.name.to_lowercase())?;
         }
 
         task.info(&format!(
             "{} theme applied to {}",
-            utils::capitalize(&p.name).yellow(),
+            theme.name.yellow(),
             self.name().bold().cyan()
         ));
         Ok(())
     }
 
-    fn build_render_context(&self, p: &Palette) -> tera::Context {
+    fn build_render_context(&self, theme: &Theme) -> tera::Context {
         let mut c = tera::Context::new();
-        c.insert("theme_name", &utils::capitalize(&p.name));
-        c.insert("bg", &p.bg);
-        c.insert("fg", &p.fg);
-        c.insert("sel", &p.sel);
-        c.insert("white", &p.white);
-        c.insert("comment", &p.comment);
-        c.insert("line_hl", &p.line_hl);
-        c.insert("keyword", &p.keyword);
-        c.insert("type_name", &p.type_name);
-        c.insert("func", &p.func);
-        c.insert("tag", &p.tag);
-        c.insert("string", &p.string);
-        c.insert("constant", &p.constant);
-        c.insert("attribute", &p.attribute);
+        c.insert("theme_name", &theme.name);
+        c.insert("bg", &theme.palette.bg);
+        c.insert("fg", &theme.palette.fg);
+        c.insert("sel", &theme.palette.sel);
+        c.insert("white", &theme.palette.white);
+        c.insert("comment", &theme.palette.comment);
+        c.insert("line_hl", &theme.palette.line_hl);
+        c.insert("keyword", &theme.palette.keyword);
+        c.insert("type_name", &theme.palette.type_name);
+        c.insert("func", &theme.palette.func);
+        c.insert("tag", &theme.palette.tag);
+        c.insert("string", &theme.palette.string);
+        c.insert("constant", &theme.palette.constant);
+        c.insert("attribute", &theme.palette.attribute);
 
-        c.insert("green", &p.ansi[2]);
-        c.insert("yellow", &p.ansi[3]);
-        c.insert("orange", &p.ansi[9]);
+        c.insert("green", &theme.palette.ansi[2]);
+        c.insert("yellow", &theme.palette.ansi[3]);
+        c.insert("orange", &theme.palette.ansi[9]);
 
         c
     }
@@ -151,7 +151,7 @@ impl Generator for BtopGenerator {
     fn fix(
         &self,
         status: &HealthStatus,
-        p: &Palette,
+        theme: &Theme,
         paths: &IrisPaths,
         templater: &Templater,
         task: &mut Task,
@@ -159,15 +159,15 @@ impl Generator for BtopGenerator {
         if !status.is_error() && !status.is_warning() {
             return task.log.action(
                 &format!("Re-applied `{}` configuration", self.name().bold()),
-                || self.apply(p, paths, templater, &mut task.as_quiet()),
+                || self.apply(theme, paths, templater, &mut task.as_quiet()),
             );
         }
 
         let mut fixed = false;
         if status.contains("missing in btop themes folder") {
             task.log.action("Restored `btop` theme symlink", || {
-                let cache = self.cache_path(paths, &p.name);
-                let link = self.link_path(paths, &p.name);
+                let cache = self.cache_path(paths, &theme.name.to_lowercase());
+                let link = self.link_path(paths, &theme.name.to_lowercase());
                 self.ensure_symlink(&cache, &link)
             })?;
             fixed = true;
@@ -178,7 +178,7 @@ impl Generator for BtopGenerator {
                 .action("Updated btop.conf to use the correct theme", || {
                     let base_dir = self.resolve_config_directory(paths);
                     let conf_path = base_dir.parent().unwrap_or(&base_dir).join("btop.conf");
-                    self.update_btop_conf(&conf_path, &p.name)
+                    self.update_btop_conf(&conf_path, &theme.name.to_lowercase())
                 })?;
             fixed = true;
         }
@@ -186,7 +186,7 @@ impl Generator for BtopGenerator {
         if !fixed {
             task.log
                 .action("Regenerated complete `btop` configuration", || {
-                    self.apply(p, paths, templater, &mut task.as_quiet())
+                    self.apply(theme, paths, templater, &mut task.as_quiet())
                 })?;
         }
 
@@ -227,12 +227,12 @@ impl BtopGenerator {
 
     fn ensure_cache_file(
         &self,
-        p: &Palette,
+        theme: &Theme,
         paths: &IrisPaths,
         templater: &Templater,
     ) -> Result<PathBuf> {
-        let cache_file: PathBuf = self.cache_path(paths, &p.name);
-        let render_ctx = self.build_render_context(p);
+        let cache_file: PathBuf = self.cache_path(paths, &theme.name.to_lowercase());
+        let render_ctx = self.build_render_context(theme);
         let content: String = templater.render(&self.template_path(), &render_ctx)?;
 
         if let Some(parent) = cache_file.parent() {
@@ -305,17 +305,23 @@ mod tests {
     #[test]
     fn should_build_valid_render_context() {
         let generator = BtopGenerator;
-        let p = Palette::mock();
-        let ctx = generator.build_render_context(&p);
+        let theme: Theme = Theme::mock();
+        let ctx = generator.build_render_context(&theme);
 
-        assert_eq!(ctx.get("bg").expect("bg missing").as_str().unwrap(), p.bg);
-        assert_eq!(ctx.get("fg").expect("fg missing").as_str().unwrap(), p.fg);
+        assert_eq!(
+            ctx.get("bg").expect("bg missing").as_str().unwrap(),
+            theme.palette.bg
+        );
+        assert_eq!(
+            ctx.get("fg").expect("fg missing").as_str().unwrap(),
+            theme.palette.fg
+        );
         assert_eq!(
             ctx.get("keyword")
                 .expect("keyword missing")
                 .as_str()
                 .unwrap(),
-            p.keyword
+            theme.palette.keyword
         );
 
         assert!(ctx.contains_key("green"));
@@ -353,12 +359,12 @@ mod tests {
     fn should_return_health_ok_for_btop() {
         let (_, mut ctx) = create_test_context();
         let generator = BtopGenerator;
-        let p = Palette::mock();
+        let theme: Theme = Theme::mock();
 
         let mut task = ctx.log.step("Test", false).as_quiet();
-        ctx.state.current_theme = p.name.clone();
+        ctx.state.current_theme = theme.name.clone();
         generator
-            .apply(&p, &ctx.paths, &ctx.templater, &mut task)
+            .apply(&theme, &ctx.paths, &ctx.templater, &mut task)
             .unwrap();
 
         let btop_dir = generator
@@ -369,14 +375,14 @@ mod tests {
         fs::create_dir_all(&btop_dir).unwrap();
         let conf_path = btop_dir.join("btop.conf");
 
-        let expected_line = format!("color_theme = \"{}\"", p.name);
+        let expected_line = format!("color_theme = \"{}\"", theme.name);
         fs::write(
             &conf_path,
             format!("graph_symbol = \"braille\"\n{}", expected_line),
         )
         .unwrap();
 
-        let status = generator.health_check(&ctx.paths, &p.name);
+        let status = generator.health_check(&ctx.paths, &theme.name);
         assert!(status.is_ok(), "Expected Ok, got: {status}");
     }
 
@@ -397,12 +403,12 @@ mod tests {
     fn should_return_health_warning_wrong_theme_in_conf_for_btop() {
         let (_, mut ctx) = create_test_context();
         let generator = BtopGenerator;
-        let p = Palette::mock();
+        let theme: Theme = Theme::mock();
 
         let mut task = ctx.log.step("Test", false).as_quiet();
-        ctx.state.current_theme = p.name.clone();
+        ctx.state.current_theme = theme.name.clone();
         generator
-            .apply(&p, &ctx.paths, &ctx.templater, &mut task)
+            .apply(&theme, &ctx.paths, &ctx.templater, &mut task)
             .unwrap();
 
         let btop_dir = generator
@@ -413,7 +419,7 @@ mod tests {
         fs::create_dir_all(&btop_dir).unwrap();
         fs::write(btop_dir.join("btop.conf"), "color_theme = \"default\"").unwrap();
 
-        let status = generator.health_check(&ctx.paths, &p.name);
+        let status = generator.health_check(&ctx.paths, &theme.name);
 
         assert!(
             status.is_warning(),
@@ -426,7 +432,7 @@ mod tests {
     fn should_apply_theme_and_update_conf() {
         let (_, ctx) = create_test_context();
         let generator = BtopGenerator;
-        let p = Palette::mock();
+        let theme: Theme = Theme::mock();
 
         let btop_dir = generator
             .resolve_config_directory(&ctx.paths)
@@ -443,14 +449,14 @@ mod tests {
         .unwrap();
 
         let mut task = ctx.log.step("Test", false).as_quiet();
-        let result = generator.apply(&p, &ctx.paths, &ctx.templater, &mut task);
+        let result = generator.apply(&theme, &ctx.paths, &ctx.templater, &mut task);
         assert!(result.is_ok());
 
         let cache_file = ctx.paths.generators.join("btop").join("test-theme.theme");
         assert!(cache_file.exists());
 
         let updated_content = fs::read_to_string(&btop_conf).unwrap();
-        assert!(updated_content.contains(&format!("color_theme = \"{}\"", p.name)));
+        assert!(updated_content.contains(&format!("color_theme = \"{}\"", theme.name)));
         assert!(updated_content.contains("graph_symbol = \"braille\""));
     }
 
@@ -458,7 +464,7 @@ mod tests {
     fn should_fix_broken_conf_for_btop() {
         let (tmp_dir, ctx) = create_test_context();
         let generator = BtopGenerator;
-        let p = Palette::mock();
+        let theme: Theme = Theme::mock();
         let root = tmp_dir.path();
 
         let btop_dir = root.join(".config/btop");
@@ -470,7 +476,7 @@ mod tests {
         )
         .unwrap();
 
-        let status = generator.health_check(&ctx.paths, &p.name);
+        let status = generator.health_check(&ctx.paths, &theme.name);
 
         assert!(
             status.is_warning(),
@@ -480,11 +486,11 @@ mod tests {
 
         let mut task = ctx.log.step("Test", false).as_quiet();
         generator
-            .fix(&status, &p, &ctx.paths, &ctx.templater, &mut task)
+            .fix(&status, &theme, &ctx.paths, &ctx.templater, &mut task)
             .expect("Fix failed");
 
         let content = fs::read_to_string(&conf_path).unwrap();
-        assert!(content.contains(&format!("color_theme = \"{}\"", p.name)));
+        assert!(content.contains(&format!("color_theme = \"{}\"", theme.name)));
         assert!(content.contains("other_setting = true"));
     }
 
@@ -492,41 +498,41 @@ mod tests {
     fn should_fix_missing_theme_file_for_btop() {
         let (tmp_dir, mut ctx) = create_test_context();
         let generator = BtopGenerator;
-        let p = Palette::mock();
+        let theme: Theme = Theme::mock();
         let root = tmp_dir.path();
 
-        ctx.state.current_theme = p.name.clone();
+        ctx.state.current_theme = theme.name.clone();
         let btop_dir = root.join(".config/btop");
         fs::create_dir_all(btop_dir.join("themes")).unwrap();
 
         fs::write(
             btop_dir.join("btop.conf"),
-            format!("color_theme = \"{}\"", p.name),
+            format!("color_theme = \"{}\"", theme.name),
         )
         .unwrap();
 
         let mut task = ctx.log.step("Test", false).as_quiet();
         generator
-            .apply(&p, &ctx.paths, &ctx.templater, &mut task)
+            .apply(&theme, &ctx.paths, &ctx.templater, &mut task)
             .unwrap();
 
-        let link_path = generator.link_path(&ctx.paths, &p.name);
+        let link_path = generator.link_path(&ctx.paths, &theme.name);
         assert!(link_path.exists());
 
         fs::remove_file(&link_path).unwrap();
 
-        let status = generator.health_check(&ctx.paths, &p.name);
+        let status = generator.health_check(&ctx.paths, &theme.name);
         assert!(
             status.is_error(),
             "Expected Error due to missing theme file, got: {status}"
         );
 
         generator
-            .fix(&status, &p, &ctx.paths, &ctx.templater, &mut task)
+            .fix(&status, &theme, &ctx.paths, &ctx.templater, &mut task)
             .expect("Fix failed");
 
         assert!(link_path.exists(), "Fix should restore the symlink");
-        assert!(generator.health_check(&ctx.paths, &p.name).is_ok());
+        assert!(generator.health_check(&ctx.paths, &theme.name).is_ok());
     }
 
     #[test]

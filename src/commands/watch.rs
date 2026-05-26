@@ -1,4 +1,9 @@
-use crate::{commands::apply_theme, core::IrisContext, models::Palette, utils};
+use crate::{
+    commands::apply_theme,
+    core::{IrisContext, ThemeOrchestrator},
+    models::Theme,
+    utils,
+};
 use colored::Colorize;
 use notify_debouncer_mini::{new_debouncer, notify::*};
 use std::{
@@ -51,9 +56,9 @@ fn handle_change(path: &PathBuf, ctx: &mut IrisContext) -> anyhow::Result<()> {
     sleep(Duration::from_millis(10));
 
     let content: String = fs::read_to_string(path)?;
-    let theme: String = content.trim().to_string();
+    let theme_name: String = content.trim().to_string();
 
-    if theme.is_empty() || theme == ctx.state.current_theme {
+    if theme_name.is_empty() || theme_name == ctx.state.current_theme {
         return Ok(());
     }
 
@@ -65,16 +70,17 @@ fn handle_change(path: &PathBuf, ctx: &mut IrisContext) -> anyhow::Result<()> {
     );
 
     let start = Instant::now();
-    let palette: Palette = Palette::fetch(&theme, false, true, &ctx.paths, &ctx.state, &ctx.log)?;
+    let orchestrator: ThemeOrchestrator = ThemeOrchestrator::new(&ctx.paths, &ctx.log);
+    let theme_obj: Theme = orchestrator.load_theme(&theme_name, false, true, &ctx.state)?;
 
-    apply_theme(&palette, ctx)?;
+    apply_theme(&theme_obj, ctx)?;
     render_watch_ui(path);
 
     println!(
         " {}  {} {} {} {}",
-        "󰄬".green().bold(),
+        "✓".green().bold(),
         "Theme".green(),
-        utils::capitalize(&palette.name).cyan().bold(),
+        theme_obj.name.cyan().bold(),
         "applied in".green(),
         format!("{:.2?}", start.elapsed()).white().bold()
     );

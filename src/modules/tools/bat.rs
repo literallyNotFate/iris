@@ -2,7 +2,7 @@ use super::rules::RULES;
 use crate::{
     core::{IrisPaths, Templater},
     log::{Reporter, Task},
-    models::{HealthStatus, Palette},
+    models::{HealthStatus, Theme},
     modules::{Generator, GeneratorType},
     utils::{self},
 };
@@ -42,19 +42,19 @@ impl Generator for BatGenerator {
 
     fn apply(
         &self,
-        p: &Palette,
+        theme: &Theme,
         paths: &IrisPaths,
         templater: &Templater,
         task: &mut Task,
     ) -> Result<()> {
         task.info(&format!(
             "Generating {} theme for {}...",
-            utils::capitalize(&p.name).yellow(),
+            theme.name.yellow(),
             self.name().bold().cyan()
         ));
 
-        let cache_theme: PathBuf = self.ensure_theme_cache(p, paths, templater)?;
-        let link_path: PathBuf = self.link_path(paths, &p.name);
+        let cache_theme: PathBuf = self.ensure_theme_cache(theme, paths, templater)?;
+        let link_path: PathBuf = self.link_path(paths, &theme.name.to_lowercase());
 
         task.info(&format!(
             "Linking {} theme to {}...",
@@ -63,42 +63,42 @@ impl Generator for BatGenerator {
         ));
         self.ensure_symlink(&cache_theme, &link_path)?;
 
-        self.ensure_config(p, paths)?;
+        self.ensure_config(theme, paths)?;
         self.rebuild_bat_cache(task)?;
 
         task.info(&format!(
             "{} theme applied to {}",
-            utils::capitalize(&p.name).yellow(),
+            theme.name.yellow(),
             self.name().bold().cyan()
         ));
         Ok(())
     }
 
-    fn build_render_context(&self, p: &Palette) -> tera::Context {
+    fn build_render_context(&self, theme: &Theme) -> tera::Context {
         let mut c = tera::Context::new();
         let fix = |h: &str| -> String {
             let hex = h.trim_start_matches('#');
             format!("#{}", hex)
         };
 
-        c.insert("theme_name", &utils::capitalize(&p.name));
-        c.insert("bg", &fix(&p.bg));
-        c.insert("fg", &fix(&p.fg));
-        c.insert("sel", &fix(&p.sel));
-        c.insert("line", &fix(&p.line_hl));
+        c.insert("theme_name", &theme.name);
+        c.insert("bg", &fix(&theme.palette.bg));
+        c.insert("fg", &fix(&theme.palette.fg));
+        c.insert("sel", &fix(&theme.palette.sel));
+        c.insert("line", &fix(&theme.palette.line_hl));
 
         let processed_rules: Vec<serde_json::Value> = RULES
             .iter()
             .map(|r| {
                 let color = match r.color_key {
-                    "keyword" => &p.keyword,
-                    "func" => &p.func,
-                    "type_name" => &p.type_name,
-                    "string" => &p.string,
-                    "operator" => &p.operator,
-                    "number" => &p.number,
-                    "comment" => &p.comment,
-                    _ => &p.fg,
+                    "keyword" => &theme.palette.keyword,
+                    "func" => &theme.palette.func,
+                    "type_name" => &theme.palette.type_name,
+                    "string" => &theme.palette.string,
+                    "operator" => &theme.palette.operator,
+                    "number" => &theme.palette.number,
+                    "comment" => &theme.palette.comment,
+                    _ => &theme.palette.fg,
                 };
 
                 let style = if r.style.is_empty() || r.style == "normal" {
@@ -155,7 +155,7 @@ impl Generator for BatGenerator {
     fn fix(
         &self,
         status: &HealthStatus,
-        p: &Palette,
+        theme: &Theme,
         paths: &IrisPaths,
         templater: &Templater,
         task: &mut Task,
@@ -164,7 +164,7 @@ impl Generator for BatGenerator {
             return task.log.action(
                 &format!("Re-applied `{}` configuration", self.name().bold()),
                 || {
-                    self.apply(p, paths, templater, &mut task.as_quiet())?;
+                    self.apply(theme, paths, templater, &mut task.as_quiet())?;
                     self.rebuild_bat_cache(&mut task.as_quiet())
                 },
             );
@@ -175,10 +175,10 @@ impl Generator for BatGenerator {
             task.log.action(
                 &format!("Repaired `{}` theme and configuration", self.name().bold()),
                 || {
-                    self.ensure_theme_cache(p, paths, templater)?;
-                    self.ensure_config(p, paths)?;
-                    let cache = self.cache_path(paths, &p.name);
-                    let link = self.link_path(paths, &p.name);
+                    self.ensure_theme_cache(theme, paths, templater)?;
+                    self.ensure_config(theme, paths)?;
+                    let cache = self.cache_path(paths, &theme.name.to_lowercase());
+                    let link = self.link_path(paths, &theme.name.to_lowercase());
                     self.ensure_symlink(&cache, &link)
                 },
             )?;
@@ -188,7 +188,7 @@ impl Generator for BatGenerator {
         if !fixed {
             task.log
                 .action("Regenerated complete `bat` configuration", || {
-                    self.apply(p, paths, templater, &mut task.as_quiet())
+                    self.apply(theme, paths, templater, &mut task.as_quiet())
                 })?;
         }
 
@@ -217,12 +217,12 @@ impl Generator for BatGenerator {
 impl BatGenerator {
     fn ensure_theme_cache(
         &self,
-        p: &Palette,
+        theme: &Theme,
         paths: &IrisPaths,
         templater: &Templater,
     ) -> Result<PathBuf> {
-        let cache_path: PathBuf = self.cache_path(paths, &p.name);
-        let render_ctx = self.build_render_context(p);
+        let cache_path: PathBuf = self.cache_path(paths, &theme.name.to_lowercase());
+        let render_ctx = self.build_render_context(theme);
         let content: String = templater.render(&self.template_path(), &render_ctx)?;
 
         if let Some(parent) = cache_path.parent() {
@@ -269,11 +269,10 @@ impl BatGenerator {
         Ok(())
     }
 
-    fn ensure_config(&self, p: &Palette, paths: &IrisPaths) -> anyhow::Result<()> {
-        let theme_name: String = utils::capitalize(&p.name);
+    fn ensure_config(&self, theme: &Theme, paths: &IrisPaths) -> anyhow::Result<()> {
         let config_content: String = format!(
             "--theme=\"{name}\"\n--style=\"numbers,changes\"\n--color=\"always\"\n",
-            name = theme_name
+            name = theme.name
         );
 
         let generator_dir: PathBuf = paths.generators.join(self.name());
@@ -328,11 +327,11 @@ mod tests {
     #[test]
     fn should_build_valid_render_context() {
         let generator = BatGenerator;
-        let p = Palette::mock();
-        let context = generator.build_render_context(&p);
+        let theme: Theme = Theme::mock();
+        let context = generator.build_render_context(&theme);
         let data = context.into_json();
 
-        assert_eq!(data["theme_name"], utils::capitalize(&p.name));
+        assert_eq!(data["theme_name"], theme.name);
         assert!(data["bg"].as_str().unwrap().starts_with('#'));
         assert!(data["fg"].as_str().unwrap().starts_with('#'));
 
@@ -349,17 +348,17 @@ mod tests {
     fn should_return_health_ok_for_bat() {
         let (_, mut ctx) = create_test_context();
         let generator = BatGenerator;
-        let p = Palette::mock();
+        let theme: Theme = Theme::mock();
 
         let mut task = ctx.log.step("Test", false).as_quiet();
-        ctx.state.current_theme = p.name.clone();
+        ctx.state.current_theme = theme.name.clone();
         generator
-            .apply(&p, &ctx.paths, &ctx.templater, &mut task)
+            .apply(&theme, &ctx.paths, &ctx.templater, &mut task)
             .unwrap();
         let expected_config = ctx.paths.generators.join(generator.name()).join("bat.conf");
 
         temp_env::with_var("BAT_CONFIG_PATH", Some(expected_config), || {
-            let status = generator.health_check(&ctx.paths, &p.name);
+            let status = generator.health_check(&ctx.paths, &theme.name);
             assert!(status.is_ok(), "Expected Ok, got: {status}");
         });
     }
@@ -383,13 +382,13 @@ mod tests {
     fn should_apply_theme_for_bat() {
         let (_, ctx) = create_test_context();
         let generator = BatGenerator;
-        let p = Palette::mock();
+        let theme: Theme = Theme::new("Test-Theme", Theme::mock().palette);
 
-        let expected_file_name: String = generator.target_file_name(&p.name);
-        let expected_theme_name: String = utils::capitalize(&p.name);
+        let expected_file_name: String = generator.target_file_name(&theme.name);
+        let expected_theme_name: String = theme.name.clone();
 
         let mut task = ctx.log.step("Test", false).as_quiet();
-        let result = generator.apply(&p, &ctx.paths, &ctx.templater, &mut task);
+        let result = generator.apply(&theme, &ctx.paths, &ctx.templater, &mut task);
         assert!(result.is_ok(), "Apply failed: {:?}", result.err());
 
         let cache_theme_path: PathBuf = ctx.paths.generators.join("bat").join(&expected_file_name);
@@ -422,28 +421,28 @@ mod tests {
         temp_env::with_vars([("HOME", Some(home_dir))], || {
             let (_iris_dir, ctx) = create_test_context();
             let generator = BatGenerator;
-            let p = Palette::mock();
+            let theme: Theme = Theme::mock();
             let expected_env = ctx.paths.generators.join(generator.name()).join("bat.conf");
 
             temp_env::with_var("BAT_CONFIG_PATH", Some(expected_env.as_os_str()), || {
                 let mut task = ctx.log.step("Test", false).as_quiet();
                 generator
-                    .apply(&p, &ctx.paths, &ctx.templater, &mut task)
+                    .apply(&theme, &ctx.paths, &ctx.templater, &mut task)
                     .unwrap();
 
-                let link = generator.link_path(&ctx.paths, &p.name);
+                let link = generator.link_path(&ctx.paths, &theme.name);
                 if link.exists() {
                     fs::remove_file(&link).unwrap();
                 }
 
-                let status = generator.health_check(&ctx.paths, &p.name);
+                let status = generator.health_check(&ctx.paths, &theme.name);
                 assert!(status.is_error(), "Expected Error, got: {status}");
                 assert!(status.contains("missing"));
 
                 generator
-                    .fix(&status, &p, &ctx.paths, &ctx.templater, &mut task)
+                    .fix(&status, &theme, &ctx.paths, &ctx.templater, &mut task)
                     .unwrap();
-                assert!(generator.health_check(&ctx.paths, &p.name).is_ok());
+                assert!(generator.health_check(&ctx.paths, &theme.name).is_ok());
             });
         });
     }
@@ -452,11 +451,11 @@ mod tests {
     fn should_clear_generated_files_for_bat() {
         let (_, ctx) = create_test_context();
         let generator = BatGenerator;
-        let p = Palette::mock();
+        let theme: Theme = Theme::mock();
 
         let mut task = ctx.log.step("Test", false).as_quiet();
         generator
-            .apply(&p, &ctx.paths, &ctx.templater, &mut task)
+            .apply(&theme, &ctx.paths, &ctx.templater, &mut task)
             .unwrap();
 
         let cache_dir: PathBuf = ctx.paths.generators.join(generator.name());
@@ -477,15 +476,15 @@ mod tests {
     fn should_remove_theme_for_bat() {
         let (_, ctx) = create_test_context();
         let generator = BatGenerator;
-        let p = Palette::mock();
+        let theme: Theme = Theme::mock();
 
         let mut task = ctx.log.step("Test", false).as_quiet();
         generator
-            .apply(&p, &ctx.paths, &ctx.templater, &mut task)
+            .apply(&theme, &ctx.paths, &ctx.templater, &mut task)
             .unwrap();
 
-        let cache_file = generator.cache_path(&ctx.paths, &p.name);
-        let link_file = generator.theme_path(&ctx.paths, &p.name);
+        let cache_file = generator.cache_path(&ctx.paths, &theme.name);
+        let link_file = generator.theme_path(&ctx.paths, &theme.name);
 
         assert!(
             cache_file.exists(),
@@ -493,7 +492,7 @@ mod tests {
         );
         assert!(link_file.exists(), "Theme file should exist before removal");
 
-        generator.remove_theme(&ctx.paths, &p.name).unwrap();
+        generator.remove_theme(&ctx.paths, &theme.name).unwrap();
 
         assert!(
             !cache_file.exists(),

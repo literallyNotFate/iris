@@ -1,6 +1,12 @@
-use crate::{cli::switch::SwitchArgs, commands::apply_theme, core::IrisContext, models::Palette};
+use crate::{
+    cli::switch::SwitchArgs,
+    commands::apply_theme,
+    core::{IrisContext, ThemeOrchestrator},
+    models::Theme,
+    utils,
+};
 
-/// Handle application switch command
+/// Handle application switch (main entry point for changing themes)
 pub fn exec(args: SwitchArgs, ctx: &mut IrisContext) -> anyhow::Result<()> {
     use colored::Colorize;
     let (target_name, is_fb) = ctx.resolve_theme(Some(args.name), args.fallback)?;
@@ -9,19 +15,14 @@ pub fn exec(args: SwitchArgs, ctx: &mut IrisContext) -> anyhow::Result<()> {
         println!(
             "\n{}  Using fallback: {}",
             "󰁯".blue(),
-            target_name.green().bold()
+            utils::capitalize(&target_name).green().bold()
         );
     }
 
     println!();
-    let palette: Palette = Palette::fetch(
-        &target_name,
-        args.force,
-        true,
-        &ctx.paths,
-        &ctx.state,
-        &ctx.log,
-    )?;
 
-    apply_theme(&palette, ctx)
+    let orchestrator: ThemeOrchestrator = ThemeOrchestrator::new(&ctx.paths, &ctx.log);
+    let theme_obj: Theme = orchestrator.load_theme(&target_name, args.force, true, &ctx.state)?;
+
+    apply_theme(&theme_obj, ctx)
 }

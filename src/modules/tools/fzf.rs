@@ -1,7 +1,7 @@
 use crate::{
     core::{IrisPaths, Templater},
     log::Task,
-    models::{HealthStatus, Palette},
+    models::{HealthStatus, Theme},
     modules::{Generator, GeneratorType},
     utils::{self},
 };
@@ -40,7 +40,7 @@ impl Generator for FzfGenerator {
 
     fn apply(
         &self,
-        p: &Palette,
+        theme: &Theme,
         paths: &IrisPaths,
         templater: &Templater,
         task: &mut Task,
@@ -50,26 +50,26 @@ impl Generator for FzfGenerator {
             self.name().bold().cyan(),
             utils::pretty_path(&self.cache_path(paths, "")).magenta()
         ));
-        self.ensure_cache_file(p, paths, templater)?;
+        self.ensure_cache_file(theme, paths, templater)?;
 
         task.info(&format!(
             "{} theme applied to {}",
-            utils::capitalize(&p.name).yellow(),
+            theme.name.yellow(),
             self.name().bold().cyan()
         ));
         Ok(())
     }
 
-    fn build_render_context(&self, p: &Palette) -> tera::Context {
+    fn build_render_context(&self, theme: &Theme) -> tera::Context {
         let mut c = tera::Context::new();
         let strip = |hex: &str| hex.trim_start_matches('#').to_string();
 
-        c.insert("theme_name", &utils::capitalize(&p.name));
-        c.insert("fg", &strip(&p.fg));
-        c.insert("bg", &strip(&p.bg));
-        c.insert("accent", &strip(&p.ansi[3]));
-        c.insert("match_c", &strip(&p.ansi[5]));
-        c.insert("dimmed", &strip(&p.ansi[8]));
+        c.insert("theme_name", &theme.name);
+        c.insert("fg", &strip(&theme.palette.fg));
+        c.insert("bg", &strip(&theme.palette.bg));
+        c.insert("accent", &strip(&theme.palette.ansi[3]));
+        c.insert("match_c", &strip(&theme.palette.ansi[5]));
+        c.insert("dimmed", &strip(&theme.palette.ansi[8]));
 
         c
     }
@@ -115,7 +115,7 @@ impl Generator for FzfGenerator {
     fn fix(
         &self,
         status: &HealthStatus,
-        p: &Palette,
+        theme: &Theme,
         paths: &IrisPaths,
         templater: &Templater,
         task: &mut Task,
@@ -123,14 +123,14 @@ impl Generator for FzfGenerator {
         if !status.is_error() && !status.is_warning() {
             return task.log.action(
                 &format!("Re-applied `{}` configuration", self.name().bold()),
-                || self.apply(p, paths, templater, &mut task.as_quiet()),
+                || self.apply(theme, paths, templater, &mut task.as_quiet()),
             );
         }
 
         let mut fixed = false;
         if status.contains("missing from cache") {
             task.log.action("Restoring missing theme file", || {
-                self.apply(p, paths, templater, &mut task.as_quiet())
+                self.apply(theme, paths, templater, &mut task.as_quiet())
             })?;
             fixed = true;
         }
@@ -146,7 +146,7 @@ impl Generator for FzfGenerator {
         if !fixed {
             task.log
                 .action("Regenerating complete `fzf` configuration", || {
-                    self.apply(p, paths, templater, &mut task.as_quiet())
+                    self.apply(theme, paths, templater, &mut task.as_quiet())
                 })?;
         }
 
@@ -204,12 +204,12 @@ impl FzfGenerator {
 
     fn ensure_cache_file(
         &self,
-        p: &Palette,
+        theme: &Theme,
         paths: &IrisPaths,
         templater: &Templater,
     ) -> Result<PathBuf> {
-        let cache_file: PathBuf = self.cache_path(paths, &p.name);
-        let render_ctx = self.build_render_context(p);
+        let cache_file: PathBuf = self.cache_path(paths, &theme.name);
+        let render_ctx = self.build_render_context(theme);
         let content: String = templater.render(&self.template_path(), &render_ctx)?;
 
         if let Some(parent) = cache_file.parent() {
@@ -270,8 +270,8 @@ mod tests {
     #[test]
     fn should_build_valid_render_context() {
         let generator = FzfGenerator;
-        let p = Palette::mock();
-        let render_ctx = generator.build_render_context(&p);
+        let theme: Theme = Theme::mock();
+        let render_ctx = generator.build_render_context(&theme);
         let fg = render_ctx.get("fg").unwrap().as_str().unwrap();
 
         assert!(!fg.starts_with('#'));
@@ -281,11 +281,11 @@ mod tests {
     fn should_return_health_ok_for_fzf() {
         let (_, ctx) = create_test_context();
         let generator = FzfGenerator;
-        let p = Palette::mock();
+        let theme: Theme = Theme::mock();
 
         let mut task = ctx.log.step("Test", true).as_quiet();
         generator
-            .apply(&p, &ctx.paths, &ctx.templater, &mut task)
+            .apply(&theme, &ctx.paths, &ctx.templater, &mut task)
             .unwrap();
 
         let zshrc_path = generator.link_path(&ctx.paths, "");
@@ -294,7 +294,7 @@ mod tests {
         fs::create_dir_all(zshrc_path.parent().unwrap()).unwrap();
         fs::write(&zshrc_path, format!("source \"{}\"", cache_file.display())).unwrap();
 
-        let status = generator.health_check(&ctx.paths, &p.name);
+        let status = generator.health_check(&ctx.paths, &theme.name);
         assert!(status.is_ok(), "Expected Ok, got: {status}");
     }
 
@@ -354,11 +354,11 @@ mod tests {
     fn should_apply_fzf_theme_to_cache() {
         let (_, ctx) = create_test_context();
         let generator = FzfGenerator;
-        let p = Palette::mock();
+        let theme: Theme = Theme::mock();
 
         let mut task = ctx.log.step("Test", false).as_quiet();
         generator
-            .apply(&p, &ctx.paths, &ctx.templater, &mut task)
+            .apply(&theme, &ctx.paths, &ctx.templater, &mut task)
             .unwrap();
 
         let cache_file = ctx.paths.bin.join("fzf.sh");
@@ -366,14 +366,14 @@ mod tests {
 
         let content = fs::read_to_string(cache_file).unwrap();
         assert!(content.contains("export FZF_DEFAULT_OPTS="));
-        assert!(content.contains(&utils::capitalize(&p.name)));
+        assert!(content.contains(&theme.name));
     }
 
     #[test]
     fn should_fix_source_line_injection_for_fzf() {
         let (tmp_dir, ctx) = create_test_context();
         let generator = FzfGenerator;
-        let p = Palette::mock();
+        let theme: Theme = Theme::mock();
         let root = tmp_dir.path();
 
         let zshrc = root.join(".zshrc");
@@ -381,19 +381,19 @@ mod tests {
 
         let mut task = ctx.log.step("Test", false).as_quiet();
         generator
-            .apply(&p, &ctx.paths, &ctx.templater, &mut task)
+            .apply(&theme, &ctx.paths, &ctx.templater, &mut task)
             .unwrap();
 
-        let status = generator.health_check(&ctx.paths, &p.name);
+        let status = generator.health_check(&ctx.paths, &theme.name);
         assert!(status.is_error());
         assert!(status.contains("not sourced"));
 
         generator
-            .fix(&status, &p, &ctx.paths, &ctx.templater, &mut task)
+            .fix(&status, &theme, &ctx.paths, &ctx.templater, &mut task)
             .expect("Fix failed");
 
         let updated_content = fs::read_to_string(&zshrc).unwrap();
-        let cache_file = generator.cache_path(&ctx.paths, &p.name);
+        let cache_file = generator.cache_path(&ctx.paths, &theme.name);
 
         assert!(
             updated_content.contains(&cache_file.to_str().unwrap()),
@@ -401,7 +401,7 @@ mod tests {
         );
         assert!(updated_content.contains("# iris:fzf"));
 
-        let final_status = generator.health_check(&ctx.paths, &p.name);
+        let final_status = generator.health_check(&ctx.paths, &theme.name);
         assert!(
             final_status.is_ok(),
             "Final status should be Ok, got: {final_status}"
@@ -412,10 +412,10 @@ mod tests {
     fn should_fix_missing_cache_for_fzf() {
         let (_, ctx) = create_test_context();
         let generator = FzfGenerator;
-        let p = Palette::mock();
+        let theme: Theme = Theme::mock();
 
         let zshrc = generator.link_path(&ctx.paths, "");
-        let cache_file = generator.cache_path(&ctx.paths, &p.name);
+        let cache_file = generator.cache_path(&ctx.paths, &theme.name);
 
         fs::create_dir_all(zshrc.parent().unwrap()).unwrap();
         fs::write(
@@ -428,7 +428,7 @@ mod tests {
 
         let mut task = ctx.log.step("Test", false).as_quiet();
         generator
-            .fix(&status, &p, &ctx.paths, &ctx.templater, &mut task)
+            .fix(&status, &theme, &ctx.paths, &ctx.templater, &mut task)
             .expect("Fix failed");
 
         assert!(cache_file.exists(), "Cache file should be recreated");
@@ -441,11 +441,11 @@ mod tests {
     fn should_clear_generated_files_for_fzf() {
         let (_, ctx) = create_test_context();
         let generator = FzfGenerator;
-        let p = Palette::mock();
+        let theme: Theme = Theme::mock();
 
         let mut task = ctx.log.step("Test", false).as_quiet();
         generator
-            .apply(&p, &ctx.paths, &ctx.templater, &mut task)
+            .apply(&theme, &ctx.paths, &ctx.templater, &mut task)
             .unwrap();
 
         let fzf_script = generator.cache_path(&ctx.paths, "");
@@ -462,17 +462,17 @@ mod tests {
     fn should_remove_theme_for_fzf() {
         let (_, ctx) = create_test_context();
         let generator = FzfGenerator;
-        let p = Palette::mock();
+        let theme: Theme = Theme::mock();
 
         let mut task = ctx.log.step("Test", false).as_quiet();
         generator
-            .apply(&p, &ctx.paths, &ctx.templater, &mut task)
+            .apply(&theme, &ctx.paths, &ctx.templater, &mut task)
             .unwrap();
 
         let fzf_script = generator.cache_path(&ctx.paths, "");
         assert!(fzf_script.exists());
 
-        generator.remove_theme(&ctx.paths, &p.name).unwrap();
+        generator.remove_theme(&ctx.paths, &theme.name).unwrap();
         assert!(
             !fzf_script.exists(),
             "remove_theme should delete the fzf.sh script"

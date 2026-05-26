@@ -21,7 +21,7 @@ impl HealthStatus {
     pub fn error(msg: impl Into<String>, hint: Option<impl Into<String>>) -> Self {
         Self::Error {
             message: msg.into(),
-            fix_hint: hint.map(|h| h.into()),
+            fix_hint: hint.map(Into::into),
         }
     }
 
@@ -51,11 +51,11 @@ impl HealthStatus {
     }
 
     /// Returns current status message
-    pub fn message(&self) -> String {
+    pub fn message(&self) -> &str {
         match self {
-            HealthStatus::Ok => "healthy".to_string(),
-            HealthStatus::Warning(msg) => msg.clone(),
-            HealthStatus::Error { message, .. } => message.clone(),
+            HealthStatus::Ok => "healthy",
+            HealthStatus::Warning(msg) => msg,
+            HealthStatus::Error { message, .. } => message,
         }
     }
 
@@ -110,11 +110,12 @@ impl HealthStatus {
 /// Display trait realisation for terminal: <icon> <message>
 impl fmt::Display for HealthStatus {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            HealthStatus::Ok => write!(f, "{} {}", self.icon(), self.message().green()),
-            HealthStatus::Warning(msg) => write!(f, "{} {}", self.icon(), msg.yellow()),
-            HealthStatus::Error { message, .. } => write!(f, "{} {}", self.icon(), message.red()),
-        }
+        let msg = match self {
+            HealthStatus::Ok => self.message().green(),
+            HealthStatus::Warning(_) => self.message().yellow(),
+            HealthStatus::Error { .. } => self.message().red(),
+        };
+        write!(f, "{} {}", self.icon(), msg)
     }
 }
 

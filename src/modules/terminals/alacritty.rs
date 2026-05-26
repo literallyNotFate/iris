@@ -1,7 +1,7 @@
 use crate::{
     core::{IrisPaths, Templater},
     log::Task,
-    models::{HealthStatus, Palette},
+    models::{HealthStatus, Theme},
     modules::{Generator, GeneratorType},
     utils::{self},
 };
@@ -42,19 +42,19 @@ impl Generator for AlacrittyGenerator {
 
     fn apply(
         &self,
-        p: &Palette,
+        theme: &Theme,
         paths: &IrisPaths,
         templater: &Templater,
         task: &mut Task,
     ) -> Result<()> {
         task.info(&format!(
             "Generating {} theme for {}",
-            utils::capitalize(&p.name).yellow(),
+            theme.name.yellow(),
             self.name().bold().cyan(),
         ));
 
-        let cache_file: PathBuf = self.ensure_cache_file(p, paths, templater)?;
-        let link_path: PathBuf = self.link_path(paths, &p.name);
+        let cache_file: PathBuf = self.ensure_cache_file(theme, paths, templater)?;
+        let link_path: PathBuf = self.link_path(paths, &theme.name);
 
         task.info(&format!(
             "Linking {} theme to {}...",
@@ -65,20 +65,20 @@ impl Generator for AlacrittyGenerator {
 
         task.info(&format!(
             "{} theme applied to {}",
-            utils::capitalize(&p.name).yellow(),
+            theme.name.yellow(),
             self.name().bold().cyan()
         ));
         Ok(())
     }
 
-    fn build_render_context(&self, p: &Palette) -> tera::Context {
+    fn build_render_context(&self, theme: &Theme) -> tera::Context {
         let mut c = tera::Context::new();
-        c.insert("theme_name", &utils::capitalize(&p.name));
-        c.insert("bg", &p.bg);
-        c.insert("fg", &p.fg);
-        c.insert("white", &p.white);
-        c.insert("sel", &p.sel);
-        c.insert("ansi", &p.ansi);
+        c.insert("theme_name", &theme.name);
+        c.insert("bg", &theme.palette.bg);
+        c.insert("fg", &theme.palette.fg);
+        c.insert("white", &theme.palette.white);
+        c.insert("sel", &theme.palette.sel);
+        c.insert("ansi", &theme.palette.ansi);
         c
     }
 
@@ -133,7 +133,7 @@ impl Generator for AlacrittyGenerator {
     fn fix(
         &self,
         status: &HealthStatus,
-        p: &Palette,
+        theme: &Theme,
         paths: &IrisPaths,
         templater: &Templater,
         task: &mut Task,
@@ -141,7 +141,7 @@ impl Generator for AlacrittyGenerator {
         if !status.is_error() && !status.is_warning() {
             return task.log.action(
                 &format!("Re-applied `{}` configuration", self.name().bold()),
-                || self.apply(p, paths, templater, &mut task.as_quiet()),
+                || self.apply(theme, paths, templater, &mut task.as_quiet()),
             );
         }
 
@@ -174,7 +174,7 @@ impl Generator for AlacrittyGenerator {
 
             task.log
                 .action("Regenerating complete `alacritty` configuration", || {
-                    self.apply(p, paths, templater, &mut task.as_quiet())
+                    self.apply(theme, paths, templater, &mut task.as_quiet())
                 })?;
         }
 
@@ -185,12 +185,12 @@ impl Generator for AlacrittyGenerator {
 impl AlacrittyGenerator {
     fn ensure_cache_file(
         &self,
-        p: &Palette,
+        theme: &Theme,
         paths: &IrisPaths,
         templater: &Templater,
     ) -> Result<PathBuf> {
-        let cache_file: PathBuf = self.cache_path(paths, &p.name);
-        let render_ctx = self.build_render_context(p);
+        let cache_file: PathBuf = self.cache_path(paths, &theme.name);
+        let render_ctx = self.build_render_context(theme);
         let content: String = templater.render(&self.template_path(), &render_ctx)?;
 
         if let Some(parent) = cache_file.parent() {
@@ -308,22 +308,22 @@ mod tests {
     #[test]
     fn should_build_valid_render_context() {
         let generator = AlacrittyGenerator;
-        let p = Palette::mock();
-        let ctx = generator.build_render_context(&p);
+        let theme: Theme = Theme::mock();
+        let ctx = generator.build_render_context(&theme);
 
         assert_eq!(
             ctx.get("bg")
                 .expect("bg not found in context")
                 .as_str()
                 .unwrap(),
-            p.bg
+            theme.palette.bg
         );
         assert_eq!(
             ctx.get("fg")
                 .expect("fg not found in context")
                 .as_str()
                 .unwrap(),
-            p.fg
+            theme.palette.fg
         );
         assert!(ctx.contains_key("ansi"));
     }
@@ -332,19 +332,19 @@ mod tests {
     fn should_return_health_ok_for_alacritty() {
         let (_, mut ctx) = create_test_context();
         let generator = AlacrittyGenerator;
-        let p = Palette::mock();
+        let theme: Theme = Theme::mock();
 
         let mut task = ctx.log.step("Test", false).as_quiet();
-        ctx.state.current_theme = p.name.clone();
+        ctx.state.current_theme = theme.name.clone();
         generator
-            .apply(&p, &ctx.paths, &ctx.templater, &mut task)
+            .apply(&theme, &ctx.paths, &ctx.templater, &mut task)
             .unwrap();
 
         let alacritty_dir = generator.resolve_config_directory(&ctx.paths);
         let main_config = alacritty_dir.join("alacritty.toml");
         fs::write(&main_config, "import = [\"current_theme.toml\"]").unwrap();
 
-        let status = generator.health_check(&ctx.paths, &p.name);
+        let status = generator.health_check(&ctx.paths, &theme.name);
         assert!(status.is_ok(), "Expected Ok, got: {status}");
     }
 
@@ -352,12 +352,12 @@ mod tests {
     fn should_return_health_error_no_import_for_alacritty() {
         let (_, mut ctx) = create_test_context();
         let generator = AlacrittyGenerator;
-        let p = Palette::mock();
+        let theme: Theme = Theme::mock();
 
         let mut task = ctx.log.step("Test", false).as_quiet();
-        ctx.state.current_theme = p.name.clone();
+        ctx.state.current_theme = theme.name.clone();
         generator
-            .apply(&p, &ctx.paths, &ctx.templater, &mut task)
+            .apply(&theme, &ctx.paths, &ctx.templater, &mut task)
             .unwrap();
 
         let main_config = generator
@@ -365,7 +365,7 @@ mod tests {
             .join("alacritty.toml");
         fs::write(&main_config, "[window]\ndecorations = \"none\"").unwrap();
 
-        let status = generator.health_check(&ctx.paths, &p.name);
+        let status = generator.health_check(&ctx.paths, &theme.name);
 
         assert!(
             status.is_error(),
@@ -378,12 +378,12 @@ mod tests {
     fn should_return_health_warning_no_main_config_for_alacritty() {
         let (_, mut ctx) = create_test_context();
         let generator = AlacrittyGenerator;
-        let p = Palette::mock();
+        let theme: Theme = Theme::mock();
 
         let mut task = ctx.log.step("Test", false).as_quiet();
-        ctx.state.current_theme = p.name.clone();
+        ctx.state.current_theme = theme.name.clone();
         generator
-            .apply(&p, &ctx.paths, &ctx.templater, &mut task)
+            .apply(&theme, &ctx.paths, &ctx.templater, &mut task)
             .unwrap();
 
         let main_config = generator
@@ -393,7 +393,7 @@ mod tests {
             fs::remove_file(main_config).unwrap();
         }
 
-        let status = generator.health_check(&ctx.paths, &p.name);
+        let status = generator.health_check(&ctx.paths, &theme.name);
 
         assert!(
             status.is_warning(),
@@ -406,10 +406,10 @@ mod tests {
     fn should_apply_theme_for_alacritty() {
         let (_, ctx) = create_test_context();
         let generator = AlacrittyGenerator;
-        let p = Palette::mock();
+        let theme: Theme = Theme::mock();
 
         let mut task = ctx.log.step("Test", false).as_quiet();
-        let result = generator.apply(&p, &ctx.paths, &ctx.templater, &mut task);
+        let result = generator.apply(&theme, &ctx.paths, &ctx.templater, &mut task);
         assert!(result.is_ok(), "Apply failed: {:?}", result.err());
 
         let cache_file = ctx
@@ -427,16 +427,16 @@ mod tests {
         );
 
         let content = fs::read_to_string(cache_file).unwrap();
-        assert!(content.contains(&format!("background = \"{}\"", p.bg)));
-        assert!(content.contains(&format!("black   = \"{}\"", p.ansi[0])));
-        assert!(content.contains(&format!("white   = \"{}\"", p.ansi[15])));
+        assert!(content.contains(&format!("background = \"{}\"", theme.palette.bg)));
+        assert!(content.contains(&format!("black   = \"{}\"", theme.palette.ansi[0])));
+        assert!(content.contains(&format!("white   = \"{}\"", theme.palette.ansi[15])));
     }
 
     #[test]
     fn should_fix_inject_issue_for_alacritty() {
         let (_, ctx) = create_test_context();
         let generator = AlacrittyGenerator;
-        let p = Palette::mock();
+        let theme: Theme = Theme::mock();
 
         let alacritty_dir = generator.resolve_config_directory(&ctx.paths);
         fs::create_dir_all(&alacritty_dir).unwrap();
@@ -444,11 +444,11 @@ mod tests {
 
         let mut task = ctx.log.step("Test", false).as_quiet();
         generator
-            .apply(&p, &ctx.paths, &ctx.templater, &mut task)
+            .apply(&theme, &ctx.paths, &ctx.templater, &mut task)
             .unwrap();
         fs::write(&config_path, "[window]\ndecorations = \"none\"").unwrap();
 
-        let status = generator.health_check(&ctx.paths, &p.name);
+        let status = generator.health_check(&ctx.paths, &theme.name);
 
         assert!(
             status.is_error(),
@@ -457,7 +457,7 @@ mod tests {
         assert!(status.contains("import"));
 
         generator
-            .fix(&status, &p, &ctx.paths, &ctx.templater, &mut task)
+            .fix(&status, &theme, &ctx.paths, &ctx.templater, &mut task)
             .expect("Fix failed");
 
         let content = fs::read_to_string(&config_path).unwrap();
@@ -465,14 +465,14 @@ mod tests {
             content.contains("current_theme.toml"),
             "Import line missing after fix!"
         );
-        assert!(generator.health_check(&ctx.paths, &p.name).is_ok());
+        assert!(generator.health_check(&ctx.paths, &theme.name).is_ok());
     }
 
     #[test]
     fn should_fix_broken_symlink_for_alacritty() {
         let (_, ctx) = create_test_context();
         let generator = AlacrittyGenerator;
-        let p = Palette::mock();
+        let theme: Theme = Theme::mock();
 
         let alacritty_dir = generator.resolve_config_directory(&ctx.paths);
         fs::create_dir_all(&alacritty_dir).unwrap();
@@ -486,7 +486,7 @@ mod tests {
 
         let mut task = ctx.log.step("Test", false).as_quiet();
         generator
-            .apply(&p, &ctx.paths, &ctx.templater, &mut task)
+            .apply(&theme, &ctx.paths, &ctx.templater, &mut task)
             .unwrap();
 
         let link_path = generator.link_path(&ctx.paths, "");
@@ -494,14 +494,14 @@ mod tests {
             fs::remove_file(&link_path).unwrap();
         }
 
-        let status = generator.health_check(&ctx.paths, &p.name);
+        let status = generator.health_check(&ctx.paths, &theme.name);
         assert!(status.is_error(), "Should be Error, got: {status}");
 
         generator
-            .fix(&status, &p, &ctx.paths, &ctx.templater, &mut task)
+            .fix(&status, &theme, &ctx.paths, &ctx.templater, &mut task)
             .expect("Fix failed");
 
-        let final_status = generator.health_check(&ctx.paths, &p.name);
+        let final_status = generator.health_check(&ctx.paths, &theme.name);
         assert!(
             final_status.is_ok(),
             "Health check failed after fix: {final_status}"

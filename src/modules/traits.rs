@@ -1,7 +1,7 @@
 use crate::{
     core::{IrisPaths, Templater},
     log::Task,
-    models::{HealthStatus, Palette},
+    models::{HealthStatus, Theme},
     modules::GeneratorType,
 };
 use anyhow::{Context, Result};
@@ -54,7 +54,7 @@ pub trait Generator: Send + Sync {
     /// Logic of applying the theme (file writing, building cache etc)
     fn apply(
         &self,
-        p: &Palette,
+        theme: &Theme,
         paths: &IrisPaths,
         templater: &Templater,
         task: &mut Task,
@@ -94,15 +94,15 @@ pub trait Generator: Send + Sync {
     fn fix(
         &self,
         status: &HealthStatus,
-        p: &Palette,
+        theme: &Theme,
         paths: &IrisPaths,
         templater: &Templater,
         task: &mut Task,
     ) -> Result<()>;
 
-    /// Basic template context builder
+    /// Basic template context builder.
     /// Basically passes all palette colors to templater
-    fn build_render_context(&self, p: &Palette) -> tera::Context;
+    fn build_render_context(&self, theme: &Theme) -> tera::Context;
 
     /// Clear generator cached files
     fn clear(&self, paths: &IrisPaths) -> Result<()> {

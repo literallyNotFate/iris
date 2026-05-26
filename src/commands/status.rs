@@ -1,12 +1,13 @@
 use crate::{
-    core::IrisContext,
+    core::{IrisContext, ThemeOrchestrator},
     utils::{self},
 };
 use colored::*;
 
 /// Handle application status command
 pub fn exec(ctx: &IrisContext) -> anyhow::Result<()> {
-    let (nvim_theme, is_sync) = ctx.get_sync_status();
+    let orchestrator: ThemeOrchestrator = ThemeOrchestrator::new(&ctx.paths, &ctx.log);
+    let (nvim_theme, is_sync) = orchestrator.get_sync_status(&ctx.state);
     let current: String = ctx.state.current_theme.clone();
 
     if ctx.log.quiet {
@@ -23,7 +24,7 @@ pub fn exec(ctx: &IrisContext) -> anyhow::Result<()> {
     println!(
         "\n  {}  Active theme:    {}",
         "󰏘".red(),
-        current.bold().blue()
+        utils::capitalize(&current).bold().blue()
     );
     println!(
         "  {}  Plugin Manager:  {}",
@@ -77,7 +78,7 @@ fn render_generators_list(ctx: &IrisContext) {
     } else {
         for name in enabled {
             let icon = if ctx.registry.is_installed(name) {
-                "󰄬".green()
+                "✓".green()
             } else {
                 "󰀦".yellow()
             };
@@ -93,7 +94,7 @@ fn render_generators_list(ctx: &IrisContext) {
 fn render_sync_block(is_sync: bool, iris_theme: &str, nvim_theme: &str) {
     println!();
     if is_sync {
-        println!("  {}  {}", "󰄬".green(), "Sync with Neovim: OK".green());
+        println!("  {}  {}", "✓".green(), "Sync with Neovim: OK".green());
     } else {
         println!(
             "  {}  {}",
@@ -117,7 +118,7 @@ fn render_sync_block(is_sync: bool, iris_theme: &str, nvim_theme: &str) {
 /// Helper function to render status in quiet mode
 fn render_quiet(ctx: &IrisContext, current: &str, nvim_theme: &str, is_sync: bool) {
     let sync_icon = if is_sync {
-        "󰄬".green()
+        "✓".green()
     } else {
         "󰀦".yellow()
     };
@@ -139,7 +140,7 @@ fn render_quiet(ctx: &IrisContext, current: &str, nvim_theme: &str, is_sync: boo
     println!(
         "\n{} Theme: {}\nPlugin manager: {}\nGenerators: {}",
         sync_icon,
-        current.cyan().bold(),
+        utils::capitalize(current).cyan().bold(),
         ctx.state.manager,
         if gens.is_empty() {
             "none".dimmed().to_string()
@@ -155,4 +156,5 @@ fn render_quiet(ctx: &IrisContext, current: &str, nvim_theme: &str, is_sync: boo
             format!("Sync mismatch: Neovim is on `{}`", nvim_theme).dimmed()
         );
     }
+    println!();
 }

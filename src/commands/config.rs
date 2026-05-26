@@ -1,7 +1,8 @@
 use crate::{
     cli::ConfigAction,
-    core::{Client, IrisContext},
+    core::{IrisContext, ThemeOrchestrator},
     models::PluginManager,
+    utils,
 };
 use colored::*;
 
@@ -11,31 +12,26 @@ pub fn exec(action: ConfigAction, ctx: &mut IrisContext) -> anyhow::Result<()> {
         ConfigAction::Nvim { manager, detect } => {
             render_config_header("Neovim Configuration", "⚙");
 
-            let selected: PluginManager = Client::choose(&ctx.paths, manager, detect, &ctx.log)?;
-            Client::validate(&ctx.paths, &selected)?;
-
-            let count: usize = Client::count_plugins(&ctx.paths, &selected);
-            if count > 0 {
-                println!(
-                    "{} found {} {} {}",
-                    "└──".dimmed(),
-                    selected,
-                    format!("({} plugins)", count).dimmed(),
-                    "✓".green()
-                );
-            }
-
+            let orchestrator: ThemeOrchestrator = ThemeOrchestrator::new(&ctx.paths, &ctx.log);
+            let selected: PluginManager = orchestrator.choose_manager(manager, detect)?;
             ctx.state.manager = selected;
         }
 
         ConfigAction::Fallback { name } => {
             render_config_header("Fallback Configuration", "⚙");
-            let theme: String = name.to_lowercase();
-            ctx.validate_theme_exists(&theme)?;
+
+            let theme: String = utils::capitalize(name.trim());
+            let orchestrator: ThemeOrchestrator = ThemeOrchestrator::new(&ctx.paths, &ctx.log);
+            if !orchestrator.theme_exists(&theme, &ctx.state) {
+                anyhow::bail!(
+                    "Theme `{}` does not exist in Neovim or cache.",
+                    theme.cyan().bold()
+                );
+            }
 
             ctx.log.info(&format!(
                 "Selecting {} as a fallback...",
-                theme.to_string().magenta().bold()
+                theme.magenta().bold()
             ));
 
             println!(
@@ -45,7 +41,7 @@ pub fn exec(action: ConfigAction, ctx: &mut IrisContext) -> anyhow::Result<()> {
                 "✓".green()
             );
 
-            ctx.state.fallback_theme = theme;
+            ctx.state.fallback_theme = theme.to_lowercase();
         }
     }
 

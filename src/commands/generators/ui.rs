@@ -34,7 +34,7 @@ pub(super) fn render_full_row(g: &dyn Generator, enabled: bool, installed: bool)
 
     let (icon, status_label, name_style) = match (enabled, installed) {
         (true, true) => (
-            "󰄬 ".green(),
+            "✓ ".green(),
             "active".green().italic(),
             g.name().cyan().bold(),
         ),
