@@ -93,12 +93,12 @@ impl Generator for StarshipGenerator {
     fn build_render_context(&self, theme: &Theme) -> tera::Context {
         let mut c = tera::Context::new();
         c.insert("theme_name", &theme.name.to_lowercase());
-        c.insert("bg", &theme.palette.bg);
-        c.insert("fg", &theme.palette.fg);
-        c.insert("sel", &theme.palette.sel);
-        c.insert("line_hl", &theme.palette.line_hl);
-        c.insert("gutter_fg", &theme.palette.gutter_fg);
-        c.insert("ansi", &theme.palette.ansi);
+        c.insert("bg", &theme.colors.bg);
+        c.insert("fg", &theme.colors.fg);
+        c.insert("sel", &theme.colors.sel);
+        c.insert("line_hl", &theme.colors.line_hl);
+        c.insert("gutter_fg", &theme.colors.gutter_fg);
+        c.insert("ansi", &theme.colors.ansi);
         c
     }
 
@@ -316,11 +316,11 @@ mod tests {
 
         assert_eq!(
             ctx.get("bg").expect("bg missing").as_str().unwrap(),
-            theme.palette.bg
+            theme.colors.bg
         );
         assert_eq!(
             ctx.get("fg").expect("fg missing").as_str().unwrap(),
-            theme.palette.fg
+            theme.colors.fg
         );
 
         let ansi = ctx
@@ -565,7 +565,7 @@ mod tests {
 
                 let content = fs::read_to_string(&config_path).unwrap();
                 assert!(content.contains(&format!("[palettes.{}]", theme.name)));
-                assert!(content.contains(&theme.palette.bg));
+                assert!(content.contains(&theme.colors.bg));
                 assert!(generator.health_check(&ctx.paths, &theme.name).is_ok());
             },
         );

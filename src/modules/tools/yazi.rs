@@ -62,34 +62,34 @@ impl Generator for YaziGenerator {
         let mut c = tera::Context::new();
 
         c.insert("theme_name", &theme.name);
-        c.insert("bg", &theme.palette.bg);
-        c.insert("fg", &theme.palette.fg);
-        c.insert("white", &theme.palette.white);
-        c.insert("comment", &theme.palette.comment);
-        c.insert("gutter_fg", &theme.palette.gutter_fg);
-        c.insert("ansi", &theme.palette.ansi);
-        c.insert("sel", &theme.palette.sel);
+        c.insert("bg", &theme.colors.bg);
+        c.insert("fg", &theme.colors.fg);
+        c.insert("white", &theme.colors.white);
+        c.insert("comment", &theme.colors.comment);
+        c.insert("gutter_fg", &theme.colors.gutter_fg);
+        c.insert("ansi", &theme.colors.ansi);
+        c.insert("sel", &theme.colors.sel);
 
-        let line_hl = if theme.palette.line_hl == "#cccccc" {
-            &theme.palette.sel
+        let line_hl = if theme.colors.line_hl == "#cccccc" {
+            &theme.colors.sel
         } else {
-            &theme.palette.line_hl
+            &theme.colors.line_hl
         };
         c.insert("line_hl", line_hl);
 
-        c.insert("red", &theme.palette.ansi[1]);
-        c.insert("green", &theme.palette.ansi[2]);
-        c.insert("orange", &theme.palette.ansi[3]);
-        c.insert("blue", &theme.palette.ansi[4]);
-        c.insert("magenta", &theme.palette.ansi[5]);
-        c.insert("teal", &theme.palette.ansi[6]);
-        c.insert("tan", &theme.palette.ansi[7]);
-        c.insert("br_red", &theme.palette.ansi[9]);
-        c.insert("br_green", &theme.palette.ansi[10]);
-        c.insert("br_orange", &theme.palette.ansi[11]);
-        c.insert("br_blue", &theme.palette.ansi[12]);
-        c.insert("br_magenta", &theme.palette.ansi[13]);
-        c.insert("br_teal", &theme.palette.ansi[14]);
+        c.insert("red", &theme.colors.ansi[1]);
+        c.insert("green", &theme.colors.ansi[2]);
+        c.insert("orange", &theme.colors.ansi[3]);
+        c.insert("blue", &theme.colors.ansi[4]);
+        c.insert("magenta", &theme.colors.ansi[5]);
+        c.insert("teal", &theme.colors.ansi[6]);
+        c.insert("tan", &theme.colors.ansi[7]);
+        c.insert("br_red", &theme.colors.ansi[9]);
+        c.insert("br_green", &theme.colors.ansi[10]);
+        c.insert("br_orange", &theme.colors.ansi[11]);
+        c.insert("br_blue", &theme.colors.ansi[12]);
+        c.insert("br_magenta", &theme.colors.ansi[13]);
+        c.insert("br_teal", &theme.colors.ansi[14]);
 
         c
     }
@@ -259,12 +259,12 @@ mod tests {
         let generator = YaziGenerator;
         let mut theme: Theme = Theme::mock();
 
-        theme.palette.line_hl = "#123456".to_string();
+        theme.colors.line_hl = "#123456".to_string();
         let ctx = generator.build_render_context(&theme);
         assert_eq!(ctx.get("line_hl").unwrap().as_str().unwrap(), "#123456");
 
-        theme.palette.line_hl = "#cccccc".to_string();
-        theme.palette.sel = "#ff0000".to_string();
+        theme.colors.line_hl = "#cccccc".to_string();
+        theme.colors.sel = "#ff0000".to_string();
         let ctx = generator.build_render_context(&theme);
 
         assert_eq!(ctx.get("line_hl").unwrap().as_str().unwrap(), "#ff0000");

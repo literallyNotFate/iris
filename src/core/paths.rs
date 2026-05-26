@@ -17,7 +17,7 @@ pub struct IrisPaths {
 
     pub state_file: PathBuf,    // ~/.config/iris/state.json
     pub current_theme: PathBuf, // ~/.cache/iris/core/current_theme
-    pub palettes: PathBuf,      // ~/.cache/iris/core/palettes
+    pub themes: PathBuf,        // ~/.cache/iris/core/themes
 }
 
 impl IrisPaths {
@@ -41,7 +41,7 @@ impl IrisPaths {
         Ok(Self {
             state_file: config.join("state.json"),
             current_theme: core.join("current_theme"),
-            palettes: core.join("palettes"),
+            themes: core.join("themes"),
             config,
             cache,
             core,
@@ -54,7 +54,7 @@ impl IrisPaths {
     pub fn ensure_dirs(&self) -> Result<()> {
         fs::create_dir_all(&self.config).context("Failed to create 'config' directory")?;
         fs::create_dir_all(&self.core).context("Failed to create 'core' directory")?;
-        fs::create_dir_all(&self.palettes).context("Failed to create palette path")?;
+        fs::create_dir_all(&self.themes).context("Failed to create themes path")?;
         fs::create_dir_all(&self.generators).context("Failed to create 'gen' directory")?;
         fs::create_dir_all(&self.bin).context("Failed to create 'bin' directory")?;
         Ok(())
@@ -138,21 +138,21 @@ impl IrisPaths {
             .map(|sub| self.nvim_data_dir().join(sub))
     }
 
-    /// Returns absolute path to JSON palette theme cache
-    pub fn palette_cache_path(&self, theme_name: &str) -> PathBuf {
-        self.palettes
+    /// Returns absolute path to JSON theme cache
+    pub fn cached_theme(&self, theme_name: &str) -> PathBuf {
+        self.themes
             .join(theme_name.to_lowercase())
             .with_extension("json")
     }
 
-    /// Checks whether requested palette is already cached
-    pub fn is_palette_cached(&self, name: &str) -> bool {
-        self.palette_cache_path(name).exists()
+    /// Checks whether requested theme is already cached
+    pub fn is_theme_cached(&self, name: &str) -> bool {
+        self.cached_theme(name).exists()
     }
 
     /// Returns a sorted list of theme names available in cache
     pub fn get_cached_themes(&self) -> Result<Vec<String>> {
-        let mut themes: Vec<String> = fs::read_dir(&self.palettes)?
+        let mut themes: Vec<String> = fs::read_dir(&self.themes)?
             .filter_map(|entry| {
                 let path = entry.ok()?.path();
 
@@ -188,7 +188,7 @@ mod tests {
             bin: base.join("cache/bin"),
             state_file: base.join("config/state.json"),
             current_theme: base.join("cache/core/current_theme"),
-            palettes: base.join("cache/core/palettes"),
+            themes: base.join("cache/core/themes"),
         }
     }
 
@@ -233,14 +233,14 @@ mod tests {
 
         assert!(!paths.config.exists());
         assert!(!paths.core.exists());
-        assert!(!paths.palettes.exists());
+        assert!(!paths.themes.exists());
 
         paths.ensure_dirs().expect("Failed to ensure directories");
 
         assert!(paths.config.is_dir());
         assert!(paths.cache.is_dir());
         assert!(paths.core.is_dir());
-        assert!(paths.palettes.is_dir());
+        assert!(paths.themes.is_dir());
         assert!(paths.generators.is_dir());
         assert!(paths.bin.is_dir());
     }
@@ -335,22 +335,22 @@ mod tests {
     }
 
     #[test]
-    fn should_handle_palette_cached_case_insensitivity() {
+    fn should_handle_theme_cached_case_insensitivity() {
         let paths = setup_paths();
-        let palettes_dir = paths.palettes.to_path_buf();
+        let palettes_dir = paths.themes.to_path_buf();
         fs::create_dir_all(&palettes_dir).unwrap();
         fs::write(palettes_dir.join("gruvbox.json"), "{}").unwrap();
 
-        assert!(paths.is_palette_cached("gruvbox"));
-        assert!(paths.is_palette_cached("Gruvbox"));
-        assert!(paths.is_palette_cached("GRUVBOX"));
-        assert!(!paths.is_palette_cached("nord"));
+        assert!(paths.is_theme_cached("gruvbox"));
+        assert!(paths.is_theme_cached("Gruvbox"));
+        assert!(paths.is_theme_cached("GRUVBOX"));
+        assert!(!paths.is_theme_cached("nord"));
     }
 
     #[test]
     fn should_return_all_cached_themes() {
         let paths = setup_paths();
-        let palettes_dir = paths.palettes.to_path_buf();
+        let palettes_dir = paths.themes.to_path_buf();
         fs::create_dir_all(&palettes_dir).unwrap();
 
         fs::write(palettes_dir.join("nord.json"), "{}").unwrap();
@@ -372,10 +372,10 @@ mod tests {
     }
 
     #[test]
-    fn should_return_palette_cache_path() {
+    fn should_return_theme_cache_path() {
         let paths = setup_paths();
-        let expected = paths.cache.join("core/palettes/melange.json");
-        let path = paths.palette_cache_path("melange");
+        let expected = paths.cache.join("core/themes/melange.json");
+        let path = paths.cached_theme("melange");
         assert_eq!(path, expected);
     }
 }

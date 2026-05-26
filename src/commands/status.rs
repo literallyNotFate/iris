@@ -32,8 +32,8 @@ pub fn exec(ctx: &IrisContext) -> anyhow::Result<()> {
         ctx.state.manager
     );
 
-    let cache_size: u64 = ctx.paths.get_size(&ctx.paths.palettes);
-    let cached_count: usize = std::fs::read_dir(&ctx.paths.palettes)
+    let cache_size: u64 = ctx.paths.get_size(&ctx.paths.themes);
+    let cached_count: usize = std::fs::read_dir(&ctx.paths.themes)
         .map(|d| d.count())
         .unwrap_or(0);
 
@@ -45,7 +45,7 @@ pub fn exec(ctx: &IrisContext) -> anyhow::Result<()> {
     println!(
         "  {}  Cache:           {} {} ({} files)",
         "󰉉".bright_black(),
-        utils::pretty_path(&ctx.paths.palettes).bright_black(),
+        utils::pretty_path(&ctx.paths.themes).bright_black(),
         format!("({})", utils::format_size(cache_size))
             .yellow()
             .dimmed(),
@@ -153,7 +153,7 @@ fn render_quiet(ctx: &IrisContext, current: &str, nvim_theme: &str, is_sync: boo
         println!(
             "{} {}",
             "󰚔".cyan(),
-            format!("Sync mismatch: Neovim is on `{}`", nvim_theme).dimmed()
+            format!("Sync mismatch: Neovim is using `{}`", nvim_theme).dimmed()
         );
     }
     println!();

@@ -82,10 +82,10 @@ fn handle_clear(all: bool, gen_name: Option<String>, ctx: &IrisContext) -> Resul
     }
 }
 
-/// Removes requested palette from the cache along with theme config files for generator
+/// Removes requested theme from the cache along with the config files for generator
 fn handle_remove(theme: &str, ctx: &IrisContext) -> Result<()> {
     let theme_lower: String = theme.to_lowercase();
-    let path: PathBuf = ctx.paths.palette_cache_path(theme);
+    let path: PathBuf = ctx.paths.cached_theme(theme);
 
     if ctx.state.current_theme == theme_lower {
         anyhow::bail!("Cannot remove active theme `{}`.", theme.cyan().bold());
@@ -113,13 +113,13 @@ fn handle_remove(theme: &str, ctx: &IrisContext) -> Result<()> {
     Ok(())
 }
 
-/// List of cached palettes
+/// List of cached themes
 fn render_list(ctx: &IrisContext) -> Result<()> {
-    println!("\n{}  {}\n", "󰋽".cyan().bold(), "Cached Palettes:".bold());
+    println!("\n{}  {}\n", "󰋽".cyan().bold(), "Cached Themes:".bold());
     let themes: Vec<String> = ctx.paths.get_cached_themes()?;
 
     for name in themes {
-        let file_path: PathBuf = ctx.paths.palette_cache_path(&name);
+        let file_path: PathBuf = ctx.paths.cached_theme(&name);
         let size: u64 = fs::metadata(&file_path)?.len();
         let display_name: String = utils::capitalize(&name);
 
@@ -153,7 +153,7 @@ fn render_info(ctx: &IrisContext) -> Result<()> {
     println!("\n  {}", "Locations:".magenta());
     let locations = [
         ("Root", &ctx.paths.cache),
-        ("Palettes", &ctx.paths.palettes),
+        ("Palettes", &ctx.paths.themes),
         ("Generators", &ctx.paths.generators),
     ];
 
@@ -166,8 +166,8 @@ fn render_info(ctx: &IrisContext) -> Result<()> {
     }
 
     println!("\n  {}", "Usage Stats:".yellow());
-    let palette_count = fs::read_dir(&ctx.paths.palettes)?.count();
-    let p_size = ctx.paths.get_size(&ctx.paths.palettes);
+    let palette_count = fs::read_dir(&ctx.paths.themes)?.count();
+    let p_size = ctx.paths.get_size(&ctx.paths.themes);
     let g_size = ctx.paths.get_size(&ctx.paths.generators);
 
     println!(

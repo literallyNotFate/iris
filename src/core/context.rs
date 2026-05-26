@@ -117,7 +117,7 @@ impl IrisContext {
 
         if self.state.manager == PluginManager::Default {
             let is_builtin: bool = NeovimBridge::get_builtin_themes().iter().any(|t| t == name);
-            return is_builtin || self.paths.is_palette_cached(name);
+            return is_builtin || self.paths.is_theme_cached(name);
         }
 
         false
@@ -204,8 +204,8 @@ mod tests {
     fn should_resolve_theme_explicit_exists() {
         let (_temp, ctx) = create_test_context();
 
-        fs::create_dir_all(&ctx.paths.palettes).unwrap();
-        fs::write(ctx.paths.palettes.join("gruvbox.json"), "{}").unwrap();
+        fs::create_dir_all(&ctx.paths.themes).unwrap();
+        fs::write(ctx.paths.themes.join("gruvbox.json"), "{}").unwrap();
 
         let (name, fallback) = ctx.resolve_theme(Some("Gruvbox".into()), false).unwrap();
 
@@ -218,8 +218,8 @@ mod tests {
         let (_temp, mut ctx) = create_test_context();
         ctx.state.current_theme = "nord".into();
 
-        fs::create_dir_all(&ctx.paths.palettes).unwrap();
-        fs::write(ctx.paths.palettes.join("nord.json"), "{}").unwrap();
+        fs::create_dir_all(&ctx.paths.themes).unwrap();
+        fs::write(ctx.paths.themes.join("nord.json"), "{}").unwrap();
 
         let (name, fallback) = ctx.resolve_theme(None, false).unwrap();
 
@@ -232,8 +232,8 @@ mod tests {
         let (_temp, mut ctx) = create_test_context();
         ctx.state.fallback_theme = "tokyonight".into();
 
-        fs::create_dir_all(&ctx.paths.palettes).unwrap();
-        fs::write(ctx.paths.palettes.join("tokyonight.json"), "{}").unwrap();
+        fs::create_dir_all(&ctx.paths.themes).unwrap();
+        fs::write(ctx.paths.themes.join("tokyonight.json"), "{}").unwrap();
 
         let (name, fallback) = ctx.resolve_theme(Some("invalid".into()), true).unwrap();
 

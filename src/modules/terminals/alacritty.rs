@@ -74,11 +74,11 @@ impl Generator for AlacrittyGenerator {
     fn build_render_context(&self, theme: &Theme) -> tera::Context {
         let mut c = tera::Context::new();
         c.insert("theme_name", &theme.name);
-        c.insert("bg", &theme.palette.bg);
-        c.insert("fg", &theme.palette.fg);
-        c.insert("white", &theme.palette.white);
-        c.insert("sel", &theme.palette.sel);
-        c.insert("ansi", &theme.palette.ansi);
+        c.insert("bg", &theme.colors.bg);
+        c.insert("fg", &theme.colors.fg);
+        c.insert("white", &theme.colors.white);
+        c.insert("sel", &theme.colors.sel);
+        c.insert("ansi", &theme.colors.ansi);
         c
     }
 
@@ -316,14 +316,14 @@ mod tests {
                 .expect("bg not found in context")
                 .as_str()
                 .unwrap(),
-            theme.palette.bg
+            theme.colors.bg
         );
         assert_eq!(
             ctx.get("fg")
                 .expect("fg not found in context")
                 .as_str()
                 .unwrap(),
-            theme.palette.fg
+            theme.colors.fg
         );
         assert!(ctx.contains_key("ansi"));
     }
@@ -427,9 +427,9 @@ mod tests {
         );
 
         let content = fs::read_to_string(cache_file).unwrap();
-        assert!(content.contains(&format!("background = \"{}\"", theme.palette.bg)));
-        assert!(content.contains(&format!("black   = \"{}\"", theme.palette.ansi[0])));
-        assert!(content.contains(&format!("white   = \"{}\"", theme.palette.ansi[15])));
+        assert!(content.contains(&format!("background = \"{}\"", theme.colors.bg)));
+        assert!(content.contains(&format!("black   = \"{}\"", theme.colors.ansi[0])));
+        assert!(content.contains(&format!("white   = \"{}\"", theme.colors.ansi[15])));
     }
 
     #[test]

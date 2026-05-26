@@ -78,19 +78,19 @@ impl Generator for TmuxGenerator {
         let mut c = tera::Context::new();
 
         c.insert("theme_name", &theme.name);
-        c.insert("bg", &theme.palette.bg);
-        c.insert("fg", &theme.palette.fg);
-        c.insert("keyword", &theme.palette.keyword);
-        c.insert("comment", &theme.palette.comment);
-        c.insert("operator", &theme.palette.operator);
-        c.insert("gutter_fg", &theme.palette.gutter_fg);
-        c.insert("line_hl", &theme.palette.line_hl);
-        c.insert("func", &theme.palette.func);
-        c.insert("tag", &theme.palette.tag);
+        c.insert("bg", &theme.colors.bg);
+        c.insert("fg", &theme.colors.fg);
+        c.insert("keyword", &theme.colors.keyword);
+        c.insert("comment", &theme.colors.comment);
+        c.insert("operator", &theme.colors.operator);
+        c.insert("gutter_fg", &theme.colors.gutter_fg);
+        c.insert("line_hl", &theme.colors.line_hl);
+        c.insert("func", &theme.colors.func);
+        c.insert("tag", &theme.colors.tag);
 
-        c.insert("green", &theme.palette.ansi[10]);
-        c.insert("yellow", &theme.palette.ansi[3]);
-        c.insert("blue", &theme.palette.ansi[12]);
+        c.insert("green", &theme.colors.ansi[10]);
+        c.insert("yellow", &theme.colors.ansi[3]);
+        c.insert("blue", &theme.colors.ansi[12]);
 
         c
     }
@@ -322,7 +322,7 @@ mod tests {
         let theme: Theme = Theme::mock();
         let ctx = generator.build_render_context(&theme);
 
-        assert_eq!(ctx.get("bg").unwrap().as_str().unwrap(), theme.palette.bg);
+        assert_eq!(ctx.get("bg").unwrap().as_str().unwrap(), theme.colors.bg);
     }
 
     #[test]

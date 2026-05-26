@@ -74,12 +74,12 @@ impl Generator for GhosttyGenerator {
     fn build_render_context(&self, theme: &Theme) -> tera::Context {
         let mut c = tera::Context::new();
         c.insert("theme_name", &theme.name);
-        c.insert("bg", &theme.palette.bg);
-        c.insert("fg", &theme.palette.fg);
-        c.insert("sel_bg", &theme.palette.sel);
-        c.insert("sel_fg", &theme.palette.bg);
-        c.insert("cursor", &theme.palette.white);
-        c.insert("ansi", &theme.palette.ansi);
+        c.insert("bg", &theme.colors.bg);
+        c.insert("fg", &theme.colors.fg);
+        c.insert("sel_bg", &theme.colors.sel);
+        c.insert("sel_fg", &theme.colors.bg);
+        c.insert("cursor", &theme.colors.white);
+        c.insert("ansi", &theme.colors.ansi);
         c
     }
 
@@ -314,7 +314,7 @@ mod tests {
         let theme: Theme = Theme::mock();
         let ctx = generator.build_render_context(&theme);
 
-        assert_eq!(ctx.get("bg").unwrap().as_str().unwrap(), theme.palette.bg);
+        assert_eq!(ctx.get("bg").unwrap().as_str().unwrap(), theme.colors.bg);
         assert!(ctx.get("ansi").unwrap().is_array());
     }
 

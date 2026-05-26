@@ -82,23 +82,23 @@ impl Generator for BatGenerator {
         };
 
         c.insert("theme_name", &theme.name);
-        c.insert("bg", &fix(&theme.palette.bg));
-        c.insert("fg", &fix(&theme.palette.fg));
-        c.insert("sel", &fix(&theme.palette.sel));
-        c.insert("line", &fix(&theme.palette.line_hl));
+        c.insert("bg", &fix(&theme.colors.bg));
+        c.insert("fg", &fix(&theme.colors.fg));
+        c.insert("sel", &fix(&theme.colors.sel));
+        c.insert("line", &fix(&theme.colors.line_hl));
 
         let processed_rules: Vec<serde_json::Value> = RULES
             .iter()
             .map(|r| {
                 let color = match r.color_key {
-                    "keyword" => &theme.palette.keyword,
-                    "func" => &theme.palette.func,
-                    "type_name" => &theme.palette.type_name,
-                    "string" => &theme.palette.string,
-                    "operator" => &theme.palette.operator,
-                    "number" => &theme.palette.number,
-                    "comment" => &theme.palette.comment,
-                    _ => &theme.palette.fg,
+                    "keyword" => &theme.colors.keyword,
+                    "func" => &theme.colors.func,
+                    "type_name" => &theme.colors.type_name,
+                    "string" => &theme.colors.string,
+                    "operator" => &theme.colors.operator,
+                    "number" => &theme.colors.number,
+                    "comment" => &theme.colors.comment,
+                    _ => &theme.colors.fg,
                 };
 
                 let style = if r.style.is_empty() || r.style == "normal" {

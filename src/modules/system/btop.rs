@@ -87,23 +87,23 @@ impl Generator for BtopGenerator {
     fn build_render_context(&self, theme: &Theme) -> tera::Context {
         let mut c = tera::Context::new();
         c.insert("theme_name", &theme.name);
-        c.insert("bg", &theme.palette.bg);
-        c.insert("fg", &theme.palette.fg);
-        c.insert("sel", &theme.palette.sel);
-        c.insert("white", &theme.palette.white);
-        c.insert("comment", &theme.palette.comment);
-        c.insert("line_hl", &theme.palette.line_hl);
-        c.insert("keyword", &theme.palette.keyword);
-        c.insert("type_name", &theme.palette.type_name);
-        c.insert("func", &theme.palette.func);
-        c.insert("tag", &theme.palette.tag);
-        c.insert("string", &theme.palette.string);
-        c.insert("constant", &theme.palette.constant);
-        c.insert("attribute", &theme.palette.attribute);
+        c.insert("bg", &theme.colors.bg);
+        c.insert("fg", &theme.colors.fg);
+        c.insert("sel", &theme.colors.sel);
+        c.insert("white", &theme.colors.white);
+        c.insert("comment", &theme.colors.comment);
+        c.insert("line_hl", &theme.colors.line_hl);
+        c.insert("keyword", &theme.colors.keyword);
+        c.insert("type_name", &theme.colors.type_name);
+        c.insert("func", &theme.colors.func);
+        c.insert("tag", &theme.colors.tag);
+        c.insert("string", &theme.colors.string);
+        c.insert("constant", &theme.colors.constant);
+        c.insert("attribute", &theme.colors.attribute);
 
-        c.insert("green", &theme.palette.ansi[2]);
-        c.insert("yellow", &theme.palette.ansi[3]);
-        c.insert("orange", &theme.palette.ansi[9]);
+        c.insert("green", &theme.colors.ansi[2]);
+        c.insert("yellow", &theme.colors.ansi[3]);
+        c.insert("orange", &theme.colors.ansi[9]);
 
         c
     }
@@ -310,18 +310,18 @@ mod tests {
 
         assert_eq!(
             ctx.get("bg").expect("bg missing").as_str().unwrap(),
-            theme.palette.bg
+            theme.colors.bg
         );
         assert_eq!(
             ctx.get("fg").expect("fg missing").as_str().unwrap(),
-            theme.palette.fg
+            theme.colors.fg
         );
         assert_eq!(
             ctx.get("keyword")
                 .expect("keyword missing")
                 .as_str()
                 .unwrap(),
-            theme.palette.keyword
+            theme.colors.keyword
         );
 
         assert!(ctx.contains_key("green"));

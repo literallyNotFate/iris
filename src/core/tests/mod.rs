@@ -20,12 +20,12 @@ pub fn create_test_context() -> (TempDir, IrisContext) {
         bin: root.join(".cache/iris/bin"),
         state_file: root.join(".config/iris/state.json"),
         current_theme: root.join(".cache/iris/core/current_theme"),
-        palettes: root.join(".cache/iris/core/palettes"),
+        themes: root.join(".cache/iris/core/themes"),
     };
 
     fs::create_dir_all(&paths.config).unwrap();
     fs::create_dir_all(&paths.core).unwrap();
-    fs::create_dir_all(&paths.palettes).unwrap();
+    fs::create_dir_all(&paths.themes).unwrap();
     fs::create_dir_all(&paths.generators).unwrap();
     fs::create_dir_all(&paths.bin).unwrap();
 

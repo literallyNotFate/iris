@@ -57,14 +57,14 @@ pub fn exec(ctx: &mut IrisContext) -> anyhow::Result<()> {
 
             if !item.is_cached {
                 term.write_line(&format!(
-                    "\n  {}  Fetching palette for {}...",
+                    "\n  {}  Fetching theme for {}...",
                     "󰚔".cyan(),
                     item.name
                 ))?;
             }
 
             let theme_obj: Theme = orchestrator.load_theme(&item.name, false, false, &ctx.state)?;
-            render_preview_flow(&theme_obj.name, &theme_obj.palette)?;
+            render_preview_flow(&theme_obj.name, &theme_obj.colors)?;
             println!();
 
             let action: Option<usize> = Select::with_theme(&select_theme())

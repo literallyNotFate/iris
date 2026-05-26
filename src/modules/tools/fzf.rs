@@ -65,11 +65,11 @@ impl Generator for FzfGenerator {
         let strip = |hex: &str| hex.trim_start_matches('#').to_string();
 
         c.insert("theme_name", &theme.name);
-        c.insert("fg", &strip(&theme.palette.fg));
-        c.insert("bg", &strip(&theme.palette.bg));
-        c.insert("accent", &strip(&theme.palette.ansi[3]));
-        c.insert("match_c", &strip(&theme.palette.ansi[5]));
-        c.insert("dimmed", &strip(&theme.palette.ansi[8]));
+        c.insert("fg", &strip(&theme.colors.fg));
+        c.insert("bg", &strip(&theme.colors.bg));
+        c.insert("accent", &strip(&theme.colors.ansi[3]));
+        c.insert("match_c", &strip(&theme.colors.ansi[5]));
+        c.insert("dimmed", &strip(&theme.colors.ansi[8]));
 
         c
     }

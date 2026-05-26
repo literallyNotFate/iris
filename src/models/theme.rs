@@ -1,12 +1,14 @@
 use crate::utils::{self, CustomColor};
+use anyhow::{Context, Result};
 use colored::Colorize;
 use serde::{Deserialize, Serialize};
+use std::{fs, path::Path};
 
 /// Main theme entity in Iris: color palette with unique name
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 pub struct Theme {
     pub name: String,
-    pub palette: Palette,
+    pub colors: Palette,
 }
 
 /// Clean color palette that is being returned from Neovim
@@ -37,7 +39,7 @@ impl Theme {
     pub fn new(name: impl Into<String>, palette: Palette) -> Self {
         Self {
             name: name.into(),
-            palette,
+            colors: palette,
         }
     }
 
@@ -45,8 +47,35 @@ impl Theme {
     pub fn from_palette(name: &str, palette: Palette) -> Self {
         Self {
             name: name.to_string(),
-            palette,
+            colors: palette,
         }
+    }
+
+    /// Load theme from JSON cache file
+    pub fn load_from_cache(path: &Path) -> Result<Self> {
+        let content: String = fs::read_to_string(path)
+            .with_context(|| format!("Failed to read theme cache at {}", path.display()))?;
+
+        let theme: Self = serde_json::from_str(&content)
+            .with_context(|| format!("Failed to deserialize theme JSON from {}", path.display()))?;
+
+        Ok(theme)
+    }
+
+    /// Save theme to JSON cache file, automatically creating all necessary folders
+    pub fn save_to_cache(&self, path: &Path) -> Result<()> {
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).with_context(|| {
+                format!("Failed to create cache directory: {}", parent.display())
+            })?;
+        }
+
+        let json: String =
+            serde_json::to_string_pretty(self).context("Failed to serialize theme to JSON")?;
+        fs::write(path, json)
+            .with_context(|| format!("Failed to write theme to {}", path.display()))?;
+
+        Ok(())
     }
 
     /// Helper to get capitalized theme name (e.g, "melange" -> "Melange")
@@ -59,7 +88,7 @@ impl Theme {
     pub fn mock() -> Self {
         Self {
             name: "test-theme".into(),
-            palette: Palette {
+            colors: Palette {
                 bg: "#1a1b26".into(),
                 fg: "#c0caf5".into(),
                 caret: "#c0caf5".into(),
@@ -332,7 +361,7 @@ impl Palette {
             print!("  ");
             for col in 0..8 {
                 let idx: usize = row * 8 + col;
-                let color: &String = &self.ansi[idx];
+                let color: &String = self.ansi.get(idx).unwrap_or(&self.fg);
                 let label: String = format!(" {:02} ", idx);
 
                 print!("{}", label.on_color_code(color).black());
@@ -439,6 +468,7 @@ impl Palette {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::core::tests::create_test_context;
 
     #[test]
     fn should_parse_palette_json_without_name() {
@@ -471,11 +501,11 @@ mod tests {
 
     #[test]
     fn should_properly_link_name_and_palette() {
-        let palette: Palette = Theme::mock().palette;
+        let palette: Palette = Theme::mock().colors;
         let theme: Theme = Theme::new("tokyonight", palette.clone());
 
         assert_eq!(theme.name, "tokyonight");
-        assert_eq!(theme.palette.bg, palette.bg);
+        assert_eq!(theme.colors.bg, palette.bg);
     }
 
     #[test]
@@ -485,5 +515,65 @@ mod tests {
 
         assert!(json.contains(r#""name":"test-theme""#));
         assert!(json.contains(r#""bg":"#));
+    }
+
+    #[test]
+    fn should_save_and_load_theme_from_cache() {
+        let (_temp, ctx) = create_test_context();
+        let cache_path = ctx.paths.themes.join("catppuccin.json");
+        let original_theme = Theme::mock();
+        let save_res = original_theme.save_to_cache(&cache_path);
+
+        assert!(
+            save_res.is_ok(),
+            "Failed to save theme: {:?}",
+            save_res.err()
+        );
+        assert!(cache_path.exists());
+
+        let load_res = Theme::load_from_cache(&cache_path);
+        assert!(
+            load_res.is_ok(),
+            "Failed to load theme: {:?}",
+            load_res.err()
+        );
+
+        let loaded_theme = load_res.unwrap();
+        assert_eq!(loaded_theme, original_theme);
+    }
+
+    #[test]
+    fn should_fail_on_non_existent_cache() {
+        let (_temp, ctx) = create_test_context();
+        let ghost_path = ctx.paths.themes.join("ghost_theme.json");
+        let result = Theme::load_from_cache(&ghost_path);
+
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("Failed to read theme cache")
+        );
+    }
+
+    #[test]
+    fn should_fail_on_broken_json() {
+        let (_temp, ctx) = create_test_context();
+        let cache_path = ctx.paths.themes.join("broken_theme.json");
+        if let Some(parent) = cache_path.parent() {
+            fs::create_dir_all(parent).unwrap();
+        }
+        fs::write(&cache_path, "{ broken json }").unwrap();
+
+        let result = Theme::load_from_cache(&cache_path);
+
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("Failed to deserialize theme JSON")
+        );
     }
 }

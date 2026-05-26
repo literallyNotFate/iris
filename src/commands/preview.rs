@@ -17,16 +17,16 @@ pub fn exec(requested_theme: Option<String>, ctx: &IrisContext) -> anyhow::Resul
     println!();
     render_header(&theme_obj.name, is_fallback, requested_theme);
 
-    let label = |s: &str| s.bold().color_code_fg(&theme_obj.palette.comment);
+    let label = |s: &str| s.bold().color_code_fg(&theme_obj.colors.comment);
 
     println!("  {}", label("Core & Syntax:"));
-    theme_obj.palette.core_and_syntax_colors();
+    theme_obj.colors.core_and_syntax_colors();
 
     println!("\n  {}", label("Terminal ANSI Grid:"));
-    theme_obj.palette.ansi_grid();
+    theme_obj.colors.ansi_grid();
 
     println!("\n  {}", label("Syntax Highlight Preview:"));
-    theme_obj.palette.preview_code();
+    theme_obj.colors.preview_code();
 
     println!("\n");
     Ok(())
