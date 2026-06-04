@@ -4,6 +4,7 @@
 pub mod cli;
 pub mod commands;
 pub mod core;
+pub mod guards;
 pub mod log;
 pub mod models;
 pub mod modules;
