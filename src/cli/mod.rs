@@ -89,6 +89,6 @@ pub enum Commands {
     /// Global configuration management
     Config {
         #[command(subcommand)]
-        action: ConfigAction,
+        action: Option<ConfigAction>,
     },
 }

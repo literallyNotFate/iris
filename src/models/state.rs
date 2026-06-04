@@ -130,6 +130,14 @@ impl Default for State {
 }
 
 impl PluginManager {
+    pub fn all() -> [PluginManager; 3] {
+        [
+            PluginManager::Lazy,
+            PluginManager::Packer,
+            PluginManager::Default,
+        ]
+    }
+
     /// Returns relative subpath for plugins (clean string)
     pub fn plugin_subdirectory(&self) -> Option<&'static str> {
         match self {

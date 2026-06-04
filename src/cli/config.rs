@@ -3,6 +3,9 @@ use clap::Subcommand;
 
 #[derive(Subcommand)]
 pub enum ConfigAction {
+    /// Show current active configuration
+    Show,
+
     /// Configure Neovim integration
     Nvim {
         /// Force a specific plugin manager (lazy, packer, default)
@@ -18,6 +21,6 @@ pub enum ConfigAction {
     Fallback {
         /// Name of the fallback theme (e.g., 'retrobox')
         #[arg(value_name = "THEME")]
-        name: String,
+        name: Option<String>,
     },
 }
