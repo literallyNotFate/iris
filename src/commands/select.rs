@@ -1,6 +1,7 @@
 use crate::{
     commands::apply_theme,
     core::{IrisContext, NeovimBridge, ThemeOrchestrator},
+    guards::CursorGuard,
     log::Reporter,
     models::Palette,
     utils::colors::select_theme,
@@ -13,38 +14,51 @@ pub fn exec(ctx: &mut IrisContext) -> anyhow::Result<()> {
     println!("\n{}  Scanning Neovim themes...", "󱑠".yellow());
 
     let builtins: Vec<String> = NeovimBridge::get_builtin_themes();
-    let cached: Vec<String> = ctx.paths.get_cached_themes().unwrap_or_default();
+    let mut cached: Vec<String> = ctx.paths.get_cached_themes().unwrap_or_default();
     let all_names: Vec<String> = NeovimBridge::get_all_themes()?;
 
-    let labels: Vec<String> = all_names
-        .iter()
-        .map(|name| {
-            render_theme_line(
-                name,
-                &ctx.state.current_theme,
-                &ctx.state.fallback_theme,
-                &cached,
-                &builtins,
-            )
-        })
-        .collect();
+    if all_names.is_empty() {
+        println!(
+            "{}  {}",
+            "󰀦".red().bold(),
+            "No themes found! Check your Neovim configuration.".red()
+        );
+        return Ok(());
+    }
 
     let mut current_idx: usize = all_names
         .iter()
         .position(|n| n == &ctx.state.current_theme)
         .unwrap_or(0);
-    let term = Term::stdout();
 
-    let quiet_logger: Reporter = Reporter::quiet();
+    let term = Term::stdout();
+    let quiet_logger = Reporter::quiet();
     let orchestrator = ThemeOrchestrator::new(&ctx.paths, &quiet_logger);
 
-    println!(
-        "\n {}  {}\n",
-        "󰏘".magenta().bold(),
-        "Iris Theme Manager".bold()
-    );
+    term.hide_cursor()?;
+    let _guard = CursorGuard::new(&term);
 
     loop {
+        let labels: Vec<String> = all_names
+            .iter()
+            .map(|name| {
+                render_theme_line(
+                    name,
+                    &ctx.state.current_theme,
+                    &ctx.state.fallback_theme,
+                    &cached,
+                    &builtins,
+                )
+            })
+            .collect();
+
+        term.clear_screen()?;
+        println!(
+            "\n {}  {}\n",
+            "󰏘".magenta().bold(),
+            "Iris Theme Manager".bold()
+        );
+
         let selection = Select::with_theme(&select_theme())
             .with_prompt("Search or select theme (Press Esc to exit)\n")
             .items(&labels)
@@ -65,12 +79,18 @@ pub fn exec(ctx: &mut IrisContext) -> anyhow::Result<()> {
                 "󰚔".cyan(),
                 selected_name
             ))?;
+
+            let theme_obj = orchestrator.load_theme(selected_name, false, true, &ctx.state)?;
+            cached.push(selected_name.clone());
+
+            term.clear_screen()?;
+            render_preview_flow(&theme_obj.name, &theme_obj.colors)?;
+        } else {
+            let theme_obj = orchestrator.load_theme(selected_name, false, false, &ctx.state)?;
+            term.clear_screen()?;
+            render_preview_flow(&theme_obj.name, &theme_obj.colors)?;
         }
 
-        let theme_obj = orchestrator.load_theme(selected_name, false, false, &ctx.state)?;
-
-        term.clear_screen()?;
-        render_preview_flow(&theme_obj.name, &theme_obj.colors)?;
         println!();
 
         let action = Select::with_theme(&select_theme())
@@ -83,17 +103,11 @@ pub fn exec(ctx: &mut IrisContext) -> anyhow::Result<()> {
                 term.clear_screen()?;
                 let final_theme =
                     orchestrator.load_theme(selected_name, false, true, &ctx.state)?;
+
+                term.show_cursor()?;
                 return apply_theme(&final_theme, ctx);
             }
-            Some(1) => {
-                term.clear_screen()?;
-                println!(
-                    "\n {}  {}\n",
-                    "󰏘".magenta().bold(),
-                    "Iris Theme Manager".bold()
-                );
-                continue;
-            }
+            Some(1) => continue,
             _ => break,
         }
     }

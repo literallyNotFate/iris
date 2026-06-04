@@ -1,10 +1,12 @@
 use crate::{
     commands::apply_theme,
     core::{IrisContext, ThemeOrchestrator},
+    guards::CursorGuard,
     models::Theme,
     utils,
 };
 use colored::Colorize;
+use dialoguer::console::Term;
 use notify_debouncer_mini::{new_debouncer, notify::*};
 use std::{
     fs,
@@ -29,10 +31,14 @@ pub fn exec(interval_ms: u64, ctx: &mut IrisContext) -> anyhow::Result<()> {
         let _ = exit_tx.send(());
     })?;
 
+    let term: Term = Term::stdout();
+    let _cursor_guard = CursorGuard::new(&term);
+
     render_watch_ui(&cache_path);
 
     loop {
         if exit_rx.try_recv().is_ok() {
+            let _ = term.show_cursor();
             println!(
                 "\n {}  {}\n",
                 "󰈆".yellow().bold(),
@@ -89,7 +95,9 @@ fn handle_change(path: &PathBuf, ctx: &mut IrisContext) -> anyhow::Result<()> {
 }
 
 fn render_watch_ui(path: &PathBuf) {
-    print!("\x1B[2J\x1B[1;1H");
+    let term = Term::stdout();
+    let _ = term.clear_screen();
+
     println!("\n\n {}  {}", "󰈈".blue().bold(), "Iris Watch Mode".bold());
     println!(
         " {}  Watching: {}",
