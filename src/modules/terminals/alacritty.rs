@@ -1,5 +1,6 @@
 use crate::{
     core::{IrisPaths, Templater},
+    guards::FsRollbackGuard,
     log::Task,
     models::{HealthStatus, Theme},
     modules::{Generator, GeneratorType},
@@ -55,13 +56,18 @@ impl Generator for AlacrittyGenerator {
 
         let cache_file: PathBuf = self.ensure_cache_file(theme, paths, templater)?;
         let link_path: PathBuf = self.link_path(paths, &theme.name);
+        let backup_path: PathBuf = link_path.with_extension("bak");
 
         task.info(&format!(
             "Linking {} theme to {}...",
             self.name().bold(),
             utils::pretty_path(&link_path).magenta(),
         ));
+
+        let rollback_guard = FsRollbackGuard::new(link_path.clone(), backup_path);
+
         self.ensure_symlink(&cache_file, &link_path)?;
+        rollback_guard.commit();
 
         task.info(&format!(
             "{} theme applied to {}",
@@ -147,19 +153,33 @@ impl Generator for AlacrittyGenerator {
 
         let mut fixed = false;
         if status.contains("link missing") {
+            let cache: PathBuf = self.cache_path(paths, "");
+            let link: PathBuf = self.link_path(paths, "");
+            let backup: PathBuf = link.with_extension("bak");
+
+            let rollback_guard = FsRollbackGuard::new(link.clone(), backup);
+
             task.log.action("Restored `alacritty` theme symlink", || {
-                let cache = self.cache_path(paths, "");
-                let link = self.link_path(paths, "");
                 self.ensure_symlink(&cache, &link)
             })?;
+
+            rollback_guard.commit();
             fixed = true;
         }
 
         if status.contains("import") {
+            let alacritty_dir: PathBuf = self.resolve_config_directory(paths);
+            let main_config: PathBuf = alacritty_dir.join("alacritty.toml");
+            let config_backup: PathBuf = main_config.with_extension("bak");
+
+            let rollback_guard = FsRollbackGuard::new(main_config.clone(), config_backup);
+
             task.log
                 .action("Injected theme import into alacritty.toml", || {
                     self.inject_import_line(paths)
                 })?;
+
+            rollback_guard.commit();
             fixed = true;
         }
 

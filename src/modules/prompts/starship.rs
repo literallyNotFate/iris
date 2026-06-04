@@ -1,5 +1,6 @@
 use crate::{
     core::{IrisPaths, Templater},
+    guards::FsRollbackGuard,
     log::Task,
     models::{HealthStatus, Theme},
     modules::{Generator, GeneratorType},
@@ -67,6 +68,7 @@ impl Generator for StarshipGenerator {
 
         let cache_file: PathBuf = self.cache_path(paths, &theme.name.to_lowercase());
         let link_path: PathBuf = self.link_path(paths, &theme.name.to_lowercase());
+        let backup_path: PathBuf = link_path.with_extension("toml.bak");
 
         let render_ctx = self.build_render_context(theme);
         let palette_block: String = templater
@@ -80,7 +82,10 @@ impl Generator for StarshipGenerator {
             format!("Failed to write palette cache to {}", cache_file.display())
         })?;
 
+        let rollback_guard = FsRollbackGuard::new(link_path.clone(), backup_path);
+
         self.update_config_file(&link_path, &link_path, theme, &palette_block)?;
+        rollback_guard.commit();
 
         task.info(&format!(
             "{} theme applied to {}",
@@ -159,8 +164,15 @@ impl Generator for StarshipGenerator {
     fn clear(&self, paths: &IrisPaths) -> Result<()> {
         let name: &str = self.name();
         let config_path: PathBuf = self.link_path(paths, "");
-        self.remove_palette_block(&config_path)
-            .context("Failed to clean up starship.toml during clear")?;
+
+        if config_path.exists() {
+            let backup_path: PathBuf = config_path.with_extension("toml.bak");
+            let rollback_guard = FsRollbackGuard::new(config_path.clone(), backup_path);
+
+            self.remove_palette_block(&config_path)
+                .context("Failed to clean up starship.toml during clear")?;
+            rollback_guard.commit();
+        }
 
         let gen_cache_dir: PathBuf = paths.generators.join(name);
         if gen_cache_dir.exists() {

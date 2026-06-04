@@ -1,5 +1,6 @@
 use crate::{
     core::{IrisPaths, Templater},
+    guards::FsRollbackGuard,
     log::Task,
     models::{HealthStatus, Theme},
     modules::{Generator, GeneratorType},
@@ -53,12 +54,15 @@ impl Generator for BtopGenerator {
 
         let cache_file: PathBuf = self.ensure_cache_file(theme, paths, templater)?;
         let link_path: PathBuf = self.link_path(paths, &theme.name.to_lowercase());
+        let backup_path: PathBuf = link_path.with_extension("bak");
 
         task.info(&format!(
             "Linking {} theme to {}...",
             self.name().bold(),
             utils::pretty_path(&link_path).magenta(),
         ));
+
+        let rollback_guard = FsRollbackGuard::new(link_path.clone(), backup_path);
         self.ensure_symlink(&cache_file, &link_path)?;
 
         let conf_path: PathBuf = self
@@ -73,8 +77,14 @@ impl Generator for BtopGenerator {
                 theme.name.bold().red()
             ));
 
+            let conf_backup: PathBuf = conf_path.with_extension("bak");
+            let conf_guard = FsRollbackGuard::new(conf_path.clone(), conf_backup);
+
             self.update_btop_conf(&conf_path, &theme.name.to_lowercase())?;
+            conf_guard.commit();
         }
+
+        rollback_guard.commit();
 
         task.info(&format!(
             "{} theme applied to {}",
@@ -165,21 +175,33 @@ impl Generator for BtopGenerator {
 
         let mut fixed = false;
         if status.contains("missing in btop themes folder") {
+            let cache: PathBuf = self.cache_path(paths, &theme.name.to_lowercase());
+            let link: PathBuf = self.link_path(paths, &theme.name.to_lowercase());
+            let backup: PathBuf = link.with_extension("bak");
+
+            let rollback_guard = FsRollbackGuard::new(link.clone(), backup);
+
             task.log.action("Restored `btop` theme symlink", || {
-                let cache = self.cache_path(paths, &theme.name.to_lowercase());
-                let link = self.link_path(paths, &theme.name.to_lowercase());
                 self.ensure_symlink(&cache, &link)
             })?;
+
+            rollback_guard.commit();
             fixed = true;
         }
 
         if status.contains("not using the current theme") {
+            let base_dir: PathBuf = self.resolve_config_directory(paths);
+            let conf_path: PathBuf = base_dir.parent().unwrap_or(&base_dir).join("btop.conf");
+            let config_backup: PathBuf = conf_path.with_extension("bak");
+
+            let rollback_guard = FsRollbackGuard::new(conf_path.clone(), config_backup);
+
             task.log
                 .action("Updated btop.conf to use the correct theme", || {
-                    let base_dir = self.resolve_config_directory(paths);
-                    let conf_path = base_dir.parent().unwrap_or(&base_dir).join("btop.conf");
                     self.update_btop_conf(&conf_path, &theme.name.to_lowercase())
                 })?;
+
+            rollback_guard.commit();
             fixed = true;
         }
 

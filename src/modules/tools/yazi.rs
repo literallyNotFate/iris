@@ -1,5 +1,6 @@
 use crate::{
     core::{IrisPaths, Templater},
+    guards::FsRollbackGuard,
     log::Task,
     models::{HealthStatus, Theme},
     modules::{Generator, GeneratorType},
@@ -42,6 +43,9 @@ impl Generator for YaziGenerator {
     ) -> Result<()> {
         let cache_file: PathBuf = self.ensure_cache_file(theme, paths, templater)?;
         let link_path: PathBuf = self.link_path(paths, &theme.name.to_lowercase());
+        let backup_path: PathBuf = link_path.with_extension("bak");
+
+        let rollback_guard = FsRollbackGuard::new(link_path.clone(), backup_path);
 
         task.info(&format!(
             "Linking {} theme to {}...",
@@ -49,6 +53,8 @@ impl Generator for YaziGenerator {
             utils::pretty_path(&link_path).magenta(),
         ));
         self.ensure_symlink(&cache_file, &link_path)?;
+
+        rollback_guard.commit();
 
         task.info(&format!(
             "{} theme applied to {}",
@@ -156,11 +162,17 @@ impl Generator for YaziGenerator {
         }
 
         if status.contains("link missing") || status.contains("unexpected location") {
+            let link: PathBuf = self.link_path(paths, &theme.name.to_lowercase());
+            let backup: PathBuf = link.with_extension("bak");
+            let cache: PathBuf = self.cache_path(paths, &theme.name.to_lowercase());
+
+            let rollback_guard = FsRollbackGuard::new(link.clone(), backup);
+
             task.log.action("Restored correct theme symlink", || {
-                let cache = self.cache_path(paths, &theme.name.to_lowercase());
-                let link = self.link_path(paths, &theme.name.to_lowercase());
                 self.ensure_symlink(&cache, &link)
             })?;
+
+            rollback_guard.commit();
             fixed = true;
         }
 

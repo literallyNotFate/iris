@@ -1,6 +1,7 @@
 use super::rules::RULES;
 use crate::{
     core::{IrisPaths, Templater},
+    guards::FsRollbackGuard,
     log::{Reporter, Task},
     models::{HealthStatus, Theme},
     modules::{Generator, GeneratorType},
@@ -55,16 +56,20 @@ impl Generator for BatGenerator {
 
         let cache_theme: PathBuf = self.ensure_theme_cache(theme, paths, templater)?;
         let link_path: PathBuf = self.link_path(paths, &theme.name.to_lowercase());
+        let backup_path: PathBuf = link_path.with_extension("bak");
 
         task.info(&format!(
             "Linking {} theme to {}...",
             self.name().bold(),
             utils::pretty_path(&link_path).magenta(),
         ));
-        self.ensure_symlink(&cache_theme, &link_path)?;
 
+        let rollback_guard = FsRollbackGuard::new(link_path.clone(), backup_path);
+
+        self.ensure_symlink(&cache_theme, &link_path)?;
         self.ensure_config(theme, paths)?;
         self.rebuild_bat_cache(task)?;
+        rollback_guard.commit();
 
         task.info(&format!(
             "{} theme applied to {}",
@@ -172,16 +177,22 @@ impl Generator for BatGenerator {
 
         let mut fixed = false;
         if status.contains("missing") || status.contains("not linked") {
+            let link: PathBuf = self.link_path(paths, &theme.name.to_lowercase());
+            let backup: PathBuf = link.with_extension("bak");
+            let cache: PathBuf = self.cache_path(paths, &theme.name.to_lowercase());
+
+            let rollback_guard = FsRollbackGuard::new(link.clone(), backup);
+
             task.log.action(
                 &format!("Repaired `{}` theme and configuration", self.name().bold()),
                 || {
                     self.ensure_theme_cache(theme, paths, templater)?;
                     self.ensure_config(theme, paths)?;
-                    let cache = self.cache_path(paths, &theme.name.to_lowercase());
-                    let link = self.link_path(paths, &theme.name.to_lowercase());
                     self.ensure_symlink(&cache, &link)
                 },
             )?;
+
+            rollback_guard.commit();
             fixed = true;
         }
 

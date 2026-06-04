@@ -1,5 +1,6 @@
 use crate::{
     core::{IrisPaths, Templater},
+    guards::FsRollbackGuard,
     log::Task,
     models::{HealthStatus, Theme},
     modules::{Generator, GeneratorType},
@@ -45,12 +46,19 @@ impl Generator for FzfGenerator {
         templater: &Templater,
         task: &mut Task,
     ) -> Result<()> {
+        let cache_file: PathBuf = self.cache_path(paths, "");
+        let backup_path: PathBuf = cache_file.with_extension("sh.bak");
+
         task.info(&format!(
             "Generating {} script in: {}",
             self.name().bold().cyan(),
-            utils::pretty_path(&self.cache_path(paths, "")).magenta()
+            utils::pretty_path(&cache_file).magenta()
         ));
+
+        let rollback_guard = FsRollbackGuard::new(cache_file.clone(), backup_path);
+
         self.ensure_cache_file(theme, paths, templater)?;
+        rollback_guard.commit();
 
         task.info(&format!(
             "{} theme applied to {}",
@@ -136,10 +144,16 @@ impl Generator for FzfGenerator {
         }
 
         if status.contains("not sourced") {
+            let zshrc = self.link_path(paths, "");
+            let backup = zshrc.with_extension("zshrc.bak");
+            let rollback_guard = FsRollbackGuard::new(zshrc.clone(), backup);
+
             task.log.action(
                 &format!("Injected source line into {}", ".zshrc".magenta()),
                 || self.inject_source_line(paths),
             )?;
+
+            rollback_guard.commit();
             fixed = true;
         }
 
@@ -160,7 +174,11 @@ impl Generator for FzfGenerator {
             let clean_content: String = self.remove_iris_lines(&content);
 
             if content != clean_content {
+                let backup = zshrc.with_extension("zshrc.bak");
+                let rollback_guard = FsRollbackGuard::new(zshrc.clone(), backup);
+
                 fs::write(&zshrc, clean_content.trim())?;
+                rollback_guard.commit();
             }
         }
 

@@ -1,5 +1,6 @@
 use crate::{
     core::{IrisPaths, Templater},
+    guards::FsRollbackGuard,
     log::Task,
     models::{HealthStatus, Theme},
     modules::{Generator, GeneratorType},
@@ -52,8 +53,10 @@ impl Generator for GhosttyGenerator {
             theme.name.yellow(),
             self.name().bold().cyan(),
         ));
+
         let cache_file: PathBuf = self.ensure_cache_file(theme, paths, templater)?;
         let link_path: PathBuf = self.link_path(paths, &theme.name);
+        let backup_path: PathBuf = link_path.with_extension("bak");
 
         task.info(&format!(
             "Linking {} theme to {}...",
@@ -61,7 +64,10 @@ impl Generator for GhosttyGenerator {
             utils::pretty_path(&link_path).magenta(),
         ));
 
+        let rollback_guard = FsRollbackGuard::new(link_path.clone(), backup_path);
+
         self.ensure_symlink(&cache_file, &link_path)?;
+        rollback_guard.commit();
 
         task.info(&format!(
             "{} theme applied to {}",
@@ -144,30 +150,39 @@ impl Generator for GhosttyGenerator {
         }
 
         let mut fixed = false;
-        if status.contains("config file missing") {
-            task.log
-                .action("Created missing `ghostty` config file", || {
-                    self.inject_import_line(paths)
-                })?;
-            fixed = true;
-        }
+        let ghostty_dir: PathBuf = self.resolve_config_directory(paths);
+        let config_path: PathBuf = ghostty_dir.join("config");
 
-        if status.contains("not imported") {
-            task.log
-                .action("Injected theme import line into `ghostty` config", || {
-                    self.inject_import_line(paths)
-                })?;
+        if status.contains("config file missing") || status.contains("not imported") {
+            let config_backup: PathBuf = config_path.with_extension("bak");
+            let rollback_guard = FsRollbackGuard::new(config_path.clone(), config_backup);
+
+            let msg: &str = if status.contains("config file missing") {
+                "Created missing `ghostty` config file"
+            } else {
+                "Injected theme import line into `ghostty` config"
+            };
+
+            task.log.action(msg, || self.inject_import_line(paths))?;
+
+            rollback_guard.commit();
             fixed = true;
         }
 
         if status.contains("missing or invalid") || status.contains("different cache") {
+            let link: PathBuf = self.link_path(paths, &theme.name.to_lowercase());
+            let backup: PathBuf = link.with_extension("bak");
+            let cache: PathBuf = self.cache_path(paths, &theme.name.to_lowercase());
+
+            let rollback_guard = FsRollbackGuard::new(link.clone(), backup);
+
             task.log
                 .action("Repaired `ghostty` theme files and symlinks", || {
                     self.ensure_cache_file(theme, paths, templater)?;
-                    let cache: PathBuf = self.cache_path(paths, &theme.name.to_lowercase());
-                    let link: PathBuf = self.link_path(paths, &theme.name.to_lowercase());
                     self.ensure_symlink(&cache, &link)
                 })?;
+
+            rollback_guard.commit();
             fixed = true;
         }
 

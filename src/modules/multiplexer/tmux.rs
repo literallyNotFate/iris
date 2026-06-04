@@ -1,5 +1,6 @@
 use crate::{
     core::{IrisPaths, Templater},
+    guards::FsRollbackGuard,
     log::Task,
     models::{HealthStatus, Theme},
     modules::{Generator, GeneratorType},
@@ -51,16 +52,19 @@ impl Generator for TmuxGenerator {
             self.name().bold().cyan(),
         ));
 
-        let cache_file = self.ensure_cache_file(theme, paths, templater)?;
-        let link_path = self.link_path(paths, &theme.name.to_lowercase());
+        let cache_file: PathBuf = self.ensure_cache_file(theme, paths, templater)?;
+        let link_path: PathBuf = self.link_path(paths, &theme.name.to_lowercase());
+        let backup_path: PathBuf = link_path.with_extension("bak");
 
         task.info(&format!(
             "Linking {} theme to {}...",
             self.name().bold(),
             utils::pretty_path(&link_path).magenta(),
         ));
-        self.ensure_symlink(&cache_file, &link_path)?;
 
+        let rollback_guard = FsRollbackGuard::new(link_path.clone(), backup_path);
+
+        self.ensure_symlink(&cache_file, &link_path)?;
         let conf_path = self.resolve_tmux_conf_path(paths);
 
         if conf_path.exists() {
@@ -68,9 +72,15 @@ impl Generator for TmuxGenerator {
                 "Patching tmux.conf to source {}...",
                 theme.name.yellow(),
             ));
+
+            let conf_backup: PathBuf = conf_path.with_extension("bak");
+            let conf_guard = FsRollbackGuard::new(conf_path.clone(), conf_backup);
+
             self.update_tmux_conf(&conf_path, &theme.name.to_lowercase())?;
+            conf_guard.commit();
         }
 
+        rollback_guard.commit();
         Ok(())
     }
 
@@ -157,19 +167,31 @@ impl Generator for TmuxGenerator {
 
         let mut fixed = false;
         if status.contains("not sourced") || status.contains("different theme") {
+            let conf_path: PathBuf = self.resolve_tmux_conf_path(paths);
+            let config_backup: PathBuf = conf_path.with_extension("bak");
+
+            let rollback_guard = FsRollbackGuard::new(conf_path.clone(), config_backup);
+
             task.log.action("Repaired tmux.conf source line", || {
-                let conf_path: PathBuf = self.resolve_tmux_conf_path(paths);
                 self.update_tmux_conf(&conf_path, &theme.name.to_lowercase())
             })?;
+
+            rollback_guard.commit();
             fixed = true;
         }
 
         if status.contains("Theme link missing") {
+            let cache: PathBuf = self.cache_path(paths, &theme.name.to_lowercase());
+            let link: PathBuf = self.link_path(paths, &theme.name.to_lowercase());
+            let backup: PathBuf = link.with_extension("bak");
+
+            let rollback_guard = FsRollbackGuard::new(link.clone(), backup);
+
             task.log.action("Restored `tmux` theme symlink", || {
-                let cache: PathBuf = self.cache_path(paths, &theme.name.to_lowercase());
-                let link: PathBuf = self.link_path(paths, &theme.name.to_lowercase());
                 self.ensure_symlink(&cache, &link)
             })?;
+
+            rollback_guard.commit();
             fixed = true;
         }
 
