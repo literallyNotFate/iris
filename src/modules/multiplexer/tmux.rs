@@ -161,12 +161,20 @@ impl Generator for TmuxGenerator {
         if !status.is_error() && !status.is_warning() {
             return task.log.action(
                 &format!("Re-applied `{}` configuration", self.name().bold()),
-                || self.apply(theme, paths, templater, &mut task.as_quiet()),
+                || self.apply(theme, paths, templater, &mut task.muted()),
             );
         }
 
         let mut fixed = false;
-        if status.contains("not sourced") || status.contains("different theme") {
+        if status.contains("Theme link missing") {
+            task.log
+                .action("Regenerated `tmux` theme file and symlink", || {
+                    self.apply(theme, paths, templater, &mut task.muted())
+                })?;
+            fixed = true;
+        }
+
+        if (status.contains("not sourced") || status.contains("different theme")) && !fixed {
             let conf_path: PathBuf = self.resolve_tmux_conf_path(paths);
             let config_backup: PathBuf = conf_path.with_extension("bak");
 
@@ -180,25 +188,10 @@ impl Generator for TmuxGenerator {
             fixed = true;
         }
 
-        if status.contains("Theme link missing") {
-            let cache: PathBuf = self.cache_path(paths, &theme.name.to_lowercase());
-            let link: PathBuf = self.link_path(paths, &theme.name.to_lowercase());
-            let backup: PathBuf = link.with_extension("bak");
-
-            let rollback_guard = FsRollbackGuard::new(link.clone(), backup);
-
-            task.log.action("Restored `tmux` theme symlink", || {
-                self.ensure_symlink(&cache, &link)
-            })?;
-
-            rollback_guard.commit();
-            fixed = true;
-        }
-
         if !fixed {
             task.log
                 .action("Regenerated complete `tmux` configuration", || {
-                    self.apply(theme, paths, templater, &mut task.as_quiet())
+                    self.apply(theme, paths, templater, &mut task.muted())
                 })?;
         }
 

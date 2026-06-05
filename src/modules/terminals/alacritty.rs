@@ -147,26 +147,11 @@ impl Generator for AlacrittyGenerator {
         if !status.is_error() && !status.is_warning() {
             return task.log.action(
                 &format!("Re-applied `{}` configuration", self.name().bold()),
-                || self.apply(theme, paths, templater, &mut task.as_quiet()),
+                || self.apply(theme, paths, templater, &mut task.muted()),
             );
         }
 
         let mut fixed = false;
-        if status.contains("link missing") {
-            let cache: PathBuf = self.cache_path(paths, "");
-            let link: PathBuf = self.link_path(paths, "");
-            let backup: PathBuf = link.with_extension("bak");
-
-            let rollback_guard = FsRollbackGuard::new(link.clone(), backup);
-
-            task.log.action("Restored `alacritty` theme symlink", || {
-                self.ensure_symlink(&cache, &link)
-            })?;
-
-            rollback_guard.commit();
-            fixed = true;
-        }
-
         if status.contains("import") {
             let alacritty_dir: PathBuf = self.resolve_config_directory(paths);
             let main_config: PathBuf = alacritty_dir.join("alacritty.toml");
@@ -183,18 +168,25 @@ impl Generator for AlacrittyGenerator {
             fixed = true;
         }
 
-        if status.contains("unexpected") || status.contains("old") {
-            fixed = false;
+        if status.contains("link missing")
+            || status.contains("unexpected")
+            || status.contains("old")
+        {
+            task.log.action(
+                "Regenerated `alacritty` theme configuration and symlinks",
+                || self.apply(theme, paths, templater, &mut task.muted()),
+            )?;
+            fixed = true;
         }
 
         if !fixed {
-            if status.is_warning() && !status.contains("unexpected") && !status.contains("old") {
+            if status.is_warning() {
                 task.info(&format!("Fixing `alacritty` warning: {status}"));
             }
 
             task.log
                 .action("Regenerating complete `alacritty` configuration", || {
-                    self.apply(theme, paths, templater, &mut task.as_quiet())
+                    self.apply(theme, paths, templater, &mut task.muted())
                 })?;
         }
 

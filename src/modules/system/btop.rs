@@ -169,27 +169,20 @@ impl Generator for BtopGenerator {
         if !status.is_error() && !status.is_warning() {
             return task.log.action(
                 &format!("Re-applied `{}` configuration", self.name().bold()),
-                || self.apply(theme, paths, templater, &mut task.as_quiet()),
+                || self.apply(theme, paths, templater, &mut task.muted()),
             );
         }
 
         let mut fixed = false;
         if status.contains("missing in btop themes folder") {
-            let cache: PathBuf = self.cache_path(paths, &theme.name.to_lowercase());
-            let link: PathBuf = self.link_path(paths, &theme.name.to_lowercase());
-            let backup: PathBuf = link.with_extension("bak");
-
-            let rollback_guard = FsRollbackGuard::new(link.clone(), backup);
-
-            task.log.action("Restored `btop` theme symlink", || {
-                self.ensure_symlink(&cache, &link)
-            })?;
-
-            rollback_guard.commit();
+            task.log
+                .action("Regenerated `btop` theme file and symlink", || {
+                    self.apply(theme, paths, templater, &mut task.muted())
+                })?;
             fixed = true;
         }
 
-        if status.contains("not using the current theme") {
+        if status.contains("not using the current theme") && !fixed {
             let base_dir: PathBuf = self.resolve_config_directory(paths);
             let conf_path: PathBuf = base_dir.parent().unwrap_or(&base_dir).join("btop.conf");
             let config_backup: PathBuf = conf_path.with_extension("bak");
@@ -208,7 +201,7 @@ impl Generator for BtopGenerator {
         if !fixed {
             task.log
                 .action("Regenerated complete `btop` configuration", || {
-                    self.apply(theme, paths, templater, &mut task.as_quiet())
+                    self.apply(theme, paths, templater, &mut task.muted())
                 })?;
         }
 
