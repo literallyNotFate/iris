@@ -1,6 +1,6 @@
 use crate::{
     core::{IrisPaths, NeovimBridge},
-    log::Reporter,
+    log::Logger,
     models::{Palette, PluginManager, State, Theme},
     utils,
 };
@@ -13,11 +13,11 @@ use std::{fs, path::PathBuf};
 /// selection w/validation and theme collection
 pub struct ThemeOrchestrator<'a> {
     paths: &'a IrisPaths,
-    log: &'a Reporter,
+    log: &'a Logger,
 }
 
 impl<'a> ThemeOrchestrator<'a> {
-    pub fn new(paths: &'a IrisPaths, log: &'a Reporter) -> Self {
+    pub fn new(paths: &'a IrisPaths, log: &'a Logger) -> Self {
         Self { paths, log }
     }
 

@@ -1,5 +1,5 @@
-pub mod reporter;
-pub mod task;
+pub mod activity;
+pub mod logger;
 
-pub use reporter::Reporter;
-pub use task::Task;
+pub use activity::Activity;
+pub use logger::{Logger, LoggingVerbosity};

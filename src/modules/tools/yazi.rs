@@ -1,7 +1,7 @@
 use crate::{
     core::{IrisPaths, Templater},
     guards::FsRollbackGuard,
-    log::Task,
+    log::Activity,
     models::{HealthStatus, Theme},
     modules::{Generator, GeneratorType},
     utils,
@@ -39,7 +39,7 @@ impl Generator for YaziGenerator {
         theme: &Theme,
         paths: &IrisPaths,
         templater: &Templater,
-        task: &mut Task,
+        task: &mut Activity,
     ) -> Result<()> {
         let cache_file: PathBuf = self.ensure_cache_file(theme, paths, templater)?;
         let link_path: PathBuf = self.link_path(paths, &theme.name.to_lowercase());
@@ -144,12 +144,12 @@ impl Generator for YaziGenerator {
         theme: &Theme,
         paths: &IrisPaths,
         templater: &Templater,
-        task: &mut Task,
+        task: &mut Activity,
     ) -> Result<()> {
         if !status.is_error() && !status.is_warning() {
             return task.log.action(
                 &format!("Re-applied `{}` configuration", self.name().bold()),
-                || self.apply(theme, paths, templater, &mut task.as_quiet()),
+                || self.apply(theme, paths, templater, &mut task.muted()),
             );
         }
 
@@ -179,7 +179,7 @@ impl Generator for YaziGenerator {
         if !fixed {
             task.log
                 .action("Regenerated complete `yazi` configuration", || {
-                    self.apply(theme, paths, templater, &mut task.as_quiet())
+                    self.apply(theme, paths, templater, &mut task.muted())
                 })?;
         }
 
@@ -322,7 +322,7 @@ mod tests {
         let theme: Theme = Theme::mock();
         ctx.state.current_theme = theme.name.clone();
 
-        let mut task = ctx.log.step("Test", false).as_quiet();
+        let mut task = ctx.log.step("Test", false).muted();
         generator
             .apply(&theme, &ctx.paths, &ctx.templater, &mut task)
             .unwrap();
@@ -400,7 +400,7 @@ mod tests {
         let (_, ctx) = create_test_context();
         let generator = YaziGenerator;
         let theme: Theme = Theme::mock();
-        let mut task = ctx.log.step("Test", false).as_quiet();
+        let mut task = ctx.log.step("Test", false).muted();
 
         generator
             .apply(&theme, &ctx.paths, &ctx.templater, &mut task)

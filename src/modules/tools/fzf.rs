@@ -1,7 +1,7 @@
 use crate::{
     core::{IrisPaths, Templater},
     guards::FsRollbackGuard,
-    log::Task,
+    log::Activity,
     models::{HealthStatus, Theme},
     modules::{Generator, GeneratorType},
     utils::{self},
@@ -44,7 +44,7 @@ impl Generator for FzfGenerator {
         theme: &Theme,
         paths: &IrisPaths,
         templater: &Templater,
-        task: &mut Task,
+        task: &mut Activity,
     ) -> Result<()> {
         let cache_file: PathBuf = self.cache_path(paths, "");
         let backup_path: PathBuf = cache_file.with_extension("sh.bak");
@@ -126,19 +126,19 @@ impl Generator for FzfGenerator {
         theme: &Theme,
         paths: &IrisPaths,
         templater: &Templater,
-        task: &mut Task,
+        task: &mut Activity,
     ) -> Result<()> {
         if !status.is_error() && !status.is_warning() {
             return task.log.action(
                 &format!("Re-applied `{}` configuration", self.name().bold()),
-                || self.apply(theme, paths, templater, &mut task.as_quiet()),
+                || self.apply(theme, paths, templater, &mut task.muted()),
             );
         }
 
         let mut fixed = false;
         if status.contains("missing from cache") {
             task.log.action("Restoring missing theme file", || {
-                self.apply(theme, paths, templater, &mut task.as_quiet())
+                self.apply(theme, paths, templater, &mut task.muted())
             })?;
             fixed = true;
         }
@@ -160,7 +160,7 @@ impl Generator for FzfGenerator {
         if !fixed {
             task.log
                 .action("Regenerating complete `fzf` configuration", || {
-                    self.apply(theme, paths, templater, &mut task.as_quiet())
+                    self.apply(theme, paths, templater, &mut task.muted())
                 })?;
         }
 
@@ -301,7 +301,7 @@ mod tests {
         let generator = FzfGenerator;
         let theme: Theme = Theme::mock();
 
-        let mut task = ctx.log.step("Test", true).as_quiet();
+        let mut task = ctx.log.step("Test", true).muted();
         generator
             .apply(&theme, &ctx.paths, &ctx.templater, &mut task)
             .unwrap();
@@ -374,7 +374,7 @@ mod tests {
         let generator = FzfGenerator;
         let theme: Theme = Theme::mock();
 
-        let mut task = ctx.log.step("Test", false).as_quiet();
+        let mut task = ctx.log.step("Test", false).muted();
         generator
             .apply(&theme, &ctx.paths, &ctx.templater, &mut task)
             .unwrap();
@@ -397,7 +397,7 @@ mod tests {
         let zshrc = root.join(".zshrc");
         fs::write(&zshrc, "# Initial zshrc\n").unwrap();
 
-        let mut task = ctx.log.step("Test", false).as_quiet();
+        let mut task = ctx.log.step("Test", false).muted();
         generator
             .apply(&theme, &ctx.paths, &ctx.templater, &mut task)
             .unwrap();
@@ -444,7 +444,7 @@ mod tests {
 
         let status = HealthStatus::error("missing from cache", None::<String>);
 
-        let mut task = ctx.log.step("Test", false).as_quiet();
+        let mut task = ctx.log.step("Test", false).muted();
         generator
             .fix(&status, &theme, &ctx.paths, &ctx.templater, &mut task)
             .expect("Fix failed");
@@ -461,7 +461,7 @@ mod tests {
         let generator = FzfGenerator;
         let theme: Theme = Theme::mock();
 
-        let mut task = ctx.log.step("Test", false).as_quiet();
+        let mut task = ctx.log.step("Test", false).muted();
         generator
             .apply(&theme, &ctx.paths, &ctx.templater, &mut task)
             .unwrap();
@@ -482,7 +482,7 @@ mod tests {
         let generator = FzfGenerator;
         let theme: Theme = Theme::mock();
 
-        let mut task = ctx.log.step("Test", false).as_quiet();
+        let mut task = ctx.log.step("Test", false).muted();
         generator
             .apply(&theme, &ctx.paths, &ctx.templater, &mut task)
             .unwrap();

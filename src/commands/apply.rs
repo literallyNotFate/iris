@@ -9,7 +9,9 @@ use colored::Colorize;
 /// Handle application apply command
 pub fn exec(args: ApplyArgs, ctx: &mut IrisContext) -> anyhow::Result<()> {
     let (theme_name, was_fallback) = ctx.resolve_theme(args.theme.clone(), args.fallback)?;
-    render_header(&theme_name, args.theme.as_deref(), was_fallback);
+    if ctx.log.is_detailed() {
+        render_header(&theme_name, args.theme.as_deref(), was_fallback);
+    }
     println!();
 
     let orchestrator = ThemeOrchestrator::new(&ctx.paths, &ctx.log);
@@ -28,9 +30,29 @@ pub fn exec(args: ApplyArgs, ctx: &mut IrisContext) -> anyhow::Result<()> {
         ),
         true,
     );
+
     let result = generator.apply(&theme_obj, &ctx.paths, &ctx.templater, &mut step);
-    step.done_with("Theme applied!");
+    let final_msg: String = if was_fallback {
+        format!(
+            "Applied theme {} to {} {}",
+            theme_obj.name.yellow().bold(),
+            generator.name().cyan().bold(),
+            format!("(using fallback: {})", theme_name).dimmed()
+        )
+    } else {
+        format!(
+            "Applied theme {} to {}",
+            theme_obj.name.yellow().bold(),
+            generator.name().cyan().bold()
+        )
+    };
+
+    step.done_with(&final_msg);
     result?;
+
+    if !ctx.log.is_detailed() {
+        println!();
+    }
 
     Ok(())
 }
@@ -53,13 +75,7 @@ fn ensure_generator_health(
             ),
             || {
                 let t = ctx.log.step(&format!("Fixing {}", g.name()), is_last);
-                let result = g.fix(
-                    &status,
-                    theme,
-                    &ctx.paths,
-                    &ctx.templater,
-                    &mut t.as_quiet(),
-                );
+                let result = g.fix(&status, theme, &ctx.paths, &ctx.templater, &mut t.muted());
 
                 t.done();
                 result

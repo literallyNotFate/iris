@@ -1,6 +1,6 @@
 use crate::{
     core::{IrisContext, NeovimBridge, ThemeOrchestrator},
-    log::Task,
+    log::Activity,
     models::PluginManager,
     utils,
 };
@@ -17,7 +17,7 @@ pub struct IrisSetup;
 
 impl IrisSetup {
     pub fn run(ctx: &mut IrisContext) -> Result<()> {
-        if !ctx.log.quiet {
+        if !ctx.log.is_detailed() {
             println!();
             println!("{}  {}", "󰒓".purple().bold(), "Iris initialization".bold());
             println!();
@@ -46,7 +46,7 @@ impl IrisSetup {
         Ok(())
     }
 
-    fn setup_initial_state(ctx: &mut IrisContext, task: &Task) -> Result<()> {
+    fn setup_initial_state(ctx: &mut IrisContext, task: &Activity) -> Result<()> {
         if ctx.paths.state_file.exists() {
             task.info("Found existing state.json, loading configuration.");
             return Ok(());
@@ -94,7 +94,7 @@ impl IrisSetup {
         Ok(())
     }
 
-    pub fn setup_zsh_hook(ctx: &IrisContext, task: &Task) -> anyhow::Result<()> {
+    pub fn setup_zsh_hook(ctx: &IrisContext, task: &Activity) -> anyhow::Result<()> {
         let home: PathBuf = dirs::home_dir().context("Home directory not found")?;
         let zshrc: PathBuf = home.join(".zshrc");
 

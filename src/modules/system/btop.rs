@@ -1,7 +1,7 @@
 use crate::{
     core::{IrisPaths, Templater},
     guards::FsRollbackGuard,
-    log::Task,
+    log::Activity,
     models::{HealthStatus, Theme},
     modules::{Generator, GeneratorType},
     utils::{self},
@@ -44,7 +44,7 @@ impl Generator for BtopGenerator {
         theme: &Theme,
         paths: &IrisPaths,
         templater: &Templater,
-        task: &mut Task,
+        task: &mut Activity,
     ) -> Result<()> {
         task.info(&format!(
             "Generating {} theme for {}",
@@ -164,7 +164,7 @@ impl Generator for BtopGenerator {
         theme: &Theme,
         paths: &IrisPaths,
         templater: &Templater,
-        task: &mut Task,
+        task: &mut Activity,
     ) -> Result<()> {
         if !status.is_error() && !status.is_warning() {
             return task.log.action(
@@ -376,7 +376,7 @@ mod tests {
         let generator = BtopGenerator;
         let theme: Theme = Theme::mock();
 
-        let mut task = ctx.log.step("Test", false).as_quiet();
+        let mut task = ctx.log.step("Test", false).muted();
         ctx.state.current_theme = theme.name.clone();
         generator
             .apply(&theme, &ctx.paths, &ctx.templater, &mut task)
@@ -420,7 +420,7 @@ mod tests {
         let generator = BtopGenerator;
         let theme: Theme = Theme::mock();
 
-        let mut task = ctx.log.step("Test", false).as_quiet();
+        let mut task = ctx.log.step("Test", false).muted();
         ctx.state.current_theme = theme.name.clone();
         generator
             .apply(&theme, &ctx.paths, &ctx.templater, &mut task)
@@ -463,7 +463,7 @@ mod tests {
         )
         .unwrap();
 
-        let mut task = ctx.log.step("Test", false).as_quiet();
+        let mut task = ctx.log.step("Test", false).muted();
         let result = generator.apply(&theme, &ctx.paths, &ctx.templater, &mut task);
         assert!(result.is_ok());
 
@@ -499,7 +499,7 @@ mod tests {
         );
         assert!(status.contains("not using the current theme"));
 
-        let mut task = ctx.log.step("Test", false).as_quiet();
+        let mut task = ctx.log.step("Test", false).muted();
         generator
             .fix(&status, &theme, &ctx.paths, &ctx.templater, &mut task)
             .expect("Fix failed");
@@ -526,7 +526,7 @@ mod tests {
         )
         .unwrap();
 
-        let mut task = ctx.log.step("Test", false).as_quiet();
+        let mut task = ctx.log.step("Test", false).muted();
         generator
             .apply(&theme, &ctx.paths, &ctx.templater, &mut task)
             .unwrap();

@@ -10,7 +10,7 @@ pub fn exec(ctx: &IrisContext) -> anyhow::Result<()> {
     let (nvim_theme, is_sync) = orchestrator.get_sync_status(&ctx.state);
     let current: String = ctx.state.current_theme.clone();
 
-    if ctx.log.quiet {
+    if !ctx.log.is_detailed() {
         render_quiet(ctx, &current, &nvim_theme, is_sync);
         return Ok(());
     }

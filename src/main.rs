@@ -1,13 +1,13 @@
 use clap::Parser;
 use colored::Colorize;
-use iris::{cli::Cli, commands, core::IrisContext, log::Reporter};
+use iris::{cli::Cli, commands, core::IrisContext, log::Logger};
 
 fn main() {
     let cli: Cli = Cli::parse();
-    let reporter: Reporter = if cli.quiet {
-        Reporter::quiet()
+    let reporter: Logger = if cli.quiet {
+        Logger::minimal()
     } else {
-        Reporter::new()
+        Logger::new()
     };
 
     if let Err(err) = run(cli, reporter) {
@@ -22,7 +22,7 @@ fn main() {
     }
 }
 
-fn run(cli: Cli, reporter: Reporter) -> anyhow::Result<()> {
+fn run(cli: Cli, reporter: Logger) -> anyhow::Result<()> {
     let mut ctx: IrisContext = IrisContext::new(reporter)?;
     commands::handle(cli.command, &mut ctx)?;
     Ok(())

@@ -1,6 +1,6 @@
 use crate::{
     core::{IrisPaths, Templater},
-    log::Task,
+    log::Activity,
     models::{HealthStatus, Theme},
     modules::GeneratorType,
 };
@@ -57,7 +57,7 @@ pub trait Generator: Send + Sync {
         theme: &Theme,
         paths: &IrisPaths,
         templater: &Templater,
-        task: &mut Task,
+        task: &mut Activity,
     ) -> Result<()>;
 
     /// Automatic config directory resolver
@@ -97,7 +97,7 @@ pub trait Generator: Send + Sync {
         theme: &Theme,
         paths: &IrisPaths,
         templater: &Templater,
-        task: &mut Task,
+        task: &mut Activity,
     ) -> Result<()>;
 
     /// Basic template context builder.

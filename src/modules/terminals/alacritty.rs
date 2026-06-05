@@ -1,7 +1,7 @@
 use crate::{
     core::{IrisPaths, Templater},
     guards::FsRollbackGuard,
-    log::Task,
+    log::Activity,
     models::{HealthStatus, Theme},
     modules::{Generator, GeneratorType},
     utils::{self},
@@ -46,7 +46,7 @@ impl Generator for AlacrittyGenerator {
         theme: &Theme,
         paths: &IrisPaths,
         templater: &Templater,
-        task: &mut Task,
+        task: &mut Activity,
     ) -> Result<()> {
         task.info(&format!(
             "Generating {} theme for {}",
@@ -142,7 +142,7 @@ impl Generator for AlacrittyGenerator {
         theme: &Theme,
         paths: &IrisPaths,
         templater: &Templater,
-        task: &mut Task,
+        task: &mut Activity,
     ) -> Result<()> {
         if !status.is_error() && !status.is_warning() {
             return task.log.action(
@@ -346,7 +346,7 @@ mod tests {
         let generator = AlacrittyGenerator;
         let theme: Theme = Theme::mock();
 
-        let mut task = ctx.log.step("Test", false).as_quiet();
+        let mut task = ctx.log.step("Test", false).muted();
         ctx.state.current_theme = theme.name.clone();
         generator
             .apply(&theme, &ctx.paths, &ctx.templater, &mut task)
@@ -366,7 +366,7 @@ mod tests {
         let generator = AlacrittyGenerator;
         let theme: Theme = Theme::mock();
 
-        let mut task = ctx.log.step("Test", false).as_quiet();
+        let mut task = ctx.log.step("Test", false).muted();
         ctx.state.current_theme = theme.name.clone();
         generator
             .apply(&theme, &ctx.paths, &ctx.templater, &mut task)
@@ -392,7 +392,7 @@ mod tests {
         let generator = AlacrittyGenerator;
         let theme: Theme = Theme::mock();
 
-        let mut task = ctx.log.step("Test", false).as_quiet();
+        let mut task = ctx.log.step("Test", false).muted();
         ctx.state.current_theme = theme.name.clone();
         generator
             .apply(&theme, &ctx.paths, &ctx.templater, &mut task)
@@ -420,7 +420,7 @@ mod tests {
         let generator = AlacrittyGenerator;
         let theme: Theme = Theme::mock();
 
-        let mut task = ctx.log.step("Test", false).as_quiet();
+        let mut task = ctx.log.step("Test", false).muted();
         let result = generator.apply(&theme, &ctx.paths, &ctx.templater, &mut task);
         assert!(result.is_ok(), "Apply failed: {:?}", result.err());
 
@@ -454,7 +454,7 @@ mod tests {
         fs::create_dir_all(&alacritty_dir).unwrap();
         let config_path = alacritty_dir.join("alacritty.toml");
 
-        let mut task = ctx.log.step("Test", false).as_quiet();
+        let mut task = ctx.log.step("Test", false).muted();
         generator
             .apply(&theme, &ctx.paths, &ctx.templater, &mut task)
             .unwrap();
@@ -496,7 +496,7 @@ mod tests {
         )
         .unwrap();
 
-        let mut task = ctx.log.step("Test", false).as_quiet();
+        let mut task = ctx.log.step("Test", false).muted();
         generator
             .apply(&theme, &ctx.paths, &ctx.templater, &mut task)
             .unwrap();

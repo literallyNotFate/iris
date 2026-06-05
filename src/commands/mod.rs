@@ -44,7 +44,7 @@ pub(crate) fn apply_theme(theme: &Theme, ctx: &mut IrisContext) -> anyhow::Resul
     let templater = &ctx.templater;
     let log = ctx.log.clone();
 
-    if !log.quiet {
+    if log.is_detailed() {
         println!(
             "{}  {}\n",
             "󰚔".green().bold(),
@@ -57,6 +57,6 @@ pub(crate) fn apply_theme(theme: &Theme, ctx: &mut IrisContext) -> anyhow::Resul
         ctx.update(&theme.name.clone())
     })?;
 
-    println!("\n");
+    println!();
     Ok(())
 }

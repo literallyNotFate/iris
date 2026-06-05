@@ -1,7 +1,7 @@
 use crate::{
     core::{IrisPaths, Templater},
     guards::FsRollbackGuard,
-    log::Task,
+    log::Activity,
     models::{HealthStatus, Theme},
     modules::{Generator, GeneratorType},
     utils::{self},
@@ -44,7 +44,7 @@ impl Generator for TmuxGenerator {
         theme: &Theme,
         paths: &IrisPaths,
         templater: &Templater,
-        task: &mut Task,
+        task: &mut Activity,
     ) -> Result<()> {
         task.info(&format!(
             "Generating {} theme for {}",
@@ -156,7 +156,7 @@ impl Generator for TmuxGenerator {
         theme: &Theme,
         paths: &IrisPaths,
         templater: &Templater,
-        task: &mut Task,
+        task: &mut Activity,
     ) -> Result<()> {
         if !status.is_error() && !status.is_warning() {
             return task.log.action(
@@ -391,7 +391,7 @@ mod tests {
         )
         .unwrap();
 
-        let mut task = ctx.log.step("Test", false).as_quiet();
+        let mut task = ctx.log.step("Test", false).muted();
         ctx.state.current_theme = theme.name.clone();
         generator
             .apply(&theme, &ctx.paths, &ctx.templater, &mut task)
@@ -421,7 +421,7 @@ mod tests {
         )
         .unwrap();
 
-        let mut task = ctx.log.step("Test", false).as_quiet();
+        let mut task = ctx.log.step("Test", false).muted();
         ctx.state.current_theme = theme.name.clone();
         generator
             .apply(&theme, &ctx.paths, &ctx.templater, &mut task)
@@ -485,7 +485,7 @@ mod tests {
         )
         .unwrap();
 
-        let mut task = ctx.log.step("Test", false).as_quiet();
+        let mut task = ctx.log.step("Test", false).muted();
         ctx.state.current_theme = theme.name.clone();
         generator
             .apply(&theme, &ctx.paths, &ctx.templater, &mut task)
@@ -514,7 +514,7 @@ mod tests {
         fs::create_dir_all(&tmux_dir).unwrap();
         fs::write(&tmux_conf, "run '~/.tmux/plugins/tpm/tpm'").unwrap();
 
-        let mut task = ctx.log.step("Test", false).as_quiet();
+        let mut task = ctx.log.step("Test", false).muted();
         generator
             .apply(&theme, &ctx.paths, &ctx.templater, &mut task)
             .expect("Apply failed");
@@ -537,7 +537,7 @@ mod tests {
         fs::create_dir_all(tmux_conf.parent().unwrap()).unwrap();
         fs::write(&tmux_conf, "run '~/.tmux/plugins/tpm/tpm'").unwrap();
 
-        let mut task = ctx.log.step("Test", false).as_quiet();
+        let mut task = ctx.log.step("Test", false).muted();
         let status = generator.health_check(&ctx.paths, &theme.name);
         generator
             .fix(&status, &theme, &ctx.paths, &ctx.templater, &mut task)
@@ -565,7 +565,7 @@ mod tests {
         let theme: Theme = Theme::mock();
         ctx.state.current_theme = theme.name.clone();
 
-        let mut task = ctx.log.step("Test", false).as_quiet();
+        let mut task = ctx.log.step("Test", false).muted();
         generator
             .apply(&theme, &ctx.paths, &ctx.templater, &mut task)
             .unwrap();
@@ -592,7 +592,7 @@ mod tests {
         let theme: Theme = Theme::mock();
         ctx.state.current_theme = theme.name.clone();
 
-        let mut task = ctx.log.step("Test", false).as_quiet();
+        let mut task = ctx.log.step("Test", false).muted();
         generator
             .apply(&theme, &ctx.paths, &ctx.templater, &mut task)
             .unwrap();

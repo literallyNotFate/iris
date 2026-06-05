@@ -1,6 +1,6 @@
 use crate::{
     core::{IrisPaths, Templater},
-    log::Reporter,
+    log::{Logger, LoggingVerbosity},
     models::{State, Theme},
     modules::{Generator, GeneratorType},
 };
@@ -117,7 +117,7 @@ impl GeneratorRegistry {
         state: &State,
         paths: &IrisPaths,
         templater: &Templater,
-        log: &Reporter,
+        log: &Logger,
     ) -> Result<()> {
         let to_apply: Vec<&dyn Generator> = self
             .generators
@@ -132,6 +132,14 @@ impl GeneratorRegistry {
         }
 
         let total: usize = to_apply.len();
+        if log.verbosity == LoggingVerbosity::Silent {
+            for generator in &to_apply {
+                let mut silent_task = log.as_task();
+                generator.apply(theme, paths, templater, &mut silent_task)?;
+            }
+            return Ok(());
+        }
+
         let root = log.step_with_icon(
             "󰛓".blue().bold(),
             &format!("Updating {} targets ...", total.to_string().blue().bold()),
@@ -139,30 +147,36 @@ impl GeneratorRegistry {
         );
 
         for (i, generator) in to_apply.iter().enumerate() {
-            let is_last: bool = i == total - 1;
-            let generator_color = generator.generator_type().color();
-            let generator_icon = generator
-                .generator_type()
-                .icon()
-                .color(generator_color)
-                .bold();
+            let is_last = i == total - 1;
 
-            let mut task = root.log.step_with_icon(
-                generator_icon,
-                &format!("{}", generator.name().color(generator_color).bold()),
-                is_last,
-            );
+            if log.verbosity == LoggingVerbosity::Minimal {
+                let mut silent_sub_task = root.muted();
+                generator.apply(theme, paths, templater, &mut silent_sub_task)?;
+            } else {
+                let generator_color = generator.generator_type().color();
+                let generator_icon = generator
+                    .generator_type()
+                    .icon()
+                    .color(generator_color)
+                    .bold();
 
-            generator
-                .apply(theme, paths, templater, &mut task)
-                .with_context(|| {
-                    format!(
-                        "Failed to apply theme to `{}`",
-                        generator.name().bold().green()
-                    )
-                })?;
+                let mut task = root.log.step_with_icon(
+                    generator_icon,
+                    &format!("{}", generator.name().color(generator_color).bold()),
+                    is_last,
+                );
 
-            task.done_with(&format!("{} updated!", generator.name().cyan()));
+                generator
+                    .apply(theme, paths, templater, &mut task)
+                    .with_context(|| {
+                        format!(
+                            "Failed to apply theme to `{}`",
+                            generator.name().bold().green()
+                        )
+                    })?;
+
+                task.done_with(&format!("{} updated!", generator.name().cyan()));
+            }
         }
 
         root.done_with(&format!(
@@ -180,7 +194,7 @@ mod tests {
     use super::*;
     use crate::{
         core::{IrisPaths, Templater},
-        log::Task,
+        log::Activity,
         models::HealthStatus,
     };
 
@@ -213,7 +227,7 @@ mod tests {
             _: &Theme,
             _: &IrisPaths,
             _: &Templater,
-            _: &mut Task,
+            _: &mut Activity,
         ) -> anyhow::Result<()> {
             Ok(())
         }
@@ -228,7 +242,7 @@ mod tests {
             _: &Theme,
             _: &IrisPaths,
             _: &Templater,
-            _: &mut Task,
+            _: &mut Activity,
         ) -> anyhow::Result<()> {
             Ok(())
         }

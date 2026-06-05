@@ -203,7 +203,7 @@ fn render_list(
         .filter(|g| ctx.state.is_enabled(g.name()))
         .count();
 
-    if !ctx.log.quiet {
+    if ctx.log.is_detailed() {
         ui::render_list_header(gen_type.is_some() || status_filter.is_some());
     }
 
@@ -211,14 +211,14 @@ fn render_list(
         let is_enabled = ctx.state.is_enabled(g.name());
         let is_installed = g.is_installed();
 
-        if ctx.log.quiet {
+        if !ctx.log.is_detailed() {
             ui::render_quiet_row(g, is_enabled);
         } else {
             ui::render_full_row(g, is_enabled, is_installed);
         }
     }
 
-    if !ctx.log.quiet {
+    if ctx.log.is_detailed() {
         ui::render_list_footer(total, enabled_count, status_filter.is_none());
     } else if total > 0 {
         println!("\nTotal: {} (Enabled: {})\n", total, enabled_count);

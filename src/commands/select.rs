@@ -2,7 +2,7 @@ use crate::{
     commands::apply_theme,
     core::{IrisContext, NeovimBridge, ThemeOrchestrator},
     guards::CursorGuard,
-    log::Reporter,
+    log::Logger,
     models::Palette,
     utils::colors::select_theme,
 };
@@ -32,7 +32,7 @@ pub fn exec(ctx: &mut IrisContext) -> anyhow::Result<()> {
         .unwrap_or(0);
 
     let term = Term::stdout();
-    let quiet_logger = Reporter::quiet();
+    let quiet_logger: Logger = Logger::silent();
     let orchestrator = ThemeOrchestrator::new(&ctx.paths, &quiet_logger);
 
     term.hide_cursor()?;

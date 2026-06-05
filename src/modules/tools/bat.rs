@@ -2,7 +2,7 @@ use super::rules::RULES;
 use crate::{
     core::{IrisPaths, Templater},
     guards::FsRollbackGuard,
-    log::{Reporter, Task},
+    log::{Activity, Logger},
     models::{HealthStatus, Theme},
     modules::{Generator, GeneratorType},
     utils::{self},
@@ -46,7 +46,7 @@ impl Generator for BatGenerator {
         theme: &Theme,
         paths: &IrisPaths,
         templater: &Templater,
-        task: &mut Task,
+        task: &mut Activity,
     ) -> Result<()> {
         task.info(&format!(
             "Generating {} theme for {}...",
@@ -163,14 +163,14 @@ impl Generator for BatGenerator {
         theme: &Theme,
         paths: &IrisPaths,
         templater: &Templater,
-        task: &mut Task,
+        task: &mut Activity,
     ) -> Result<()> {
         if !status.is_error() && !status.is_warning() {
             return task.log.action(
                 &format!("Re-applied `{}` configuration", self.name().bold()),
                 || {
-                    self.apply(theme, paths, templater, &mut task.as_quiet())?;
-                    self.rebuild_bat_cache(&mut task.as_quiet())
+                    self.apply(theme, paths, templater, &mut task.muted())?;
+                    self.rebuild_bat_cache(&mut task.muted())
                 },
             );
         }
@@ -199,11 +199,11 @@ impl Generator for BatGenerator {
         if !fixed {
             task.log
                 .action("Regenerated complete `bat` configuration", || {
-                    self.apply(theme, paths, templater, &mut task.as_quiet())
+                    self.apply(theme, paths, templater, &mut task.muted())
                 })?;
         }
 
-        self.rebuild_bat_cache(&mut task.as_quiet())?;
+        self.rebuild_bat_cache(&mut task.muted())?;
         Ok(())
     }
 
@@ -220,7 +220,7 @@ impl Generator for BatGenerator {
             fs::remove_file(link_file)?;
         }
 
-        self.rebuild_bat_cache(&mut Reporter::quiet().as_task())?;
+        self.rebuild_bat_cache(&mut Logger::silent().as_task())?;
         Ok(())
     }
 }
@@ -301,7 +301,7 @@ impl BatGenerator {
         Ok(())
     }
 
-    fn rebuild_bat_cache(&self, task: &mut Task) -> Result<()> {
+    fn rebuild_bat_cache(&self, task: &mut Activity) -> Result<()> {
         let task = task.log.step("Rebuilding `bat` cache...", false);
         let output = Command::new("bat")
             .arg("cache")
@@ -363,7 +363,7 @@ mod tests {
         let test_bat_cache = ctx.paths.generators.join("bat").join("cache");
 
         temp_env::with_var("BAT_CACHE_PATH", Some(&test_bat_cache), || {
-            let mut task = ctx.log.step("Test", false).as_quiet();
+            let mut task = ctx.log.step("Test", false).muted();
             ctx.state.current_theme = theme.name.clone();
 
             generator
@@ -405,7 +405,7 @@ mod tests {
             let expected_file_name: String = generator.target_file_name(&theme.name);
             let expected_theme_name: String = theme.name.clone();
 
-            let mut task = ctx.log.step("Test", false).as_quiet();
+            let mut task = ctx.log.step("Test", false).muted();
             let result = generator.apply(&theme, &ctx.paths, &ctx.templater, &mut task);
             assert!(result.is_ok(), "Apply failed: {:?}", result.err());
 
@@ -439,7 +439,7 @@ mod tests {
                 let expected_env = ctx.paths.generators.join(generator.name()).join("bat.conf");
 
                 temp_env::with_var("BAT_CONFIG_PATH", Some(expected_env.as_os_str()), || {
-                    let mut task = ctx.log.step("Test", false).as_quiet();
+                    let mut task = ctx.log.step("Test", false).muted();
                     generator
                         .apply(&theme, &ctx.paths, &ctx.templater, &mut task)
                         .unwrap();
@@ -470,7 +470,7 @@ mod tests {
         let test_bat_cache = ctx.paths.generators.join("bat").join("cache");
 
         temp_env::with_var("BAT_CACHE_PATH", Some(&test_bat_cache), || {
-            let mut task = ctx.log.step("Test", false).as_quiet();
+            let mut task = ctx.log.step("Test", false).muted();
             generator
                 .apply(&theme, &ctx.paths, &ctx.templater, &mut task)
                 .unwrap();
@@ -491,7 +491,7 @@ mod tests {
         let test_bat_cache = ctx.paths.generators.join("bat").join("cache");
 
         temp_env::with_var("BAT_CACHE_PATH", Some(&test_bat_cache), || {
-            let mut task = ctx.log.step("Test", false).as_quiet();
+            let mut task = ctx.log.step("Test", false).muted();
             generator
                 .apply(&theme, &ctx.paths, &ctx.templater, &mut task)
                 .unwrap();

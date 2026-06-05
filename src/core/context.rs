@@ -1,7 +1,7 @@
 use super::IrisPaths;
 use crate::{
     core::{NeovimBridge, Templater},
-    log::Reporter,
+    log::Logger,
     models::{PluginManager, State},
     modules::{Generator, GeneratorRegistry},
     utils,
@@ -18,12 +18,12 @@ pub struct IrisContext {
     pub registry: GeneratorRegistry,
     pub templater: Templater,
 
-    pub log: Reporter,
+    pub log: Logger,
 }
 
 impl IrisContext {
     /// New context w/loading UIState from file
-    pub fn new(log: Reporter) -> Result<Self> {
+    pub fn new(log: Logger) -> Result<Self> {
         let paths = IrisPaths::new()?;
         let user_templates: Option<PathBuf> = Some(paths.config.join("templates"));
 

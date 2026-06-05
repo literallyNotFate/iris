@@ -1,6 +1,6 @@
 use crate::{
     core::{IrisContext, ThemeOrchestrator},
-    log::Reporter,
+    log::Logger,
     models::Theme,
     utils::CustomColor,
 };
@@ -10,7 +10,7 @@ use colored::*;
 pub fn exec(requested_theme: Option<String>, ctx: &IrisContext) -> anyhow::Result<()> {
     let (theme_name, is_fallback) = ctx.resolve_theme(requested_theme.clone(), true)?;
 
-    let quiet_logger: Reporter = Reporter::quiet();
+    let quiet_logger: Logger = Logger::silent();
     let orchestrator = ThemeOrchestrator::new(&ctx.paths, &quiet_logger);
     let theme_obj: Theme = orchestrator.load_theme(&theme_name, false, true, &ctx.state)?;
 

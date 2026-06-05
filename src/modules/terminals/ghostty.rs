@@ -1,7 +1,7 @@
 use crate::{
     core::{IrisPaths, Templater},
     guards::FsRollbackGuard,
-    log::Task,
+    log::Activity,
     models::{HealthStatus, Theme},
     modules::{Generator, GeneratorType},
     utils::{self},
@@ -46,7 +46,7 @@ impl Generator for GhosttyGenerator {
         theme: &Theme,
         paths: &IrisPaths,
         templater: &Templater,
-        task: &mut Task,
+        task: &mut Activity,
     ) -> Result<()> {
         task.info(&format!(
             "Generating {} theme for {}",
@@ -140,12 +140,12 @@ impl Generator for GhosttyGenerator {
         theme: &Theme,
         paths: &IrisPaths,
         templater: &Templater,
-        task: &mut Task,
+        task: &mut Activity,
     ) -> Result<()> {
         if !status.is_error() && !status.is_warning() {
             return task.log.action(
                 &format!("Re-applied `{}` configuration", self.name().bold()),
-                || self.apply(theme, paths, templater, &mut task.as_quiet()),
+                || self.apply(theme, paths, templater, &mut task.muted()),
             );
         }
 
@@ -189,7 +189,7 @@ impl Generator for GhosttyGenerator {
         if !fixed {
             task.log
                 .action("Regenerated complete `ghostty` configuration", || {
-                    self.apply(theme, paths, templater, &mut task.as_quiet())
+                    self.apply(theme, paths, templater, &mut task.muted())
                 })?;
         }
 
@@ -339,7 +339,7 @@ mod tests {
         let generator = GhosttyGenerator;
         let theme: Theme = Theme::mock();
 
-        let mut task = ctx.log.step("Test", false).as_quiet();
+        let mut task = ctx.log.step("Test", false).muted();
         ctx.state.current_theme = theme.name.clone();
         generator
             .apply(&theme, &ctx.paths, &ctx.templater, &mut task)
@@ -372,7 +372,7 @@ mod tests {
         let generator = GhosttyGenerator;
         let theme: Theme = Theme::mock();
 
-        let mut task = ctx.log.step("Test", false).as_quiet();
+        let mut task = ctx.log.step("Test", false).muted();
         ctx.state.current_theme = theme.name.clone();
         generator
             .apply(&theme, &ctx.paths, &ctx.templater, &mut task)
@@ -398,7 +398,7 @@ mod tests {
         let generator = GhosttyGenerator;
         let theme: Theme = Theme::mock();
 
-        let mut task = ctx.log.step("Test", false).as_quiet();
+        let mut task = ctx.log.step("Test", false).muted();
         let result = generator.apply(&theme, &ctx.paths, &ctx.templater, &mut task);
         assert!(result.is_ok(), "Failed to apply: {:?}", result.err());
 
@@ -425,7 +425,7 @@ mod tests {
         fs::create_dir_all(&config_dir).unwrap();
         let config_path = config_dir.join("config");
 
-        let mut task = ctx.log.step("Test", false).as_quiet();
+        let mut task = ctx.log.step("Test", false).muted();
         generator
             .apply(&theme, &ctx.paths, &ctx.templater, &mut task)
             .unwrap();
@@ -448,7 +448,7 @@ mod tests {
         let theme: Theme = Theme::mock();
         ctx.state.current_theme = theme.name.clone();
 
-        let mut task = ctx.log.step("Test", false).as_quiet();
+        let mut task = ctx.log.step("Test", false).muted();
         let ghostty_dir = generator.resolve_config_directory(&ctx.paths);
         let config_path = ghostty_dir.join("config");
         fs::create_dir_all(&ghostty_dir).unwrap();

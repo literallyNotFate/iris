@@ -13,7 +13,6 @@ pub fn exec(action: CacheAction, ctx: &IrisContext) -> Result<()> {
         CacheAction::Info => render_info(ctx)?,
     }
 
-    println!();
     Ok(())
 }
 
@@ -115,81 +114,113 @@ fn handle_remove(theme: &str, ctx: &IrisContext) -> Result<()> {
 
 /// List of cached themes
 fn render_list(ctx: &IrisContext) -> Result<()> {
-    println!("\n{}  {}\n", "󰋽".cyan().bold(), "Cached Themes:".bold());
     let themes: Vec<String> = ctx.paths.get_cached_themes()?;
+    println!();
 
-    for name in themes {
-        let file_path: PathBuf = ctx.paths.cached_theme(&name);
-        let size: u64 = fs::metadata(&file_path)?.len();
-        let display_name: String = utils::capitalize(&name);
+    if ctx.log.is_detailed() {
+        println!("{}  {}\n", "󰋽".cyan().bold(), "Cached Themes:".bold());
+        for name in themes {
+            let file_path = ctx.paths.cached_theme(&name);
+            let size = fs::metadata(&file_path)?.len();
+            let display_name = utils::capitalize(&name);
 
-        let status = if name == ctx.state.current_theme {
-            "✓  (active)".green()
-        } else if name == ctx.state.fallback_theme {
-            "󰁯  (fallback)".blue()
-        } else {
-            "".into()
-        };
+            let status = if name == ctx.state.current_theme {
+                "✓  (active)".green()
+            } else if name == ctx.state.fallback_theme {
+                "󰁯  (fallback)".blue()
+            } else {
+                "".into()
+            };
 
-        println!(
-            "  • {:<15} {:>8}  {}",
-            display_name,
-            utils::format_size(size).dimmed(),
-            status
-        );
+            println!(
+                "  • {:<15} {:>8}  {}",
+                display_name,
+                utils::format_size(size).dimmed(),
+                status
+            );
+        }
+    } else {
+        let list = themes
+            .iter()
+            .map(|name| {
+                if name == &ctx.state.current_theme {
+                    format!("{}*", utils::capitalize(name).green().bold())
+                } else if name == &ctx.state.fallback_theme {
+                    format!("{}!", utils::capitalize(name).blue())
+                } else {
+                    utils::capitalize(name)
+                }
+            })
+            .collect::<Vec<_>>()
+            .join(", ");
+
+        println!("{}  Cached themes: {}", "󰋽".cyan().bold(), list);
     }
 
+    println!();
     Ok(())
 }
 
 /// Handling cache info (status)
 fn render_info(ctx: &IrisContext) -> Result<()> {
-    println!(
-        "\n{}  {}",
-        "󰋽".cyan().bold(),
-        "Iris Cache Information:".bold()
-    );
+    println!();
 
-    println!("\n  {}", "Locations:".magenta());
-    let locations = [
-        ("Root", &ctx.paths.cache),
-        ("Palettes", &ctx.paths.themes),
-        ("Generators", &ctx.paths.generators),
-    ];
+    let palette_count: usize = fs::read_dir(&ctx.paths.themes)?.count();
+    let p_size: u64 = ctx.paths.get_size(&ctx.paths.themes);
+    let g_size: u64 = ctx.paths.get_size(&ctx.paths.generators);
 
-    for (label, path) in locations {
+    if ctx.log.is_detailed() {
+        println!(
+            "{}  {}",
+            "󰋽".cyan().bold(),
+            "Iris Cache Information:".bold()
+        );
+        println!("\n  {}", "Locations:".magenta());
+        let locations = [
+            ("Root", &ctx.paths.cache),
+            ("Palettes", &ctx.paths.themes),
+            ("Generators", &ctx.paths.generators),
+        ];
+        for (label, path) in locations {
+            println!(
+                "    {:<12} {}",
+                label.white(),
+                utils::pretty_path(path).cyan()
+            );
+        }
+
+        println!("\n  {}", "Usage Stats:".yellow());
+        println!(
+            "    {:<12} {} files ({})",
+            "Palettes",
+            palette_count,
+            utils::format_size(p_size)
+        );
+        println!("    {:<12} {}", "Configs", utils::format_size(g_size));
+
+        println!("\n  {}", "Current State:".red());
         println!(
             "    {:<12} {}",
-            label.white(),
-            utils::pretty_path(path).cyan()
+            "Theme",
+            utils::capitalize(&ctx.state.current_theme).green().bold()
+        );
+        println!(
+            "    {:<12} {}",
+            "Fallback",
+            utils::capitalize(&ctx.state.fallback_theme).blue()
+        );
+        println!("    {:<12} {}", "Manager", ctx.state.manager);
+    } else {
+        println!(
+            "{}  Cache: {} palettes ({}) | Configs: {} | Active: {}",
+            "󰋽".cyan().bold(),
+            palette_count,
+            utils::format_size(p_size).yellow(),
+            utils::format_size(g_size).yellow(),
+            utils::capitalize(&ctx.state.current_theme).green().bold()
         );
     }
 
-    println!("\n  {}", "Usage Stats:".yellow());
-    let palette_count = fs::read_dir(&ctx.paths.themes)?.count();
-    let p_size = ctx.paths.get_size(&ctx.paths.themes);
-    let g_size = ctx.paths.get_size(&ctx.paths.generators);
-
-    println!(
-        "    {:<12} {} files ({})",
-        "Palettes",
-        palette_count,
-        utils::format_size(p_size)
-    );
-    println!("    {:<12} {}", "Configs", utils::format_size(g_size));
-
-    println!("\n  {}", "Current State:".red());
-    println!(
-        "    {:<12} {}",
-        "Theme",
-        utils::capitalize(&ctx.state.current_theme).green().bold()
-    );
-    println!(
-        "    {:<12} {}",
-        "Fallback",
-        utils::capitalize(&ctx.state.fallback_theme).blue()
-    );
-    println!("    {:<12} {}", "Manager", ctx.state.manager);
-
+    println!();
     Ok(())
 }
