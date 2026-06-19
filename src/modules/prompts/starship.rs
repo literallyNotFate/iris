@@ -49,6 +49,10 @@ impl Generator for StarshipGenerator {
             .join(self.target_file_name(""))
     }
 
+    fn active_link_path(&self, paths: &IrisPaths) -> Option<PathBuf> {
+        Some(self.resolve_config_directory(paths).join("starship.toml"))
+    }
+
     fn env_config_directory(&self) -> Option<PathBuf> {
         env::var("STARSHIP_CONFIG").ok().map(PathBuf::from)
     }

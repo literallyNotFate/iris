@@ -116,19 +116,16 @@ impl<'a> ThemeOrchestrator<'a> {
         let stdout: String = main_task.log.action("Executed Lua bridge", || {
             NeovimBridge::run_fetch_bridge(theme_name, state)
         })?;
-        println!();
 
         let palette: Palette = main_task
             .log
             .action("Parsed palette data", || Self::parse_nvim_stdout(&stdout))?;
-        println!();
 
         let theme_obj: Theme = Theme::new(&theme_cap, palette);
         if save {
             main_task.log.action("Saved theme to cache", || {
                 theme_obj.save_to_cache(&cache_path)
             })?;
-            println!();
         }
 
         main_task.done_with(&format!(

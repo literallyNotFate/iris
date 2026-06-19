@@ -41,6 +41,13 @@ impl Generator for GhosttyGenerator {
             .join(self.target_file_name(""))
     }
 
+    fn active_link_path(&self, paths: &IrisPaths) -> Option<PathBuf> {
+        Some(
+            self.resolve_config_directory(paths)
+                .join("current_theme.conf"),
+        )
+    }
+
     fn apply(
         &self,
         theme: &Theme,

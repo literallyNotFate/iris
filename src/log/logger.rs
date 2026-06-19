@@ -53,7 +53,7 @@ impl Logger {
             message: String::new(),
             start: Instant::now(),
             is_last: true,
-            parent_loggger: self.clone(),
+            parent_logger: self.clone(),
             finished: true,
         }
     }

@@ -35,6 +35,12 @@ pub trait Generator: Send + Sync {
             .join(self.target_file_name(theme))
     }
 
+    /// Returns path to the static active link if app uses it,
+    /// By default: None (means that app uses dynamic theme files like btop etc.)
+    fn active_link_path(&self, _paths: &IrisPaths) -> Option<PathBuf> {
+        None
+    }
+
     /// Dynamically forms ID template for Tera
     /// E.g. "tool/yazi", "terminal/alacritty"
     fn template_path(&self) -> String {
@@ -107,27 +113,24 @@ pub trait Generator: Send + Sync {
     /// Clear generator cached files
     fn clear(&self, paths: &IrisPaths) -> Result<()> {
         let name: &str = self.name();
-        let link_path: PathBuf = self.link_path(paths, "");
 
-        if link_path.exists() || link_path.is_symlink() {
-            fs::remove_file(&link_path).with_context(|| {
-                format!(
-                    "Failed to remove active theme symlink for {}: {}",
-                    name.bold(),
-                    link_path.display()
-                )
-            })?;
+        if let Some(active_link) = self.active_link_path(paths) {
+            if active_link.exists() || active_link.is_symlink() {
+                fs::remove_file(&active_link).with_context(|| {
+                    format!(
+                        "Failed to remove active link for {}: {}",
+                        name.bold(),
+                        active_link.display()
+                    )
+                })?;
+            }
         }
 
-        let bin_file: PathBuf = self.cache_path(paths, "");
-        if bin_file.exists() {
-            fs::remove_file(&bin_file).with_context(|| {
-                format!(
-                    "Failed to remove cache file for {}: {}",
-                    name.bold(),
-                    bin_file.display()
-                )
-            })?;
+        let app_config_dir = self.resolve_config_directory(paths);
+        if app_config_dir.exists() && app_config_dir.is_dir() {
+            if app_config_dir.to_string_lossy().contains("themes") {
+                let _ = fs::remove_dir_all(&app_config_dir);
+            }
         }
 
         let gen_cache_dir: PathBuf = paths.generators.join(name);
@@ -146,13 +149,20 @@ pub trait Generator: Send + Sync {
 
     /// Removes cached files for generator of a certain theme
     fn remove_theme(&self, paths: &IrisPaths, theme_name: &str) -> Result<()> {
+        let name: &str = self.name();
         let theme_name_lower: String = theme_name.to_lowercase();
         let theme_file: PathBuf = self.link_path(paths, &theme_name_lower);
 
         if theme_file.exists() || theme_file.is_symlink() {
-            fs::remove_file(&theme_file).with_context(|| {
-                format!("Failed to remove theme link/file: {}", theme_file.display())
-            })?;
+            if theme_file != self.resolve_config_directory(paths) {
+                fs::remove_file(&theme_file).with_context(|| {
+                    format!(
+                        "Failed to remove theme file for {}: {}",
+                        name.bold(),
+                        theme_file.display()
+                    )
+                })?;
+            }
         }
 
         let cache_file: PathBuf = self.cache_path(paths, &theme_name_lower);

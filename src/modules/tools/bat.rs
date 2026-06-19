@@ -210,14 +210,14 @@ impl Generator for BatGenerator {
     fn remove_theme(&self, paths: &IrisPaths, theme_name: &str) -> Result<()> {
         let theme_lower: String = theme_name.to_lowercase();
 
+        let link_file: PathBuf = self.theme_path(paths, &theme_lower);
+        if link_file.exists() || link_file.is_symlink() {
+            fs::remove_file(link_file)?;
+        }
+
         let cache_file: PathBuf = self.cache_path(paths, &theme_lower);
         if cache_file.exists() {
             fs::remove_file(cache_file)?;
-        }
-
-        let link_file: PathBuf = self.theme_path(paths, &theme_lower);
-        if link_file.exists() {
-            fs::remove_file(link_file)?;
         }
 
         self.rebuild_bat_cache(&mut Logger::silent().as_task())?;
@@ -283,7 +283,7 @@ impl BatGenerator {
     fn ensure_config(&self, theme: &Theme, paths: &IrisPaths) -> anyhow::Result<()> {
         let config_content: String = format!(
             "--theme=\"{name}\"\n--style=\"numbers,changes\"\n--color=\"always\"\n",
-            name = theme.name
+            name = theme.name.to_lowercase()
         );
 
         let generator_dir: PathBuf = paths.generators.join(self.name());
@@ -403,7 +403,7 @@ mod tests {
 
         temp_env::with_var("BAT_CACHE_PATH", Some(&test_bat_cache), || {
             let expected_file_name: String = generator.target_file_name(&theme.name);
-            let expected_theme_name: String = theme.name.clone();
+            let expected_theme_name: String = theme.name.to_lowercase();
 
             let mut task = ctx.log.step("Test", false).muted();
             let result = generator.apply(&theme, &ctx.paths, &ctx.templater, &mut task);

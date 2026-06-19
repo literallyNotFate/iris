@@ -12,7 +12,7 @@ pub struct Activity {
     pub message: String,
     pub start: Instant,
     pub is_last: bool,
-    pub parent_loggger: Logger,
+    pub parent_logger: Logger,
     pub finished: bool,
 }
 
@@ -48,7 +48,7 @@ impl Activity {
             message,
             start: Instant::now(),
             is_last,
-            parent_loggger: parent.clone(),
+            parent_logger: parent.clone(),
             log: Logger {
                 gutter: child_gutter,
                 verbosity: parent.verbosity,
@@ -63,7 +63,7 @@ impl Activity {
             message: self.message.clone(),
             start: self.start,
             is_last: self.is_last,
-            parent_loggger: self.parent_loggger.clone(),
+            parent_logger: self.parent_logger.clone(),
             log: Logger {
                 verbosity: LoggingVerbosity::Silent,
                 gutter: String::new(),
@@ -91,24 +91,24 @@ impl Activity {
 
         let duration = utils::format_duration(self.start.elapsed()).dimmed();
 
-        match self.parent_loggger.verbosity {
+        match self.parent_logger.verbosity {
             LoggingVerbosity::Detailed => {
                 println!(
                     "{}{} {} {}",
-                    self.parent_loggger.gutter,
+                    self.parent_logger.gutter,
                     "✓".green(),
                     final_msg.green().bold(),
                     duration
                 );
 
                 if !self.is_last {
-                    println!("{}{}", self.parent_loggger.gutter, "│".dimmed());
-                } else if self.parent_loggger.gutter.is_empty() {
+                    println!("{}{}", self.parent_logger.gutter, "│".dimmed());
+                } else if self.parent_logger.gutter.is_empty() {
                     println!();
                 }
             }
             LoggingVerbosity::Minimal => {
-                if self.parent_loggger.gutter.is_empty() {
+                if self.parent_logger.gutter.is_empty() {
                     println!(
                         "{} {} {}",
                         "✓".green().bold(),
@@ -145,8 +145,8 @@ impl Drop for Activity {
     /// Ensures that if a activity is dropped (e.g., due to a panic or error),
     /// it still prints an "incomplete" status to maintain log integrity
     fn drop(&mut self) {
-        if !self.finished && self.parent_loggger.verbosity == LoggingVerbosity::Detailed {
-            println!("{}{}", self.parent_loggger.gutter, self.message.dimmed());
+        if !self.finished && self.parent_logger.verbosity == LoggingVerbosity::Detailed {
+            println!("{}{}", self.parent_logger.gutter, self.message.dimmed());
         }
     }
 }

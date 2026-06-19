@@ -34,6 +34,10 @@ impl Generator for YaziGenerator {
             .join(self.target_file_name(""))
     }
 
+    fn active_link_path(&self, paths: &IrisPaths) -> Option<PathBuf> {
+        Some(self.resolve_config_directory(paths).join("theme.toml"))
+    }
+
     fn apply(
         &self,
         theme: &Theme,
@@ -218,15 +222,6 @@ impl YaziGenerator {
     }
 
     fn ensure_symlink(&self, target: &Path, link: &Path) -> Result<()> {
-        if link.exists() || link.is_symlink() {
-            fs::remove_file(link).with_context(|| {
-                format!(
-                    "Failed to remove `yazi` old symlink/file: {}",
-                    link.display()
-                )
-            })?;
-        }
-
         if let Some(parent) = link.parent() {
             fs::create_dir_all(parent).with_context(|| {
                 format!(
@@ -236,17 +231,31 @@ impl YaziGenerator {
             })?;
         }
 
+        let ts = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_micros())
+            .unwrap_or(0);
+        let tmp_link = link.with_extension(format!("tmp-{}", ts));
+
         #[cfg(unix)]
         {
             use std::os::unix::fs::symlink;
-            symlink(target, link).with_context(|| {
+            symlink(target, &tmp_link).with_context(|| {
                 format!(
-                    "Failed to create `yazi` symlink: {} -> {}",
+                    "Failed to create temporary `yazi` symlink: {} -> {}",
                     target.display(),
-                    link.display()
+                    tmp_link.display()
                 )
             })?;
         }
+
+        fs::rename(&tmp_link, link).with_context(|| {
+            let _ = fs::remove_file(&tmp_link);
+            format!(
+                "Failed to atomically replace `yazi` symlink at: {}",
+                link.display()
+            )
+        })?;
 
         Ok(())
     }
