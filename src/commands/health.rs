@@ -109,7 +109,7 @@ pub fn exec(fix: bool, ctx: &mut IrisContext) -> anyhow::Result<()> {
             }
         } else if verbosity == LoggingVerbosity::Minimal && issues_found {
             println!(
-                "{}  Found {} issue(s)! Operational: {}/{}",
+                "{}  Found {} issue(s), operational: {}/{}",
                 "󰀦".yellow().bold(),
                 errors.len().to_string().red().bold(),
                 healthy.len(),

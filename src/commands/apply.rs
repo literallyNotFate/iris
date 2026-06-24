@@ -67,20 +67,17 @@ fn ensure_generator_health(
     let status = g.health_check(&ctx.paths, &theme.name);
 
     if !status.is_ok() {
-        ctx.log.action(
+        let mut fix_step = ctx.log.step(
             &format!(
-                "Repaired {} ({})",
+                "Fixing `{}` problem: {}",
                 g.name().cyan(),
                 status.message().dimmed()
             ),
-            || {
-                let t = ctx.log.step(&format!("Fixing {}", g.name()), is_last);
-                let result = g.fix(&status, theme, &ctx.paths, &ctx.templater, &mut t.muted());
+            is_last,
+        );
 
-                t.done();
-                result
-            },
-        )?;
+        let _ = g.fix(&status, theme, &ctx.paths, &ctx.templater, &mut fix_step)?;
+        fix_step.done_with(&format!("Repaired `{}` successfully", g.name().cyan()));
     }
 
     Ok(())
@@ -89,7 +86,7 @@ fn ensure_generator_health(
 /// Helper function to render header for apply
 fn render_header(theme: &str, original: Option<&str>, is_fallback: bool) {
     println!(
-        "\n{}  {} {}",
+        "{}  {} {}",
         "󰷉".yellow().bold(),
         "Standalone apply:".bold(),
         theme.magenta()

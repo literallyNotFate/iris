@@ -80,8 +80,6 @@ fn handle_select(ctx: &mut IrisContext) -> anyhow::Result<()> {
     };
 
     ctx.log.action(success_msg, || ctx.save())?;
-    println!();
-
     Ok(())
 }
 
@@ -108,13 +106,13 @@ fn handle_status_change(name: String, enable: bool, ctx: &mut IrisContext) -> an
 
         let success_msg: &str = if !list.is_empty() {
             &format!(
-                "{} generator: {}\n  Active modules: {}\n",
+                "{} generator: {}\n  Active modules: {}",
                 verb,
                 name.cyan(),
                 list
             )
         } else {
-            &format!("{} generator: {}\n", verb, name.cyan())
+            &format!("{} generator: {}", verb, name.cyan())
         };
 
         ctx.log.action(success_msg, || ctx.save())?;
@@ -165,7 +163,7 @@ pub fn handle_auto(ctx: &mut IrisContext) -> anyhow::Result<()> {
         println!();
 
         ctx.log
-            .action("Saved configuration to state.json\n", || ctx.save())?;
+            .action("Saved configuration to state.json", || ctx.save())?;
     } else {
         println!("{}", "All discovered apps are already active.".dimmed());
     }

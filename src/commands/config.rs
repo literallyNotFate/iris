@@ -119,12 +119,15 @@ pub fn exec(action: Option<ConfigAction>, ctx: &mut IrisContext) -> anyhow::Resu
                 ctx.state.fallback_theme = theme.to_lowercase();
                 changed = true;
                 if ctx.log.verbosity != LoggingVerbosity::Silent {
-                    println!("{}  Fallback theme updated successfully!", "✓".green());
+                    println!(
+                        "\n{}",
+                        "✓ Fallback theme updated successfully!".green().bold()
+                    );
                 }
             } else if ctx.log.verbosity != LoggingVerbosity::Silent {
                 println!(
-                    "{}  Fallback theme is already set to {}",
-                    "✓".green(),
+                    "\n{} {}",
+                    "✓ Fallback theme is already set to".green().bold(),
                     theme.magenta().bold()
                 );
             }

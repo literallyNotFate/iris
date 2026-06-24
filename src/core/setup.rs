@@ -17,14 +17,14 @@ pub struct IrisSetup;
 
 impl IrisSetup {
     pub fn run(ctx: &mut IrisContext) -> Result<()> {
-        if !ctx.log.is_detailed() {
+        if ctx.log.is_detailed() {
             println!();
             println!("{}  {}", "󰒓".purple().bold(), "Iris initialization".bold());
             println!();
         }
 
         ctx.log
-            .action("Infrastructure prepared\n", || ctx.paths.ensure_dirs())?;
+            .action("Infrastructure prepared", || ctx.paths.ensure_dirs())?;
         println!();
 
         {
@@ -42,6 +42,10 @@ impl IrisSetup {
             Self::setup_zsh_hook(ctx, &task)?;
             task.done_with("`zsh` synchronization hook installed");
         }
+
+        ctx.log
+            .success("Iris is now fully configured and ready to go!");
+        println!();
 
         Ok(())
     }

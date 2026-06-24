@@ -1,4 +1,8 @@
-use crate::{cli::Commands, core::IrisContext, models::Theme};
+use crate::{
+    cli::Commands,
+    core::{IrisContext, IrisSetup},
+    models::Theme,
+};
 
 pub mod apply;
 pub mod cache;
@@ -7,17 +11,16 @@ pub mod generators;
 pub mod health;
 pub mod preview;
 pub mod select;
-pub mod setup;
 pub mod status;
 pub mod switch;
 pub mod sync;
 pub mod watch;
 
-/// Main entry point for command execution
+/// Main entry point for command execution.
 /// Routes CLI commands to their respective logic modules
 pub fn handle(command: Commands, ctx: &mut IrisContext) -> anyhow::Result<()> {
     match command {
-        Commands::Init => setup::exec(ctx)?,
+        Commands::Init => IrisSetup::run(ctx)?,
         Commands::Switch(args) => switch::exec(args, ctx)?,
         Commands::Sync { force } => sync::exec(force, ctx)?,
         Commands::Apply(args) => apply::exec(args, ctx)?,

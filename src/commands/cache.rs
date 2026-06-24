@@ -58,8 +58,8 @@ fn handle_clear(all: bool, gen_name: Option<String>, ctx: &IrisContext) -> Resul
         .default(false)
         .interact()?
     {
-        println!();
         ctx.log.info("Canceled.");
+        println!();
         return Ok(());
     }
 
@@ -94,8 +94,12 @@ fn handle_remove(theme: &str, ctx: &IrisContext) -> Result<()> {
         anyhow::bail!("Cannot remove fallback theme `{}`.", theme.magenta().bold());
     }
 
+    for generator in ctx.registry.all() {
+        let _ = generator.remove_theme(&ctx.paths, &theme_lower);
+    }
+
     if !path.exists() {
-        anyhow::bail!("Theme not found in cache");
+        anyhow::bail!("Theme not found in cache.");
     }
 
     println!();
@@ -103,10 +107,6 @@ fn handle_remove(theme: &str, ctx: &IrisContext) -> Result<()> {
         .action(&format!("Removed `{}` from cache", theme.yellow()), || {
             fs::remove_file(&path).context("Failed to delete theme file")
         })?;
-
-    for generator in ctx.registry.all() {
-        let _ = generator.remove_theme(&ctx.paths, &theme_lower);
-    }
 
     println!();
     Ok(())
