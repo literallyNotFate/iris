@@ -25,15 +25,12 @@ impl Generator for GhosttyGenerator {
         GeneratorType::Terminal
     }
 
-    fn target_file_name(&self, _theme: &str) -> String {
-        "current_theme.conf".into()
-    }
-
-    fn cache_path(&self, paths: &IrisPaths, _theme: &str) -> PathBuf {
-        paths
-            .generators
-            .join(self.name())
-            .join(self.target_file_name(""))
+    fn target_file_name(&self, theme: &str) -> String {
+        if theme.is_empty() {
+            "current_theme.conf".into()
+        } else {
+            format!("{}.conf", theme.to_lowercase())
+        }
     }
 
     fn link_path(&self, paths: &IrisPaths, _theme: &str) -> PathBuf {
@@ -104,7 +101,13 @@ impl Generator for GhosttyGenerator {
         let ghostty_dir: PathBuf = self.resolve_config_directory(paths);
         let config_path: PathBuf = ghostty_dir.join("config");
         let link_path: PathBuf = self.link_path(paths, "");
-        let expected_cache: PathBuf = self.cache_path(paths, "");
+
+        let expected_cache: PathBuf = self.cache_path(paths, theme);
+        let abs_expected_cache: PathBuf = if expected_cache.exists() {
+            fs::canonicalize(&expected_cache).unwrap_or(expected_cache)
+        } else {
+            expected_cache
+        };
 
         let config_status = HealthStatus::check_file(&config_path, "`ghostty` config file");
         if config_status.is_error() {
@@ -115,7 +118,7 @@ impl Generator for GhosttyGenerator {
         }
 
         let content: String = fs::read_to_string(&config_path).unwrap_or_default();
-        let import_line: String = format!("config-file = {}", self.target_file_name(theme));
+        let import_line: String = format!("config-file = {}", self.target_file_name(""));
         if !content.contains(&import_line) {
             return HealthStatus::Warning(format!(
                 "Theme is generated but not imported in {}",
@@ -127,13 +130,13 @@ impl Generator for GhosttyGenerator {
         if symlink_status.is_error() {
             return HealthStatus::error(
                 "current_theme.conf missing or invalid",
-                Some("run `iris sync` or `iris health --fix` to recreate the link"),
+                Some("Run `iris sync` or `iris health --fix` to recreate the link"),
             );
         }
 
-        #[cfg(unix)]
         if let Ok(target) = fs::read_link(&link_path) {
-            if target != expected_cache {
+            let abs_target: PathBuf = fs::canonicalize(&target).unwrap_or(target);
+            if abs_target != abs_expected_cache {
                 return HealthStatus::Warning("Link points to a different cache location".into());
             }
         }
@@ -177,7 +180,7 @@ impl Generator for GhosttyGenerator {
         }
 
         if status.contains("missing or invalid") || status.contains("different cache") {
-            let link: PathBuf = self.link_path(paths, &theme.name.to_lowercase());
+            let link: PathBuf = self.link_path(paths, "");
             let backup: PathBuf = link.with_extension("bak");
             let cache: PathBuf = self.cache_path(paths, &theme.name.to_lowercase());
 
@@ -327,7 +330,7 @@ mod tests {
         let generator = GhosttyGenerator;
         assert_eq!(generator.name(), "ghostty");
         assert_eq!(generator.generator_type(), GeneratorType::Terminal);
-        assert_eq!(generator.target_file_name("any"), "current_theme.conf");
+        assert_eq!(generator.target_file_name("melange"), "melange.conf");
     }
 
     #[test]
@@ -355,7 +358,7 @@ mod tests {
         let config_path = generator
             .resolve_config_directory(&ctx.paths)
             .join("config");
-        let import_line = format!("config-file = {}", generator.target_file_name(&theme.name));
+        let import_line = format!("config-file = {}", generator.target_file_name(""));
         fs::write(&config_path, import_line).unwrap();
 
         let status = generator.health_check(&ctx.paths, &theme.name);
@@ -409,11 +412,7 @@ mod tests {
         let result = generator.apply(&theme, &ctx.paths, &ctx.templater, &mut task);
         assert!(result.is_ok(), "Failed to apply: {:?}", result.err());
 
-        let cache_file = ctx
-            .paths
-            .generators
-            .join("ghostty")
-            .join("current_theme.conf");
+        let cache_file = ctx.paths.generators.join("ghostty").join("test-theme.conf");
         assert!(cache_file.exists());
 
         let content = fs::read_to_string(cache_file).unwrap();
@@ -460,7 +459,7 @@ mod tests {
         let config_path = ghostty_dir.join("config");
         fs::create_dir_all(&ghostty_dir).unwrap();
 
-        let import_line = format!("config-file = {}", generator.target_file_name(&theme.name));
+        let import_line = format!("config-file = {}", generator.target_file_name(""));
         fs::write(&config_path, import_line).unwrap();
 
         generator

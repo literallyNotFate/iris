@@ -28,7 +28,7 @@ pub trait Generator: Send + Sync {
             .join(self.target_file_name(theme))
     }
 
-    /// Path, where app expects to apply config/theme
+    /// Path, where app expects to apply config/theme.
     /// By default: ~/.config/[name]/[target_file]
     fn link_path(&self, paths: &IrisPaths, theme: &str) -> PathBuf {
         self.resolve_config_directory(paths)
@@ -41,13 +41,13 @@ pub trait Generator: Send + Sync {
         None
     }
 
-    /// Dynamically forms ID template for Tera
+    /// Dynamically forms ID template for Tera.
     /// E.g. "tool/yazi", "terminal/alacritty"
     fn template_path(&self) -> String {
         format!("{}/{}", self.generator_type().label(), self.name())
     }
 
-    /// Path to the theme file (either in cache or link).
+    /// Path to the theme file (either in cache or link)
     fn theme_path(&self, paths: &IrisPaths, theme: &str) -> PathBuf {
         self.link_path(paths, theme)
     }
@@ -90,7 +90,7 @@ pub trait Generator: Send + Sync {
         None
     }
 
-    /// "Health" generator check
+    /// "Health" generator check.
     /// Implementation by default checks if binary is installed
     fn health_check(&self, _paths: &IrisPaths, _theme: &str) -> HealthStatus {
         HealthStatus::Ok
@@ -126,9 +126,14 @@ pub trait Generator: Send + Sync {
             }
         }
 
+        let static_link: PathBuf = self.link_path(paths, "");
+        if static_link.is_symlink() || static_link.exists() {
+            let _ = fs::remove_file(&static_link);
+        }
+
         let app_config_dir = self.resolve_config_directory(paths);
         if app_config_dir.exists() && app_config_dir.is_dir() {
-            if app_config_dir.to_string_lossy().contains("themes") {
+            if app_config_dir.file_name().map_or(false, |n| n == "themes") {
                 let _ = fs::remove_dir_all(&app_config_dir);
             }
         }
@@ -151,25 +156,53 @@ pub trait Generator: Send + Sync {
     fn remove_theme(&self, paths: &IrisPaths, theme_name: &str) -> Result<()> {
         let name: &str = self.name();
         let theme_name_lower: String = theme_name.to_lowercase();
-        let theme_file: PathBuf = self.link_path(paths, &theme_name_lower);
 
-        if theme_file.exists() || theme_file.is_symlink() {
-            if theme_file != self.resolve_config_directory(paths) {
-                fs::remove_file(&theme_file).with_context(|| {
-                    format!(
-                        "Failed to remove theme file for {}: {}",
-                        name.bold(),
-                        theme_file.display()
-                    )
-                })?;
+        let cache_file: PathBuf = self.cache_path(paths, &theme_name_lower);
+        let abs_cache_file = if cache_file.exists() {
+            fs::canonicalize(&cache_file).unwrap_or(cache_file.clone())
+        } else {
+            cache_file.clone()
+        };
+
+        let static_theme_file: PathBuf = self.link_path(paths, "");
+        let custom_theme_file: PathBuf = self.link_path(paths, &theme_name_lower);
+
+        let mut targets = vec![static_theme_file, custom_theme_file];
+        targets.dedup();
+
+        for theme_file in targets {
+            if theme_file.exists() || theme_file.is_symlink() {
+                if theme_file.is_symlink() {
+                    if let Ok(resolved_target) = fs::canonicalize(&theme_file) {
+                        if resolved_target == abs_cache_file {
+                            fs::remove_file(&theme_file).with_context(|| {
+                                format!(
+                                    "Failed to remove active symlink for {}: {}",
+                                    name.bold(),
+                                    theme_file.display()
+                                )
+                            })?;
+                        }
+                    }
+                } else {
+                    if theme_file != self.resolve_config_directory(paths) {
+                        fs::remove_file(&theme_file).with_context(|| {
+                            format!(
+                                "Failed to remove theme file for {}: {}",
+                                name.bold(),
+                                theme_file.display()
+                            )
+                        })?;
+                    }
+                }
             }
         }
 
-        let cache_file: PathBuf = self.cache_path(paths, &theme_name_lower);
         if cache_file.exists() {
             fs::remove_file(&cache_file).with_context(|| {
                 format!(
-                    "Failed to remove theme cache file: {}",
+                    "Failed to remove {} cache file: {}",
+                    name.bold(),
                     cache_file.display()
                 )
             })?;

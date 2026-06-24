@@ -25,15 +25,12 @@ impl Generator for AlacrittyGenerator {
         GeneratorType::Terminal
     }
 
-    fn target_file_name(&self, _theme: &str) -> String {
-        "current_theme.toml".into()
-    }
-
-    fn cache_path(&self, paths: &IrisPaths, _theme: &str) -> PathBuf {
-        paths
-            .generators
-            .join(self.name())
-            .join(self.target_file_name(""))
+    fn target_file_name(&self, theme: &str) -> String {
+        if theme.is_empty() {
+            "current_theme.toml".into()
+        } else {
+            format!("{}.toml", theme.to_lowercase())
+        }
     }
 
     fn link_path(&self, paths: &IrisPaths, _theme: &str) -> PathBuf {
@@ -95,7 +92,7 @@ impl Generator for AlacrittyGenerator {
         c
     }
 
-    fn health_check(&self, paths: &IrisPaths, _theme: &str) -> HealthStatus {
+    fn health_check(&self, paths: &IrisPaths, theme: &str) -> HealthStatus {
         if !self.is_installed() {
             return HealthStatus::Warning("`alacritty` binary not found".into());
         }
@@ -103,19 +100,25 @@ impl Generator for AlacrittyGenerator {
         let alacritty_dir: PathBuf = self.resolve_config_directory(paths);
         let main_config: PathBuf = alacritty_dir.join("alacritty.toml");
         let link_path: PathBuf = self.link_path(paths, "");
-        let expected_cache: PathBuf = self.cache_path(paths, "");
-        let symlink_status = HealthStatus::check_symlink(&link_path, "Theme link");
+        let expected_cache: PathBuf = self.cache_path(paths, theme);
 
+        let abs_expected_cache: PathBuf = if expected_cache.exists() {
+            fs::canonicalize(&expected_cache).unwrap_or(expected_cache)
+        } else {
+            expected_cache
+        };
+
+        let symlink_status = HealthStatus::check_symlink(&link_path, "Theme link");
         if symlink_status.is_error() {
             return HealthStatus::error(
                 "Theme link missing in `alacritty` config directory",
-                Some("run `iris sync` or `iris health --fix` to regenerate"),
+                Some("Run `iris sync` or `iris health --fix` to regenerate"),
             );
         }
 
-        #[cfg(unix)]
         if let Ok(target) = fs::read_link(&link_path) {
-            if target != expected_cache {
+            let abs_target: PathBuf = fs::canonicalize(&target).unwrap_or(target);
+            if abs_target != abs_expected_cache {
                 return HealthStatus::Warning("Link points to an unexpected location".into());
             }
         }
@@ -321,7 +324,7 @@ mod tests {
         let generator = AlacrittyGenerator;
         assert_eq!(generator.name(), "alacritty");
         assert_eq!(generator.generator_type(), GeneratorType::Terminal);
-        assert_eq!(generator.target_file_name("nord"), "current_theme.toml");
+        assert_eq!(generator.target_file_name("nord"), "nord.toml");
     }
 
     #[test]
@@ -435,7 +438,7 @@ mod tests {
             .paths
             .generators
             .join("alacritty")
-            .join("current_theme.toml");
+            .join("test-theme.toml");
         assert!(cache_file.exists(), "Theme missing in Iris cache");
 
         let alacritty_dir = generator.resolve_config_directory(&ctx.paths);

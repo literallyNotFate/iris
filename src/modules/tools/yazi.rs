@@ -25,8 +25,12 @@ impl Generator for YaziGenerator {
         GeneratorType::Tool
     }
 
-    fn target_file_name(&self, _theme: &str) -> String {
-        "theme.toml".into()
+    fn target_file_name(&self, theme: &str) -> String {
+        if theme.is_empty() {
+            "theme.toml".into()
+        } else {
+            format!("{}.toml", theme.to_lowercase())
+        }
     }
 
     fn link_path(&self, paths: &IrisPaths, _theme: &str) -> PathBuf {
@@ -104,19 +108,25 @@ impl Generator for YaziGenerator {
         c
     }
 
-    fn health_check(&self, paths: &IrisPaths, _theme: &str) -> HealthStatus {
+    fn health_check(&self, paths: &IrisPaths, theme: &str) -> HealthStatus {
         if !self.is_installed() {
             return HealthStatus::Warning("`yazi` binary not found".into());
         }
 
         let link_path: PathBuf = self.link_path(paths, "");
-        let expected_cache: PathBuf = self.cache_path(paths, "");
-        let cache_status = HealthStatus::check_file(&expected_cache, "`yazi` theme cache file");
 
+        let expected_cache: PathBuf = self.cache_path(paths, theme);
+        let abs_expected_cache: PathBuf = if expected_cache.exists() {
+            fs::canonicalize(&expected_cache).unwrap_or(expected_cache)
+        } else {
+            expected_cache
+        };
+
+        let cache_status = HealthStatus::check_file(&abs_expected_cache, "`yazi` theme cache file");
         if cache_status.is_error() {
             return HealthStatus::error(
                 "`yazi` theme cache file is missing",
-                Some("run `iris sync` or `iris health --fix` to regenerate the cache"),
+                Some("Run `iris sync` or `iris health --fix` to regenerate the cache"),
             );
         }
 
@@ -125,16 +135,17 @@ impl Generator for YaziGenerator {
         if symlink_status.is_error() {
             return HealthStatus::error(
                 "theme.toml link missing or invalid in yazi config",
-                Some("run `iris sync` or `iris health --fix` to create the symlink"),
+                Some("Run `iris sync` or `iris health --fix` to create the symlink"),
             );
         }
 
         #[cfg(unix)]
         if let Ok(target) = fs::read_link(&link_path) {
-            if target != expected_cache {
+            let abs_target: PathBuf = fs::canonicalize(&target).unwrap_or(target);
+            if abs_target != abs_expected_cache {
                 return HealthStatus::Warning(format!(
                     "`yazi` theme link points to an unexpected location: {:?}",
-                    target
+                    abs_target
                 ));
             }
         }
@@ -166,7 +177,7 @@ impl Generator for YaziGenerator {
         }
 
         if status.contains("link missing") || status.contains("unexpected location") {
-            let link: PathBuf = self.link_path(paths, &theme.name.to_lowercase());
+            let link: PathBuf = self.link_path(paths, "");
             let backup: PathBuf = link.with_extension("bak");
             let cache: PathBuf = self.cache_path(paths, &theme.name.to_lowercase());
 
@@ -272,7 +283,7 @@ mod tests {
         let generator = YaziGenerator;
         assert_eq!(generator.name(), "yazi");
         assert_eq!(generator.generator_type(), GeneratorType::Tool);
-        assert_eq!(generator.target_file_name("any"), "theme.toml");
+        assert_eq!(generator.target_file_name("cattpuccin"), "cattpuccin.toml");
     }
 
     #[test]
