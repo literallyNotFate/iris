@@ -9,6 +9,15 @@ use colored::Colorize;
 /// Handle application apply command
 pub fn exec(args: ApplyArgs, ctx: &mut IrisContext) -> anyhow::Result<()> {
     let (theme_name, was_fallback) = ctx.resolve_theme(args.theme.clone(), args.fallback)?;
+
+    let generator = ctx.resolve_generator(&args.generator)?;
+    if !generator.is_installed() {
+        anyhow::bail!(
+            "Cannot apply theme: application `{}` is not installed in your system.",
+            generator.name().cyan().bold()
+        );
+    }
+
     if ctx.log.is_detailed() {
         render_header(&theme_name, args.theme.as_deref(), was_fallback);
     }
@@ -17,7 +26,6 @@ pub fn exec(args: ApplyArgs, ctx: &mut IrisContext) -> anyhow::Result<()> {
     let orchestrator = ThemeOrchestrator::new(&ctx.paths, &ctx.log);
     let theme_obj: Theme = orchestrator.load_theme(&theme_name, false, true, &ctx.state)?;
 
-    let generator = ctx.resolve_generator(&args.generator)?;
     ensure_generator_health(generator, &theme_obj, ctx, false)?;
 
     let gen_color = generator.generator_type().color();
@@ -86,7 +94,7 @@ fn ensure_generator_health(
 /// Helper function to render header for apply
 fn render_header(theme: &str, original: Option<&str>, is_fallback: bool) {
     println!(
-        "{}  {} {}",
+        "\n{}  {} {}",
         "󰷉".yellow().bold(),
         "Standalone apply:".bold(),
         theme.magenta()

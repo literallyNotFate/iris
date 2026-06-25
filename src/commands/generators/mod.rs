@@ -28,23 +28,30 @@ pub fn exec(action: GenAction, ctx: &mut IrisContext) -> anyhow::Result<()> {
 /// Select generators using dialoguer
 fn handle_select(ctx: &mut IrisContext) -> anyhow::Result<()> {
     let all_generators = ctx.registry.all();
+    let mut selectable_generators = Vec::new();
+    let mut missing_generators = Vec::new();
+
+    for g in &all_generators {
+        if g.is_installed() {
+            selectable_generators.push(g);
+        } else {
+            missing_generators.push(g);
+        }
+    }
+
     let mut items = Vec::new();
     let mut defaults = Vec::new();
 
-    for g in &all_generators {
+    for g in &selectable_generators {
         let name = g.name();
         let g_type = g.generator_type();
 
-        let display = if g.is_installed() {
-            format!(
-                "{:<14} {} ({})",
-                name,
-                g_type.icon().color(g_type.color()),
-                g_type.label()
-            )
-        } else {
-            format!("{} {:<14} (not found)", "󰂭".bright_red(), name)
-        };
+        let display = format!(
+            "{:<14} {} ({})",
+            name,
+            g_type.icon().color(g_type.color()),
+            g_type.label()
+        );
 
         items.push(display);
         defaults.push(ctx.state.is_enabled(name));
@@ -52,21 +59,33 @@ fn handle_select(ctx: &mut IrisContext) -> anyhow::Result<()> {
 
     ui::render_header("Generator Management", "󰒓");
 
-    let chosen: Vec<usize> = MultiSelect::with_theme(&utils::colors::select_theme())
-        .with_prompt(format!(
-            "Toggle modules ({}:toggle / {}:confirm)\n",
-            "space".yellow(),
-            "enter".cyan()
-        ))
-        .items(&items)
-        .defaults(&defaults)
-        .report(false)
-        .interact()?;
+    let chosen: Vec<usize> = if items.is_empty() {
+        ctx.log
+            .warn("No supported terminal emulators or utilities found in your system.");
+        Vec::new()
+    } else {
+        MultiSelect::with_theme(&utils::colors::select_theme())
+            .with_prompt(format!(
+                "Toggle modules ({}:toggle / {}:confirm)\n",
+                "space".yellow(),
+                "enter".cyan()
+            ))
+            .items(&items)
+            .defaults(&defaults)
+            .report(false)
+            .interact()?
+    };
 
-    let selected_names: BTreeSet<String> = chosen
+    let mut selected_names: BTreeSet<String> = chosen
         .iter()
-        .map(|&i| all_generators[i].name().to_string())
+        .map(|&i| selectable_generators[i].name().to_string())
         .collect();
+
+    for g in &missing_generators {
+        if ctx.state.is_enabled(g.name()) {
+            selected_names.insert(g.name().to_string());
+        }
+    }
 
     ctx.state.replace_enabled(selected_names.clone());
 
@@ -80,6 +99,20 @@ fn handle_select(ctx: &mut IrisContext) -> anyhow::Result<()> {
     };
 
     ctx.log.action(success_msg, || ctx.save())?;
+
+    if !missing_generators.is_empty() {
+        println!("{}", "Unavailable modules (not installed):".dimmed());
+        for g in missing_generators {
+            println!(
+                "  {}  {:<14} {}",
+                "󰂭".dimmed(),
+                g.name().dimmed(),
+                "(not found)".red().dimmed()
+            );
+        }
+        println!();
+    }
+
     Ok(())
 }
 
@@ -133,25 +166,25 @@ fn handle_status_change(name: String, enable: bool, ctx: &mut IrisContext) -> an
 
 /// Autodiscovering generators
 pub fn handle_auto(ctx: &mut IrisContext) -> anyhow::Result<()> {
-    use colored::*;
     ui::render_header("Autodiscovering generators...", "󰩊");
 
     let mut added: i32 = 0;
-    let installed = ctx.registry.installed();
+    let all_generators = ctx.registry.all();
 
     ctx.log
         .info("Scanning system for supported applications...");
 
-    for g in &installed {
-        if !ctx.state.is_enabled(g.name()) {
+    for g in &all_generators {
+        if g.is_installed() && !ctx.state.is_enabled(g.name()) {
             ctx.state.enable_generator(g.name());
+            println!("    Detected {}, enabling...", g.name().green().bold());
             added += 1;
         }
     }
 
     if added > 0 {
         println!(
-            "{}  {} {} {}",
+            "{} {} {} {}",
             "└──".dimmed(),
             "Added".bold(),
             format!("{} new generators to configuration", added)
@@ -161,11 +194,10 @@ pub fn handle_auto(ctx: &mut IrisContext) -> anyhow::Result<()> {
         );
 
         println!();
-
         ctx.log
             .action("Saved configuration to state.json", || ctx.save())?;
     } else {
-        println!("{}", "All discovered apps are already active.".dimmed());
+        ctx.log.info("All discovered apps are already active.");
     }
 
     println!();

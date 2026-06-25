@@ -38,13 +38,9 @@ pub(super) fn render_full_row(g: &dyn Generator, enabled: bool, installed: bool)
             "active".green().italic(),
             g.name().cyan().bold(),
         ),
-        (true, false) => (
-            "󰀦 ".yellow(),
-            "broken".yellow(),
-            g.name().yellow().strikethrough(),
-        ),
+        (true, false) => ("󰀦 ".yellow(), "broken".yellow(), g.name().yellow()),
         (false, true) => ("󰈈 ".dimmed(), "ready".dimmed(), g.name().normal()),
-        (false, false) => ("󰂭 ".red(), "missing".red(), g.name().normal()),
+        (false, false) => ("󰂭 ".red(), "missing".red().italic(), g.name().red()),
     };
 
     println!(
