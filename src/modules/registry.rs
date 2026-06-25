@@ -192,63 +192,9 @@ impl GeneratorRegistry {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{
-        core::{IrisPaths, Templater},
-        log::Activity,
-        models::HealthStatus,
-    };
+    use crate::utils::tests::MockGenerator;
 
-    // Mock generator and trait implementation
-    struct MockGenerator {
-        name: &'static str,
-        g_type: GeneratorType,
-        installed: bool,
-    }
-
-    impl Generator for MockGenerator {
-        fn name(&self) -> &str {
-            self.name
-        }
-
-        fn generator_type(&self) -> GeneratorType {
-            self.g_type
-        }
-
-        fn target_file_name(&self, theme: &str) -> String {
-            format!("{}.conf", theme)
-        }
-
-        fn is_installed(&self) -> bool {
-            self.installed
-        }
-
-        fn apply(
-            &self,
-            _: &Theme,
-            _: &IrisPaths,
-            _: &Templater,
-            _: &mut Activity,
-        ) -> anyhow::Result<()> {
-            Ok(())
-        }
-
-        fn build_render_context(&self, _: &Theme) -> tera::Context {
-            tera::Context::new()
-        }
-
-        fn fix(
-            &self,
-            _: &HealthStatus,
-            _: &Theme,
-            _: &IrisPaths,
-            _: &Templater,
-            _: &mut Activity,
-        ) -> anyhow::Result<()> {
-            Ok(())
-        }
-    }
-
-    // Helper function to setup generator registry with mocks
+    /// Helper function to setup generator registry with mocks
     fn setup_registry() -> GeneratorRegistry {
         let mut reg = GeneratorRegistry::default();
         reg.generators.push(Arc::new(MockGenerator {

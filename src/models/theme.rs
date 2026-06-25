@@ -468,7 +468,7 @@ impl Palette {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::tests::create_test_context;
+    use crate::utils::tests::mock_context;
 
     #[test]
     fn should_parse_palette_json_without_name() {
@@ -519,7 +519,7 @@ mod tests {
 
     #[test]
     fn should_save_and_load_theme_from_cache() {
-        let (_temp, ctx) = create_test_context();
+        let (_temp, ctx) = mock_context();
         let cache_path = ctx.paths.themes.join("catppuccin.json");
         let original_theme = Theme::mock();
         let save_res = original_theme.save_to_cache(&cache_path);
@@ -544,7 +544,7 @@ mod tests {
 
     #[test]
     fn should_fail_on_non_existent_cache() {
-        let (_temp, ctx) = create_test_context();
+        let (_temp, ctx) = mock_context();
         let ghost_path = ctx.paths.themes.join("ghost_theme.json");
         let result = Theme::load_from_cache(&ghost_path);
 
@@ -559,7 +559,7 @@ mod tests {
 
     #[test]
     fn should_fail_on_broken_json() {
-        let (_temp, ctx) = create_test_context();
+        let (_temp, ctx) = mock_context();
         let cache_path = ctx.paths.themes.join("broken_theme.json");
         if let Some(parent) = cache_path.parent() {
             fs::create_dir_all(parent).unwrap();

@@ -271,229 +271,252 @@ impl FzfGenerator {
     }
 }
 
-/// Unit-tests for fzf generator
+/// Tests for fzf generator
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::tests::create_test_context;
+    use crate::utils::tests::mock_context;
 
-    #[test]
-    fn should_return_fzf_metadata() {
-        let generator = FzfGenerator;
-        assert_eq!(generator.name(), "fzf");
-        assert_eq!(generator.generator_type(), GeneratorType::Tool);
-        assert_eq!(generator.target_file_name("any"), "fzf.sh");
-    }
+    /// Unit-tests for fzf
+    mod unit {
+        use super::*;
 
-    #[test]
-    fn should_build_valid_render_context() {
-        let generator = FzfGenerator;
-        let theme: Theme = Theme::mock();
-        let render_ctx = generator.build_render_context(&theme);
-        let fg = render_ctx.get("fg").unwrap().as_str().unwrap();
-
-        assert!(!fg.starts_with('#'));
-    }
-
-    #[test]
-    fn should_return_health_ok_for_fzf() {
-        let (_, ctx) = create_test_context();
-        let generator = FzfGenerator;
-        let theme: Theme = Theme::mock();
-
-        let mut task = ctx.log.step("Test", true).muted();
-        generator
-            .apply(&theme, &ctx.paths, &ctx.templater, &mut task)
-            .unwrap();
-
-        let zshrc_path = generator.link_path(&ctx.paths, "");
-        let cache_file = generator.cache_path(&ctx.paths, "any");
-
-        fs::create_dir_all(zshrc_path.parent().unwrap()).unwrap();
-        fs::write(&zshrc_path, format!("source \"{}\"", cache_file.display())).unwrap();
-
-        let status = generator.health_check(&ctx.paths, &theme.name);
-        assert!(status.is_ok(), "Expected Ok, got: {status}");
-    }
-
-    #[test]
-    fn should_return_health_error_no_zshrc_for_fzf() {
-        let (_, ctx) = create_test_context();
-        let generator = FzfGenerator;
-        let status = generator.health_check(&ctx.paths, &ctx.state.current_theme);
-
-        assert!(
-            status.is_error(),
-            "Expected Error due to missing .zshrc, got: {status}"
-        );
-        assert!(status.contains(".zshrc not found"));
-    }
-
-    #[test]
-    fn should_return_health_error_not_sourced_for_fzf() {
-        let (tmp_dir, ctx) = create_test_context();
-        let generator = FzfGenerator;
-        let root = tmp_dir.path();
-        let zshrc_path = root.join(".zshrc");
-
-        fs::write(&zshrc_path, "alias ls='ls --color=auto'").unwrap();
-
-        let status = generator.health_check(&ctx.paths, &ctx.state.current_theme);
-
-        assert!(
-            status.is_error(),
-            "Expected Error because fzf.sh is not in .zshrc, got: {status}"
-        );
-        assert!(status.contains("not sourced"));
-    }
-
-    #[test]
-    fn should_return_health_error_cache_file_missing_for_fzf() {
-        let (_tmp_dir, ctx) = create_test_context();
-        let generator = FzfGenerator;
-
-        let zshrc = generator.link_path(&ctx.paths, "");
-        let cache_file = generator.cache_path(&ctx.paths, "");
-
-        fs::create_dir_all(zshrc.parent().unwrap()).unwrap();
-        fs::write(&zshrc, format!("source {:?} # iris:fzf", cache_file)).unwrap();
-
-        if cache_file.exists() {
-            fs::remove_file(&cache_file).unwrap();
+        #[test]
+        fn should_return_fzf_metadata() {
+            let generator = FzfGenerator;
+            assert_eq!(generator.name(), "fzf");
+            assert_eq!(generator.generator_type(), GeneratorType::Tool);
+            assert_eq!(generator.target_file_name("any"), "fzf.sh");
         }
 
-        let status = generator.health_check(&ctx.paths, &ctx.state.current_theme);
+        #[test]
+        fn should_build_valid_render_context() {
+            let generator = FzfGenerator;
+            let theme: Theme = Theme::mock();
+            let render_ctx = generator.build_render_context(&theme);
+            let fg = render_ctx.get("fg").unwrap().as_str().unwrap();
 
-        assert!(status.is_error(), "Expected Error, got: {status}");
-        assert!(status.contains("missing from cache") || status.contains("not found"));
+            assert!(!fg.starts_with('#'));
+        }
+
+        #[test]
+        fn should_apply_fzf_theme_to_cache() {
+            let (_, ctx) = mock_context();
+            let generator = FzfGenerator;
+            let theme: Theme = Theme::mock();
+
+            let mut task = ctx.log.step("Test", false).muted();
+            generator
+                .apply(&theme, &ctx.paths, &ctx.templater, &mut task)
+                .unwrap();
+
+            let cache_file = ctx.paths.bin.join("fzf.sh");
+            assert!(cache_file.exists(), "Cache file fzf.sh was not created");
+
+            let content = fs::read_to_string(cache_file).unwrap();
+            assert!(content.contains("export FZF_DEFAULT_OPTS="));
+            assert!(content.contains(&theme.name));
+        }
+
+        #[test]
+        fn should_clear_generated_files_for_fzf() {
+            let (_, ctx) = mock_context();
+            let generator = FzfGenerator;
+            let theme: Theme = Theme::mock();
+
+            let mut task = ctx.log.step("Test", false).muted();
+            generator
+                .apply(&theme, &ctx.paths, &ctx.templater, &mut task)
+                .unwrap();
+
+            let fzf_script = generator.cache_path(&ctx.paths, "");
+            assert!(fzf_script.exists());
+
+            generator.clear(&ctx.paths).unwrap();
+            assert!(
+                !fzf_script.exists(),
+                "Clear should remove the generated fzf.sh script"
+            );
+        }
+
+        #[test]
+        fn should_remove_theme_for_fzf() {
+            let (_, ctx) = mock_context();
+            let generator = FzfGenerator;
+            let theme: Theme = Theme::mock();
+
+            let mut task = ctx.log.step("Test", false).muted();
+            generator
+                .apply(&theme, &ctx.paths, &ctx.templater, &mut task)
+                .unwrap();
+
+            let fzf_script = generator.cache_path(&ctx.paths, "");
+            assert!(fzf_script.exists());
+
+            generator.remove_theme(&ctx.paths, &theme.name).unwrap();
+            assert!(
+                !fzf_script.exists(),
+                "remove_theme should delete the fzf.sh script"
+            );
+        }
     }
 
-    #[test]
-    fn should_apply_fzf_theme_to_cache() {
-        let (_, ctx) = create_test_context();
-        let generator = FzfGenerator;
-        let theme: Theme = Theme::mock();
+    /// Integration tests for yazi
+    mod integration {
+        use super::*;
+        use crate::skip_if_not_installed;
 
-        let mut task = ctx.log.step("Test", false).muted();
-        generator
-            .apply(&theme, &ctx.paths, &ctx.templater, &mut task)
+        #[test]
+        fn should_return_health_ok_for_fzf() {
+            skip_if_not_installed!(FzfGenerator);
+
+            let (_, ctx) = mock_context();
+            let generator = FzfGenerator;
+            let theme: Theme = Theme::mock();
+
+            let mut task = ctx.log.step("Test", true).muted();
+            generator
+                .apply(&theme, &ctx.paths, &ctx.templater, &mut task)
+                .unwrap();
+
+            let zshrc_path = generator.link_path(&ctx.paths, "");
+            let cache_file = generator.cache_path(&ctx.paths, "any");
+
+            fs::create_dir_all(zshrc_path.parent().unwrap()).unwrap();
+            fs::write(&zshrc_path, format!("source \"{}\"", cache_file.display())).unwrap();
+
+            let status = generator.health_check(&ctx.paths, &theme.name);
+            assert!(status.is_ok(), "Expected Ok, got: {status}");
+        }
+
+        #[test]
+        fn should_return_health_error_no_zshrc_for_fzf() {
+            skip_if_not_installed!(FzfGenerator);
+
+            let (_, ctx) = mock_context();
+            let generator = FzfGenerator;
+            let status = generator.health_check(&ctx.paths, &ctx.state.current_theme);
+
+            assert!(
+                status.is_error(),
+                "Expected Error due to missing .zshrc, got: {status}"
+            );
+            assert!(status.contains(".zshrc not found"));
+        }
+
+        #[test]
+        fn should_return_health_error_not_sourced_for_fzf() {
+            skip_if_not_installed!(FzfGenerator);
+
+            let (tmp_dir, ctx) = mock_context();
+            let generator = FzfGenerator;
+            let root = tmp_dir.path();
+            let zshrc_path = root.join(".zshrc");
+
+            fs::write(&zshrc_path, "alias ls='ls --color=auto'").unwrap();
+
+            let status = generator.health_check(&ctx.paths, &ctx.state.current_theme);
+
+            assert!(
+                status.is_error(),
+                "Expected Error because fzf.sh is not in .zshrc, got: {status}"
+            );
+            assert!(status.contains("not sourced"));
+        }
+
+        #[test]
+        fn should_return_health_error_cache_file_missing_for_fzf() {
+            skip_if_not_installed!(FzfGenerator);
+
+            let (_tmp_dir, ctx) = mock_context();
+            let generator = FzfGenerator;
+
+            let zshrc = generator.link_path(&ctx.paths, "");
+            let cache_file = generator.cache_path(&ctx.paths, "");
+
+            fs::create_dir_all(zshrc.parent().unwrap()).unwrap();
+            fs::write(&zshrc, format!("source {:?} # iris:fzf", cache_file)).unwrap();
+
+            if cache_file.exists() {
+                fs::remove_file(&cache_file).unwrap();
+            }
+
+            let status = generator.health_check(&ctx.paths, &ctx.state.current_theme);
+
+            assert!(status.is_error(), "Expected Error, got: {status}");
+            assert!(status.contains("missing from cache") || status.contains("not found"));
+        }
+
+        #[test]
+        fn should_fix_source_line_injection_for_fzf() {
+            skip_if_not_installed!(FzfGenerator);
+
+            let (tmp_dir, ctx) = mock_context();
+            let generator = FzfGenerator;
+            let theme: Theme = Theme::mock();
+            let root = tmp_dir.path();
+
+            let zshrc = root.join(".zshrc");
+            fs::write(&zshrc, "# Initial zshrc\n").unwrap();
+
+            let mut task = ctx.log.step("Test", false).muted();
+            generator
+                .apply(&theme, &ctx.paths, &ctx.templater, &mut task)
+                .unwrap();
+
+            let status = generator.health_check(&ctx.paths, &theme.name);
+            assert!(status.is_error());
+            assert!(status.contains("not sourced"));
+
+            generator
+                .fix(&status, &theme, &ctx.paths, &ctx.templater, &mut task)
+                .expect("Fix failed");
+
+            let updated_content = fs::read_to_string(&zshrc).unwrap();
+            let cache_file = generator.cache_path(&ctx.paths, &theme.name);
+
+            assert!(
+                updated_content.contains(&cache_file.to_str().unwrap()),
+                "zshrc should now contain the source line for fzf.sh"
+            );
+            assert!(updated_content.contains("# iris:fzf"));
+
+            let final_status = generator.health_check(&ctx.paths, &theme.name);
+            assert!(
+                final_status.is_ok(),
+                "Final status should be Ok, got: {final_status}"
+            );
+        }
+
+        #[test]
+        fn should_fix_missing_cache_for_fzf() {
+            skip_if_not_installed!(FzfGenerator);
+
+            let (_, ctx) = mock_context();
+            let generator = FzfGenerator;
+            let theme: Theme = Theme::mock();
+
+            let zshrc = generator.link_path(&ctx.paths, "");
+            let cache_file = generator.cache_path(&ctx.paths, &theme.name);
+
+            fs::create_dir_all(zshrc.parent().unwrap()).unwrap();
+            fs::write(
+                &zshrc,
+                format!("source \"{}\" # fzf.sh", cache_file.display()),
+            )
             .unwrap();
 
-        let cache_file = ctx.paths.bin.join("fzf.sh");
-        assert!(cache_file.exists(), "Cache file fzf.sh was not created");
+            let status = HealthStatus::error("missing from cache", None::<String>);
 
-        let content = fs::read_to_string(cache_file).unwrap();
-        assert!(content.contains("export FZF_DEFAULT_OPTS="));
-        assert!(content.contains(&theme.name));
-    }
+            let mut task = ctx.log.step("Test", false).muted();
+            generator
+                .fix(&status, &theme, &ctx.paths, &ctx.templater, &mut task)
+                .expect("Fix failed");
 
-    #[test]
-    fn should_fix_source_line_injection_for_fzf() {
-        let (tmp_dir, ctx) = create_test_context();
-        let generator = FzfGenerator;
-        let theme: Theme = Theme::mock();
-        let root = tmp_dir.path();
+            assert!(cache_file.exists(), "Cache file should be recreated");
 
-        let zshrc = root.join(".zshrc");
-        fs::write(&zshrc, "# Initial zshrc\n").unwrap();
-
-        let mut task = ctx.log.step("Test", false).muted();
-        generator
-            .apply(&theme, &ctx.paths, &ctx.templater, &mut task)
-            .unwrap();
-
-        let status = generator.health_check(&ctx.paths, &theme.name);
-        assert!(status.is_error());
-        assert!(status.contains("not sourced"));
-
-        generator
-            .fix(&status, &theme, &ctx.paths, &ctx.templater, &mut task)
-            .expect("Fix failed");
-
-        let updated_content = fs::read_to_string(&zshrc).unwrap();
-        let cache_file = generator.cache_path(&ctx.paths, &theme.name);
-
-        assert!(
-            updated_content.contains(&cache_file.to_str().unwrap()),
-            "zshrc should now contain the source line for fzf.sh"
-        );
-        assert!(updated_content.contains("# iris:fzf"));
-
-        let final_status = generator.health_check(&ctx.paths, &theme.name);
-        assert!(
-            final_status.is_ok(),
-            "Final status should be Ok, got: {final_status}"
-        );
-    }
-
-    #[test]
-    fn should_fix_missing_cache_for_fzf() {
-        let (_, ctx) = create_test_context();
-        let generator = FzfGenerator;
-        let theme: Theme = Theme::mock();
-
-        let zshrc = generator.link_path(&ctx.paths, "");
-        let cache_file = generator.cache_path(&ctx.paths, &theme.name);
-
-        fs::create_dir_all(zshrc.parent().unwrap()).unwrap();
-        fs::write(
-            &zshrc,
-            format!("source \"{}\" # fzf.sh", cache_file.display()),
-        )
-        .unwrap();
-
-        let status = HealthStatus::error("missing from cache", None::<String>);
-
-        let mut task = ctx.log.step("Test", false).muted();
-        generator
-            .fix(&status, &theme, &ctx.paths, &ctx.templater, &mut task)
-            .expect("Fix failed");
-
-        assert!(cache_file.exists(), "Cache file should be recreated");
-
-        let content = fs::read_to_string(cache_file).unwrap();
-        assert!(content.contains("export FZF_DEFAULT_OPTS="));
-    }
-
-    #[test]
-    fn should_clear_generated_files_for_fzf() {
-        let (_, ctx) = create_test_context();
-        let generator = FzfGenerator;
-        let theme: Theme = Theme::mock();
-
-        let mut task = ctx.log.step("Test", false).muted();
-        generator
-            .apply(&theme, &ctx.paths, &ctx.templater, &mut task)
-            .unwrap();
-
-        let fzf_script = generator.cache_path(&ctx.paths, "");
-        assert!(fzf_script.exists());
-
-        generator.clear(&ctx.paths).unwrap();
-        assert!(
-            !fzf_script.exists(),
-            "Clear should remove the generated fzf.sh script"
-        );
-    }
-
-    #[test]
-    fn should_remove_theme_for_fzf() {
-        let (_, ctx) = create_test_context();
-        let generator = FzfGenerator;
-        let theme: Theme = Theme::mock();
-
-        let mut task = ctx.log.step("Test", false).muted();
-        generator
-            .apply(&theme, &ctx.paths, &ctx.templater, &mut task)
-            .unwrap();
-
-        let fzf_script = generator.cache_path(&ctx.paths, "");
-        assert!(fzf_script.exists());
-
-        generator.remove_theme(&ctx.paths, &theme.name).unwrap();
-        assert!(
-            !fzf_script.exists(),
-            "remove_theme should delete the fzf.sh script"
-        );
+            let content = fs::read_to_string(cache_file).unwrap();
+            assert!(content.contains("export FZF_DEFAULT_OPTS="));
+        }
     }
 }

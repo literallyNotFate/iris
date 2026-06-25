@@ -313,274 +313,295 @@ impl AlacrittyGenerator {
     }
 }
 
-/// Unit-tests for alacritty
+/// Tests for alacritty generator
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::tests::create_test_context;
+    use crate::utils::tests::mock_context;
 
-    #[test]
-    fn should_return_alacritty_metadata() {
-        let generator = AlacrittyGenerator;
-        assert_eq!(generator.name(), "alacritty");
-        assert_eq!(generator.generator_type(), GeneratorType::Terminal);
-        assert_eq!(generator.target_file_name("nord"), "nord.toml");
-    }
+    /// Unit-tests for alacritty
+    mod unit {
+        use super::*;
 
-    #[test]
-    fn should_build_valid_render_context() {
-        let generator = AlacrittyGenerator;
-        let theme: Theme = Theme::mock();
-        let ctx = generator.build_render_context(&theme);
-
-        assert_eq!(
-            ctx.get("bg")
-                .expect("bg not found in context")
-                .as_str()
-                .unwrap(),
-            theme.colors.bg
-        );
-        assert_eq!(
-            ctx.get("fg")
-                .expect("fg not found in context")
-                .as_str()
-                .unwrap(),
-            theme.colors.fg
-        );
-        assert!(ctx.contains_key("ansi"));
-    }
-
-    #[test]
-    fn should_return_health_ok_for_alacritty() {
-        let (_, mut ctx) = create_test_context();
-        let generator = AlacrittyGenerator;
-        let theme: Theme = Theme::mock();
-
-        let mut task = ctx.log.step("Test", false).muted();
-        ctx.state.current_theme = theme.name.clone();
-        generator
-            .apply(&theme, &ctx.paths, &ctx.templater, &mut task)
-            .unwrap();
-
-        let alacritty_dir = generator.resolve_config_directory(&ctx.paths);
-        let main_config = alacritty_dir.join("alacritty.toml");
-        fs::write(&main_config, "import = [\"current_theme.toml\"]").unwrap();
-
-        let status = generator.health_check(&ctx.paths, &theme.name);
-        assert!(status.is_ok(), "Expected Ok, got: {status}");
-    }
-
-    #[test]
-    fn should_return_health_error_no_import_for_alacritty() {
-        let (_, mut ctx) = create_test_context();
-        let generator = AlacrittyGenerator;
-        let theme: Theme = Theme::mock();
-
-        let mut task = ctx.log.step("Test", false).muted();
-        ctx.state.current_theme = theme.name.clone();
-        generator
-            .apply(&theme, &ctx.paths, &ctx.templater, &mut task)
-            .unwrap();
-
-        let main_config = generator
-            .resolve_config_directory(&ctx.paths)
-            .join("alacritty.toml");
-        fs::write(&main_config, "[window]\ndecorations = \"none\"").unwrap();
-
-        let status = generator.health_check(&ctx.paths, &theme.name);
-
-        assert!(
-            status.is_error(),
-            "Expected Error for missing import, got: {status}"
-        );
-        assert!(status.contains("not imported"));
-    }
-
-    #[test]
-    fn should_return_health_warning_no_main_config_for_alacritty() {
-        let (_, mut ctx) = create_test_context();
-        let generator = AlacrittyGenerator;
-        let theme: Theme = Theme::mock();
-
-        let mut task = ctx.log.step("Test", false).muted();
-        ctx.state.current_theme = theme.name.clone();
-        generator
-            .apply(&theme, &ctx.paths, &ctx.templater, &mut task)
-            .unwrap();
-
-        let main_config = generator
-            .resolve_config_directory(&ctx.paths)
-            .join("alacritty.toml");
-        if main_config.exists() {
-            fs::remove_file(main_config).unwrap();
+        #[test]
+        fn should_return_alacritty_metadata() {
+            let generator = AlacrittyGenerator;
+            assert_eq!(generator.name(), "alacritty");
+            assert_eq!(generator.generator_type(), GeneratorType::Terminal);
+            assert_eq!(generator.target_file_name("nord"), "nord.toml");
         }
 
-        let status = generator.health_check(&ctx.paths, &theme.name);
+        #[test]
+        fn should_build_valid_render_context() {
+            let generator = AlacrittyGenerator;
+            let theme: Theme = Theme::mock();
+            let ctx = generator.build_render_context(&theme);
 
-        assert!(
-            status.is_warning(),
-            "Expected Warning for missing file, got: {status}"
-        );
-        assert!(status.contains("not found"));
-    }
-
-    #[test]
-    fn should_apply_theme_for_alacritty() {
-        let (_, ctx) = create_test_context();
-        let generator = AlacrittyGenerator;
-        let theme: Theme = Theme::mock();
-
-        let mut task = ctx.log.step("Test", false).muted();
-        let result = generator.apply(&theme, &ctx.paths, &ctx.templater, &mut task);
-        assert!(result.is_ok(), "Apply failed: {:?}", result.err());
-
-        let cache_file = ctx
-            .paths
-            .generators
-            .join("alacritty")
-            .join("test-theme.toml");
-        assert!(cache_file.exists(), "Theme missing in Iris cache");
-
-        let alacritty_dir = generator.resolve_config_directory(&ctx.paths);
-        let link_path = alacritty_dir.join("current_theme.toml");
-        assert!(
-            link_path.exists(),
-            "Symlink missing in Alacritty config dir"
-        );
-
-        let content = fs::read_to_string(cache_file).unwrap();
-        assert!(content.contains(&format!("background = \"{}\"", theme.colors.bg)));
-        assert!(content.contains(&format!("black   = \"{}\"", theme.colors.ansi[0])));
-        assert!(content.contains(&format!("white   = \"{}\"", theme.colors.ansi[15])));
-    }
-
-    #[test]
-    fn should_fix_inject_issue_for_alacritty() {
-        let (_, ctx) = create_test_context();
-        let generator = AlacrittyGenerator;
-        let theme: Theme = Theme::mock();
-
-        let alacritty_dir = generator.resolve_config_directory(&ctx.paths);
-        fs::create_dir_all(&alacritty_dir).unwrap();
-        let config_path = alacritty_dir.join("alacritty.toml");
-
-        let mut task = ctx.log.step("Test", false).muted();
-        generator
-            .apply(&theme, &ctx.paths, &ctx.templater, &mut task)
-            .unwrap();
-        fs::write(&config_path, "[window]\ndecorations = \"none\"").unwrap();
-
-        let status = generator.health_check(&ctx.paths, &theme.name);
-
-        assert!(
-            status.is_error(),
-            "Expected Import Error, but got: {status}"
-        );
-        assert!(status.contains("import"));
-
-        generator
-            .fix(&status, &theme, &ctx.paths, &ctx.templater, &mut task)
-            .expect("Fix failed");
-
-        let content = fs::read_to_string(&config_path).unwrap();
-        assert!(
-            content.contains("current_theme.toml"),
-            "Import line missing after fix!"
-        );
-        assert!(generator.health_check(&ctx.paths, &theme.name).is_ok());
-    }
-
-    #[test]
-    fn should_fix_broken_symlink_for_alacritty() {
-        let (_, ctx) = create_test_context();
-        let generator = AlacrittyGenerator;
-        let theme: Theme = Theme::mock();
-
-        let alacritty_dir = generator.resolve_config_directory(&ctx.paths);
-        fs::create_dir_all(&alacritty_dir).unwrap();
-
-        let config_path = alacritty_dir.join("alacritty.toml");
-        fs::write(
-            &config_path,
-            "import = [\"~/.config/alacritty/current_theme.toml\"]",
-        )
-        .unwrap();
-
-        let mut task = ctx.log.step("Test", false).muted();
-        generator
-            .apply(&theme, &ctx.paths, &ctx.templater, &mut task)
-            .unwrap();
-
-        let link_path = generator.link_path(&ctx.paths, "");
-        if link_path.exists() || link_path.is_symlink() {
-            fs::remove_file(&link_path).unwrap();
+            assert_eq!(
+                ctx.get("bg")
+                    .expect("bg not found in context")
+                    .as_str()
+                    .unwrap(),
+                theme.colors.bg
+            );
+            assert_eq!(
+                ctx.get("fg")
+                    .expect("fg not found in context")
+                    .as_str()
+                    .unwrap(),
+                theme.colors.fg
+            );
+            assert!(ctx.contains_key("ansi"));
         }
 
-        let status = generator.health_check(&ctx.paths, &theme.name);
-        assert!(status.is_error(), "Should be Error, got: {status}");
+        #[test]
+        fn should_apply_theme_for_alacritty() {
+            let (_, ctx) = mock_context();
+            let generator = AlacrittyGenerator;
+            let theme: Theme = Theme::mock();
 
-        generator
-            .fix(&status, &theme, &ctx.paths, &ctx.templater, &mut task)
-            .expect("Fix failed");
+            let mut task = ctx.log.step("Test", false).muted();
+            let result = generator.apply(&theme, &ctx.paths, &ctx.templater, &mut task);
+            assert!(result.is_ok(), "Apply failed: {:?}", result.err());
 
-        let final_status = generator.health_check(&ctx.paths, &theme.name);
-        assert!(
-            final_status.is_ok(),
-            "Health check failed after fix: {final_status}"
-        );
+            let cache_file = ctx
+                .paths
+                .generators
+                .join("alacritty")
+                .join("test-theme.toml");
+            assert!(cache_file.exists(), "Theme missing in Iris cache");
+
+            let alacritty_dir = generator.resolve_config_directory(&ctx.paths);
+            let link_path = alacritty_dir.join("current_theme.toml");
+            assert!(
+                link_path.exists(),
+                "Symlink missing in Alacritty config dir"
+            );
+
+            let content = fs::read_to_string(cache_file).unwrap();
+            assert!(content.contains(&format!("background = \"{}\"", theme.colors.bg)));
+            assert!(content.contains(&format!("black   = \"{}\"", theme.colors.ansi[0])));
+            assert!(content.contains(&format!("white   = \"{}\"", theme.colors.ansi[15])));
+        }
+
+        #[test]
+        fn should_clear_generated_files_for_alacritty() {
+            let (_, ctx) = mock_context();
+            let generator = AlacrittyGenerator;
+
+            let cache_dir = ctx.paths.generators.join(generator.name());
+            fs::create_dir_all(&cache_dir).unwrap();
+            let file = cache_dir.join(generator.target_file_name(""));
+            fs::write(&file, "test").unwrap();
+
+            assert!(
+                cache_dir.exists(),
+                "Cache directory should exist before clearing"
+            );
+
+            generator.clear(&ctx.paths).unwrap();
+
+            assert!(
+                !cache_dir.exists(),
+                "Clear should remove the entire generator cache directory"
+            );
+        }
+
+        #[test]
+        fn should_remove_theme_for_alacritty() {
+            let (_, ctx) = mock_context();
+            let generator = AlacrittyGenerator;
+
+            let cache_file = generator.cache_path(&ctx.paths, "");
+            let link_file = generator.link_path(&ctx.paths, "");
+
+            fs::create_dir_all(cache_file.parent().unwrap()).unwrap();
+            fs::create_dir_all(link_file.parent().unwrap()).unwrap();
+            fs::write(&cache_file, "test").unwrap();
+            fs::write(&link_file, "test").unwrap();
+
+            assert!(
+                cache_file.exists(),
+                "Cache file should exist before removal"
+            );
+            assert!(link_file.exists(), "Link file should exist before removal");
+
+            generator.remove_theme(&ctx.paths, "").unwrap();
+
+            assert!(
+                !cache_file.exists(),
+                "remove_theme should delete the cache file"
+            );
+            assert!(
+                !link_file.exists(),
+                "remove_theme should delete the target link file"
+            );
+        }
     }
 
-    #[test]
-    fn should_clear_generated_files_for_alacritty() {
-        let (_, ctx) = create_test_context();
-        let generator = AlacrittyGenerator;
+    /// Integration tests for alacritty
+    mod integration {
+        use super::*;
+        use crate::skip_if_not_installed;
 
-        let cache_dir = ctx.paths.generators.join(generator.name());
-        fs::create_dir_all(&cache_dir).unwrap();
-        let file = cache_dir.join(generator.target_file_name(""));
-        fs::write(&file, "test").unwrap();
+        #[test]
+        fn should_return_health_ok_for_alacritty() {
+            skip_if_not_installed!(AlacrittyGenerator);
 
-        assert!(
-            cache_dir.exists(),
-            "Cache directory should exist before clearing"
-        );
+            let (_, mut ctx) = mock_context();
+            let generator = AlacrittyGenerator;
+            let theme: Theme = Theme::mock();
 
-        generator.clear(&ctx.paths).unwrap();
+            let mut task = ctx.log.step("Test", false).muted();
+            ctx.state.current_theme = theme.name.clone();
+            generator
+                .apply(&theme, &ctx.paths, &ctx.templater, &mut task)
+                .unwrap();
 
-        assert!(
-            !cache_dir.exists(),
-            "Clear should remove the entire generator cache directory"
-        );
-    }
+            let alacritty_dir = generator.resolve_config_directory(&ctx.paths);
+            let main_config = alacritty_dir.join("alacritty.toml");
+            fs::write(&main_config, "import = [\"current_theme.toml\"]").unwrap();
 
-    #[test]
-    fn should_remove_theme_for_alacritty() {
-        let (_, ctx) = create_test_context();
-        let generator = AlacrittyGenerator;
+            let status = generator.health_check(&ctx.paths, &theme.name);
+            assert!(status.is_ok(), "Expected Ok, got: {status}");
+        }
 
-        let cache_file = generator.cache_path(&ctx.paths, "");
-        let link_file = generator.link_path(&ctx.paths, "");
+        #[test]
+        fn should_return_health_error_no_import_for_alacritty() {
+            skip_if_not_installed!(AlacrittyGenerator);
 
-        fs::create_dir_all(cache_file.parent().unwrap()).unwrap();
-        fs::create_dir_all(link_file.parent().unwrap()).unwrap();
-        fs::write(&cache_file, "test").unwrap();
-        fs::write(&link_file, "test").unwrap();
+            let (_, mut ctx) = mock_context();
+            let generator = AlacrittyGenerator;
+            let theme: Theme = Theme::mock();
 
-        assert!(
-            cache_file.exists(),
-            "Cache file should exist before removal"
-        );
-        assert!(link_file.exists(), "Link file should exist before removal");
+            let mut task = ctx.log.step("Test", false).muted();
+            ctx.state.current_theme = theme.name.clone();
+            generator
+                .apply(&theme, &ctx.paths, &ctx.templater, &mut task)
+                .unwrap();
 
-        generator.remove_theme(&ctx.paths, "").unwrap();
+            let main_config = generator
+                .resolve_config_directory(&ctx.paths)
+                .join("alacritty.toml");
+            fs::write(&main_config, "[window]\ndecorations = \"none\"").unwrap();
 
-        assert!(
-            !cache_file.exists(),
-            "remove_theme should delete the cache file"
-        );
-        assert!(
-            !link_file.exists(),
-            "remove_theme should delete the target link file"
-        );
+            let status = generator.health_check(&ctx.paths, &theme.name);
+
+            assert!(
+                status.is_error(),
+                "Expected Error for missing import, got: {status}"
+            );
+            assert!(status.contains("not imported"));
+        }
+
+        #[test]
+        fn should_return_health_warning_no_main_config_for_alacritty() {
+            skip_if_not_installed!(AlacrittyGenerator);
+
+            let (_, mut ctx) = mock_context();
+            let generator = AlacrittyGenerator;
+            let theme: Theme = Theme::mock();
+
+            let mut task = ctx.log.step("Test", false).muted();
+            ctx.state.current_theme = theme.name.clone();
+            generator
+                .apply(&theme, &ctx.paths, &ctx.templater, &mut task)
+                .unwrap();
+
+            let main_config = generator
+                .resolve_config_directory(&ctx.paths)
+                .join("alacritty.toml");
+            if main_config.exists() {
+                fs::remove_file(main_config).unwrap();
+            }
+
+            let status = generator.health_check(&ctx.paths, &theme.name);
+
+            assert!(
+                status.is_warning(),
+                "Expected Warning for missing file, got: {status}"
+            );
+            assert!(status.contains("not found"));
+        }
+
+        #[test]
+        fn should_fix_inject_issue_for_alacritty() {
+            skip_if_not_installed!(AlacrittyGenerator);
+
+            let (_, ctx) = mock_context();
+            let generator = AlacrittyGenerator;
+            let theme: Theme = Theme::mock();
+
+            let alacritty_dir = generator.resolve_config_directory(&ctx.paths);
+            fs::create_dir_all(&alacritty_dir).unwrap();
+            let config_path = alacritty_dir.join("alacritty.toml");
+
+            let mut task = ctx.log.step("Test", false).muted();
+            generator
+                .apply(&theme, &ctx.paths, &ctx.templater, &mut task)
+                .unwrap();
+            fs::write(&config_path, "[window]\ndecorations = \"none\"").unwrap();
+
+            let status = generator.health_check(&ctx.paths, &theme.name);
+
+            assert!(
+                status.is_error(),
+                "Expected Import Error, but got: {status}"
+            );
+            assert!(status.contains("import"));
+
+            generator
+                .fix(&status, &theme, &ctx.paths, &ctx.templater, &mut task)
+                .expect("Fix failed");
+
+            let content = fs::read_to_string(&config_path).unwrap();
+            assert!(
+                content.contains("current_theme.toml"),
+                "Import line missing after fix!"
+            );
+            assert!(generator.health_check(&ctx.paths, &theme.name).is_ok());
+        }
+
+        #[test]
+        fn should_fix_broken_symlink_for_alacritty() {
+            skip_if_not_installed!(AlacrittyGenerator);
+
+            let (_, ctx) = mock_context();
+            let generator = AlacrittyGenerator;
+            let theme: Theme = Theme::mock();
+
+            let alacritty_dir = generator.resolve_config_directory(&ctx.paths);
+            fs::create_dir_all(&alacritty_dir).unwrap();
+
+            let config_path = alacritty_dir.join("alacritty.toml");
+            fs::write(
+                &config_path,
+                "import = [\"~/.config/alacritty/current_theme.toml\"]",
+            )
+            .unwrap();
+
+            let mut task = ctx.log.step("Test", false).muted();
+            generator
+                .apply(&theme, &ctx.paths, &ctx.templater, &mut task)
+                .unwrap();
+
+            let link_path = generator.link_path(&ctx.paths, "");
+            if link_path.exists() || link_path.is_symlink() {
+                fs::remove_file(&link_path).unwrap();
+            }
+
+            let status = generator.health_check(&ctx.paths, &theme.name);
+            assert!(status.is_error(), "Should be Error, got: {status}");
+
+            generator
+                .fix(&status, &theme, &ctx.paths, &ctx.templater, &mut task)
+                .expect("Fix failed");
+
+            let final_status = generator.health_check(&ctx.paths, &theme.name);
+            assert!(
+                final_status.is_ok(),
+                "Health check failed after fix: {final_status}"
+            );
+        }
     }
 }

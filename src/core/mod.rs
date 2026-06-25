@@ -5,9 +5,6 @@ pub mod paths;
 pub mod setup;
 pub mod templater;
 
-#[cfg(test)]
-pub mod tests;
-
 pub use bridge::NeovimBridge;
 pub use context::IrisContext;
 pub use orchestrator::ThemeOrchestrator;

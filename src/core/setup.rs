@@ -161,12 +161,12 @@ add-zsh-hook precmd _iris_fzf_sync
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::tests::create_test_context;
+    use crate::utils::tests::mock_context;
     use temp_env;
 
     #[test]
     fn should_handle_setup_zsh_hook_injection() {
-        let (tmp, ctx) = create_test_context();
+        let (tmp, ctx) = mock_context();
         let fake_home = tmp.path();
         let zshrc_path = fake_home.join(".zshrc");
 
@@ -194,7 +194,7 @@ mod tests {
 
     #[test]
     fn should_skip_initial_setup_if_exists() {
-        let (_tmp, mut ctx) = create_test_context();
+        let (_tmp, mut ctx) = mock_context();
 
         fs::write(
             &ctx.paths.state_file,
@@ -210,7 +210,7 @@ mod tests {
 
     #[test]
     fn should_handle_full_setup_logic() {
-        let (tmp, mut ctx) = create_test_context();
+        let (tmp, mut ctx) = mock_context();
         let fake_home = tmp.path();
 
         fs::write(fake_home.join(".zshrc"), "").unwrap();

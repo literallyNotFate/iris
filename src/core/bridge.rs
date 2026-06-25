@@ -196,11 +196,11 @@ impl NeovimBridge {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::tests::create_test_context;
+    use crate::utils::tests::mock_context;
 
     #[test]
     fn should_detect_lazy_by_lockfile() {
-        let (_temp, ctx) = create_test_context();
+        let (_temp, ctx) = mock_context();
         let config_nvim = ctx.paths.nvim_config_dir();
 
         fs::create_dir_all(&config_nvim).unwrap();
@@ -212,7 +212,7 @@ mod tests {
 
     #[test]
     fn should_count_plugins_correctly() {
-        let (_temp, ctx) = create_test_context();
+        let (_temp, ctx) = mock_context();
 
         let lazy_dir = ctx.paths.resolve_plugin_path(&PluginManager::Lazy).unwrap();
         fs::create_dir_all(lazy_dir.join("p1")).unwrap();
@@ -232,7 +232,7 @@ mod tests {
 
     #[test]
     fn should_test_build_args_for_lazy_manager() {
-        let (_temp, mut ctx) = create_test_context();
+        let (_temp, mut ctx) = mock_context();
         ctx.state.manager = PluginManager::Lazy;
         let args = NeovimBridge::build_base_args(&ctx.state);
 
@@ -248,7 +248,7 @@ mod tests {
 
     #[test]
     fn should_test_build_args_without_rtp_for_default_manager() {
-        let (_temp, mut ctx) = create_test_context();
+        let (_temp, mut ctx) = mock_context();
         ctx.state.manager = PluginManager::Default;
         let args = NeovimBridge::build_base_args(&ctx.state);
 

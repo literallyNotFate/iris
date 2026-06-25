@@ -159,11 +159,11 @@ impl IrisContext {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::tests::create_test_context;
+    use crate::utils::tests::mock_context;
 
     #[test]
     fn should_handle_context_update_theme_persistence() {
-        let (_tmp, mut ctx) = create_test_context();
+        let (_tmp, mut ctx) = mock_context();
         let theme_name = "melange";
 
         ctx.update(theme_name)
@@ -180,7 +180,7 @@ mod tests {
 
     #[test]
     fn should_handle_context_save_state() {
-        let (_tmp, mut ctx) = create_test_context();
+        let (_tmp, mut ctx) = mock_context();
         ctx.state.enable_generator("yazi");
         ctx.save().expect("Should save state");
 
@@ -190,7 +190,7 @@ mod tests {
 
     #[test]
     fn should_handle_loading_context_from_existing_file() {
-        let (_tmp, ctx_orig) = create_test_context();
+        let (_tmp, ctx_orig) = mock_context();
         let mut ctx = ctx_orig;
         ctx.update("gruvbox").unwrap();
 
@@ -202,7 +202,7 @@ mod tests {
 
     #[test]
     fn should_resolve_theme_explicit_exists() {
-        let (_temp, ctx) = create_test_context();
+        let (_temp, ctx) = mock_context();
 
         fs::create_dir_all(&ctx.paths.themes).unwrap();
         fs::write(ctx.paths.themes.join("gruvbox.json"), "{}").unwrap();
@@ -215,7 +215,7 @@ mod tests {
 
     #[test]
     fn should_resolve_theme_fallback_to_current() {
-        let (_temp, mut ctx) = create_test_context();
+        let (_temp, mut ctx) = mock_context();
         ctx.state.current_theme = "nord".into();
 
         fs::create_dir_all(&ctx.paths.themes).unwrap();
@@ -229,7 +229,7 @@ mod tests {
 
     #[test]
     fn should_resolve_theme_use_fallback_theme_on_error() {
-        let (_temp, mut ctx) = create_test_context();
+        let (_temp, mut ctx) = mock_context();
         ctx.state.fallback_theme = "tokyonight".into();
 
         fs::create_dir_all(&ctx.paths.themes).unwrap();
@@ -243,7 +243,7 @@ mod tests {
 
     #[test]
     fn should_check_if_theme_available_builtin() {
-        let (_temp, mut ctx) = create_test_context();
+        let (_temp, mut ctx) = mock_context();
         ctx.state.manager = PluginManager::Default;
 
         assert!(ctx.is_theme_available("habamax"));
@@ -252,7 +252,7 @@ mod tests {
 
     #[test]
     fn should_handle_resolve_generator_not_found() {
-        let (_temp, ctx) = create_test_context();
+        let (_temp, ctx) = mock_context();
         let result = ctx.resolve_generator("ghostty");
         assert!(result.is_err());
 

@@ -319,224 +319,245 @@ impl GhosttyGenerator {
     }
 }
 
-/// Unit-tests for ghostty
+/// Tests for ghostty generator
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::tests::create_test_context;
+    use crate::utils::tests::mock_context;
 
-    #[test]
-    fn should_return_ghostty_metadata() {
-        let generator = GhosttyGenerator;
-        assert_eq!(generator.name(), "ghostty");
-        assert_eq!(generator.generator_type(), GeneratorType::Terminal);
-        assert_eq!(generator.target_file_name("melange"), "melange.conf");
-    }
+    /// Unit-tests for ghostty
+    mod unit {
+        use super::*;
 
-    #[test]
-    fn should_build_valid_render_context() {
-        let generator = GhosttyGenerator;
-        let theme: Theme = Theme::mock();
-        let ctx = generator.build_render_context(&theme);
-
-        assert_eq!(ctx.get("bg").unwrap().as_str().unwrap(), theme.colors.bg);
-        assert!(ctx.get("ansi").unwrap().is_array());
-    }
-
-    #[test]
-    fn should_return_health_ok_for_ghostty() {
-        let (_, mut ctx) = create_test_context();
-        let generator = GhosttyGenerator;
-        let theme: Theme = Theme::mock();
-
-        let mut task = ctx.log.step("Test", false).muted();
-        ctx.state.current_theme = theme.name.clone();
-        generator
-            .apply(&theme, &ctx.paths, &ctx.templater, &mut task)
-            .unwrap();
-
-        let config_path = generator
-            .resolve_config_directory(&ctx.paths)
-            .join("config");
-        let import_line = format!("config-file = {}", generator.target_file_name(""));
-        fs::write(&config_path, import_line).unwrap();
-
-        let status = generator.health_check(&ctx.paths, &theme.name);
-        assert!(status.is_ok(), "Expected Ok, got: {status}");
-    }
-
-    #[test]
-    fn should_return_health_error_missing_config_for_ghostty() {
-        let (_, ctx) = create_test_context();
-        let generator = GhosttyGenerator;
-        let theme: Theme = Theme::mock();
-
-        let status = generator.health_check(&ctx.paths, &theme.name);
-        assert!(status.is_error(), "Expected Error, got: {status}");
-        assert!(status.contains("config file missing"));
-    }
-
-    #[test]
-    fn should_return_health_warning_no_import_for_ghostty() {
-        let (_, mut ctx) = create_test_context();
-        let generator = GhosttyGenerator;
-        let theme: Theme = Theme::mock();
-
-        let mut task = ctx.log.step("Test", false).muted();
-        ctx.state.current_theme = theme.name.clone();
-        generator
-            .apply(&theme, &ctx.paths, &ctx.templater, &mut task)
-            .unwrap();
-
-        let config_path = generator
-            .resolve_config_directory(&ctx.paths)
-            .join("config");
-        fs::write(&config_path, "font-family = JetBrainsMono").unwrap();
-
-        let status = generator.health_check(&ctx.paths, &theme.name);
-
-        assert!(
-            status.is_warning(),
-            "Expected Warning for missing import line, got: {status}"
-        );
-        assert!(status.contains("not imported"));
-    }
-
-    #[test]
-    fn should_apply_theme_for_ghostty() {
-        let (_, ctx) = create_test_context();
-        let generator = GhosttyGenerator;
-        let theme: Theme = Theme::mock();
-
-        let mut task = ctx.log.step("Test", false).muted();
-        let result = generator.apply(&theme, &ctx.paths, &ctx.templater, &mut task);
-        assert!(result.is_ok(), "Failed to apply: {:?}", result.err());
-
-        let cache_file = ctx.paths.generators.join("ghostty").join("test-theme.conf");
-        assert!(cache_file.exists());
-
-        let content = fs::read_to_string(cache_file).unwrap();
-        assert!(content.contains("background ="));
-        assert!(content.contains("palette = 0="));
-        assert!(content.contains("palette = 15="));
-    }
-
-    #[test]
-    fn should_fix_inject_issue_for_ghostty() {
-        let (_, ctx) = create_test_context();
-        let generator = GhosttyGenerator;
-        let theme: Theme = Theme::mock();
-
-        let config_dir = generator.resolve_config_directory(&ctx.paths);
-        fs::create_dir_all(&config_dir).unwrap();
-        let config_path = config_dir.join("config");
-
-        let mut task = ctx.log.step("Test", false).muted();
-        generator
-            .apply(&theme, &ctx.paths, &ctx.templater, &mut task)
-            .unwrap();
-        fs::write(&config_path, "font-size = 12").unwrap();
-
-        let status = generator.health_check(&ctx.paths, &theme.name);
-        generator
-            .fix(&status, &theme, &ctx.paths, &ctx.templater, &mut task)
-            .expect("Fix failed");
-
-        let content = fs::read_to_string(&config_path).unwrap();
-        assert!(content.contains("current_theme.conf"));
-        assert!(generator.health_check(&ctx.paths, &theme.name).is_ok());
-    }
-
-    #[test]
-    fn should_fix_broken_link_for_ghostty() {
-        let (_, mut ctx) = create_test_context();
-        let generator = GhosttyGenerator;
-        let theme: Theme = Theme::mock();
-        ctx.state.current_theme = theme.name.clone();
-
-        let mut task = ctx.log.step("Test", false).muted();
-        let ghostty_dir = generator.resolve_config_directory(&ctx.paths);
-        let config_path = ghostty_dir.join("config");
-        fs::create_dir_all(&ghostty_dir).unwrap();
-
-        let import_line = format!("config-file = {}", generator.target_file_name(""));
-        fs::write(&config_path, import_line).unwrap();
-
-        generator
-            .apply(&theme, &ctx.paths, &ctx.templater, &mut task)
-            .unwrap();
-
-        let link_path_empty = generator.link_path(&ctx.paths, "");
-        if link_path_empty.exists() {
-            fs::remove_file(&link_path_empty).unwrap();
+        #[test]
+        fn should_return_ghostty_metadata() {
+            let generator = GhosttyGenerator;
+            assert_eq!(generator.name(), "ghostty");
+            assert_eq!(generator.generator_type(), GeneratorType::Terminal);
+            assert_eq!(generator.target_file_name("melange"), "melange.conf");
         }
 
-        let link_path_theme = generator.link_path(&ctx.paths, &theme.name);
-        if link_path_theme.exists() && link_path_theme != link_path_empty {
-            fs::remove_file(&link_path_theme).unwrap();
+        #[test]
+        fn should_build_valid_render_context() {
+            let generator = GhosttyGenerator;
+            let theme: Theme = Theme::mock();
+            let ctx = generator.build_render_context(&theme);
+
+            assert_eq!(ctx.get("bg").unwrap().as_str().unwrap(), theme.colors.bg);
+            assert!(ctx.get("ansi").unwrap().is_array());
         }
 
-        let status = generator.health_check(&ctx.paths, &theme.name);
-        assert!(status.is_error());
-        assert!(status.contains("missing or invalid"));
+        #[test]
+        fn should_apply_theme_for_ghostty() {
+            let (_, ctx) = mock_context();
+            let generator = GhosttyGenerator;
+            let theme: Theme = Theme::mock();
 
-        generator
-            .fix(&status, &theme, &ctx.paths, &ctx.templater, &mut task)
-            .unwrap();
-        assert!(generator.health_check(&ctx.paths, &theme.name).is_ok());
+            let mut task = ctx.log.step("Test", false).muted();
+            let result = generator.apply(&theme, &ctx.paths, &ctx.templater, &mut task);
+            assert!(result.is_ok(), "Failed to apply: {:?}", result.err());
+
+            let cache_file = ctx.paths.generators.join("ghostty").join("test-theme.conf");
+            assert!(cache_file.exists());
+
+            let content = fs::read_to_string(cache_file).unwrap();
+            assert!(content.contains("background ="));
+            assert!(content.contains("palette = 0="));
+            assert!(content.contains("palette = 15="));
+        }
+
+        #[test]
+        fn should_clear_generated_files_for_ghostty() {
+            let (_, ctx) = mock_context();
+            let generator = GhosttyGenerator;
+
+            let cache_dir = ctx.paths.generators.join(generator.name());
+            fs::create_dir_all(&cache_dir).unwrap();
+            let file = cache_dir.join(generator.target_file_name(""));
+            fs::write(&file, "test").unwrap();
+
+            assert!(
+                cache_dir.exists(),
+                "Cache directory should exist before clearing"
+            );
+
+            generator.clear(&ctx.paths).unwrap();
+
+            assert!(
+                !cache_dir.exists(),
+                "Clear should remove the entire generator cache directory"
+            );
+        }
+
+        #[test]
+        fn should_remove_theme_for_ghostty() {
+            let (_, ctx) = mock_context();
+            let generator = GhosttyGenerator;
+
+            let cache_file = generator.cache_path(&ctx.paths, "");
+            let link_file = generator.link_path(&ctx.paths, "");
+
+            fs::create_dir_all(cache_file.parent().unwrap()).unwrap();
+            fs::create_dir_all(link_file.parent().unwrap()).unwrap();
+            fs::write(&cache_file, "test").unwrap();
+            fs::write(&link_file, "test").unwrap();
+
+            assert!(
+                cache_file.exists(),
+                "Cache file should exist before removal"
+            );
+            assert!(link_file.exists(), "Link file should exist before removal");
+
+            generator.remove_theme(&ctx.paths, "").unwrap();
+
+            assert!(
+                !cache_file.exists(),
+                "remove_theme should delete the cache file"
+            );
+            assert!(
+                !link_file.exists(),
+                "remove_theme should delete the target link file"
+            );
+        }
     }
 
-    #[test]
-    fn should_clear_generated_files_for_ghostty() {
-        let (_, ctx) = create_test_context();
-        let generator = GhosttyGenerator;
+    /// Integration tests for ghostty
+    mod integration {
+        use super::*;
+        use crate::skip_if_not_installed;
 
-        let cache_dir = ctx.paths.generators.join(generator.name());
-        fs::create_dir_all(&cache_dir).unwrap();
-        let file = cache_dir.join(generator.target_file_name(""));
-        fs::write(&file, "test").unwrap();
+        #[test]
+        fn should_return_health_ok_for_ghostty() {
+            skip_if_not_installed!(GhosttyGenerator);
 
-        assert!(
-            cache_dir.exists(),
-            "Cache directory should exist before clearing"
-        );
+            let (_, mut ctx) = mock_context();
+            let generator = GhosttyGenerator;
+            let theme: Theme = Theme::mock();
 
-        generator.clear(&ctx.paths).unwrap();
+            let mut task = ctx.log.step("Test", false).muted();
+            ctx.state.current_theme = theme.name.clone();
+            generator
+                .apply(&theme, &ctx.paths, &ctx.templater, &mut task)
+                .unwrap();
 
-        assert!(
-            !cache_dir.exists(),
-            "Clear should remove the entire generator cache directory"
-        );
-    }
+            let config_path = generator
+                .resolve_config_directory(&ctx.paths)
+                .join("config");
+            let import_line = format!("config-file = {}", generator.target_file_name(""));
+            fs::write(&config_path, import_line).unwrap();
 
-    #[test]
-    fn should_remove_theme_for_ghostty() {
-        let (_, ctx) = create_test_context();
-        let generator = GhosttyGenerator;
+            let status = generator.health_check(&ctx.paths, &theme.name);
+            assert!(status.is_ok(), "Expected Ok, got: {status}");
+        }
 
-        let cache_file = generator.cache_path(&ctx.paths, "");
-        let link_file = generator.link_path(&ctx.paths, "");
+        #[test]
+        fn should_return_health_error_missing_config_for_ghostty() {
+            skip_if_not_installed!(GhosttyGenerator);
 
-        fs::create_dir_all(cache_file.parent().unwrap()).unwrap();
-        fs::create_dir_all(link_file.parent().unwrap()).unwrap();
-        fs::write(&cache_file, "test").unwrap();
-        fs::write(&link_file, "test").unwrap();
+            let (_, ctx) = mock_context();
+            let generator = GhosttyGenerator;
+            let theme: Theme = Theme::mock();
 
-        assert!(
-            cache_file.exists(),
-            "Cache file should exist before removal"
-        );
-        assert!(link_file.exists(), "Link file should exist before removal");
+            let status = generator.health_check(&ctx.paths, &theme.name);
+            assert!(status.is_error(), "Expected Error, got: {status}");
+            assert!(status.contains("config file missing"));
+        }
 
-        generator.remove_theme(&ctx.paths, "").unwrap();
+        #[test]
+        fn should_return_health_warning_no_import_for_ghostty() {
+            skip_if_not_installed!(GhosttyGenerator);
 
-        assert!(
-            !cache_file.exists(),
-            "remove_theme should delete the cache file"
-        );
-        assert!(
-            !link_file.exists(),
-            "remove_theme should delete the target link file"
-        );
+            let (_, mut ctx) = mock_context();
+            let generator = GhosttyGenerator;
+            let theme: Theme = Theme::mock();
+
+            let mut task = ctx.log.step("Test", false).muted();
+            ctx.state.current_theme = theme.name.clone();
+            generator
+                .apply(&theme, &ctx.paths, &ctx.templater, &mut task)
+                .unwrap();
+
+            let config_path = generator
+                .resolve_config_directory(&ctx.paths)
+                .join("config");
+            fs::write(&config_path, "font-family = JetBrainsMono").unwrap();
+
+            let status = generator.health_check(&ctx.paths, &theme.name);
+
+            assert!(
+                status.is_warning(),
+                "Expected Warning for missing import line, got: {status}"
+            );
+            assert!(status.contains("not imported"));
+        }
+
+        #[test]
+        fn should_fix_inject_issue_for_ghostty() {
+            skip_if_not_installed!(GhosttyGenerator);
+
+            let (_, ctx) = mock_context();
+            let generator = GhosttyGenerator;
+            let theme: Theme = Theme::mock();
+
+            let config_dir = generator.resolve_config_directory(&ctx.paths);
+            fs::create_dir_all(&config_dir).unwrap();
+            let config_path = config_dir.join("config");
+
+            let mut task = ctx.log.step("Test", false).muted();
+            generator
+                .apply(&theme, &ctx.paths, &ctx.templater, &mut task)
+                .unwrap();
+            fs::write(&config_path, "font-size = 12").unwrap();
+
+            let status = generator.health_check(&ctx.paths, &theme.name);
+            generator
+                .fix(&status, &theme, &ctx.paths, &ctx.templater, &mut task)
+                .expect("Fix failed");
+
+            let content = fs::read_to_string(&config_path).unwrap();
+            assert!(content.contains("current_theme.conf"));
+            assert!(generator.health_check(&ctx.paths, &theme.name).is_ok());
+        }
+
+        #[test]
+        fn should_fix_broken_link_for_ghostty() {
+            skip_if_not_installed!(GhosttyGenerator);
+
+            let (_, mut ctx) = mock_context();
+            let generator = GhosttyGenerator;
+            let theme: Theme = Theme::mock();
+            ctx.state.current_theme = theme.name.clone();
+
+            let mut task = ctx.log.step("Test", false).muted();
+            let ghostty_dir = generator.resolve_config_directory(&ctx.paths);
+            let config_path = ghostty_dir.join("config");
+            fs::create_dir_all(&ghostty_dir).unwrap();
+
+            let import_line = format!("config-file = {}", generator.target_file_name(""));
+            fs::write(&config_path, import_line).unwrap();
+
+            generator
+                .apply(&theme, &ctx.paths, &ctx.templater, &mut task)
+                .unwrap();
+
+            let link_path_empty = generator.link_path(&ctx.paths, "");
+            if link_path_empty.exists() {
+                fs::remove_file(&link_path_empty).unwrap();
+            }
+
+            let link_path_theme = generator.link_path(&ctx.paths, &theme.name);
+            if link_path_theme.exists() && link_path_theme != link_path_empty {
+                fs::remove_file(&link_path_theme).unwrap();
+            }
+
+            let status = generator.health_check(&ctx.paths, &theme.name);
+            assert!(status.is_error());
+            assert!(status.contains("missing or invalid"));
+
+            generator
+                .fix(&status, &theme, &ctx.paths, &ctx.templater, &mut task)
+                .unwrap();
+            assert!(generator.health_check(&ctx.paths, &theme.name).is_ok());
+        }
     }
 }

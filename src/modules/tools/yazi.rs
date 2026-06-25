@@ -272,215 +272,236 @@ impl YaziGenerator {
     }
 }
 
-/// Unit-tests for yazi generator
+/// Tests for yazi generator
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::tests::create_test_context;
+    use crate::utils::tests::mock_context;
 
-    #[test]
-    fn should_return_yazi_metadata() {
-        let generator = YaziGenerator;
-        assert_eq!(generator.name(), "yazi");
-        assert_eq!(generator.generator_type(), GeneratorType::Tool);
-        assert_eq!(generator.target_file_name("cattpuccin"), "cattpuccin.toml");
-    }
+    /// Unit-tests for yazi
+    mod unit {
+        use super::*;
 
-    #[test]
-    fn should_build_valid_render_context() {
-        let generator = YaziGenerator;
-        let mut theme: Theme = Theme::mock();
-
-        theme.colors.line_hl = "#123456".to_string();
-        let ctx = generator.build_render_context(&theme);
-        assert_eq!(ctx.get("line_hl").unwrap().as_str().unwrap(), "#123456");
-
-        theme.colors.line_hl = "#cccccc".to_string();
-        theme.colors.sel = "#ff0000".to_string();
-        let ctx = generator.build_render_context(&theme);
-
-        assert_eq!(ctx.get("line_hl").unwrap().as_str().unwrap(), "#ff0000");
-        assert!(ctx.get("red").is_some());
-        assert!(ctx.get("br_teal").is_some());
-    }
-
-    #[test]
-    fn should_return_health_ok_for_yazi() {
-        let (_, mut ctx) = create_test_context();
-        let generator = YaziGenerator;
-        let theme: Theme = Theme::mock();
-
-        ctx.state.current_theme = theme.name.clone();
-        let mut task = ctx.log.step("Test", false);
-        generator
-            .apply(&theme, &ctx.paths, &ctx.templater, &mut task)
-            .unwrap();
-
-        let status = generator.health_check(&ctx.paths, &theme.name);
-        assert!(status.is_ok(), "Expected Ok, got: {status}");
-    }
-
-    #[test]
-    fn should_return_health_error_missing_link_for_yazi() {
-        let (_, ctx) = create_test_context();
-        let generator = YaziGenerator;
-        let link = generator.link_path(&ctx.paths, "");
-
-        if link.exists() || link.is_symlink() {
-            let _ = fs::remove_file(&link);
+        #[test]
+        fn should_return_yazi_metadata() {
+            let generator = YaziGenerator;
+            assert_eq!(generator.name(), "yazi");
+            assert_eq!(generator.generator_type(), GeneratorType::Tool);
+            assert_eq!(generator.target_file_name("cattpuccin"), "cattpuccin.toml");
         }
 
-        let status = generator.health_check(&ctx.paths, &ctx.state.current_theme);
-        assert!(status.is_error(), "Expected Error, got: {status}");
-        assert!(status.contains("missing") || status.contains("not found"));
-    }
+        #[test]
+        fn should_build_valid_render_context() {
+            let generator = YaziGenerator;
+            let mut theme: Theme = Theme::mock();
 
-    #[test]
-    fn should_return_health_error_missing_cache_for_yazi() {
-        let (_, mut ctx) = create_test_context();
-        let generator = YaziGenerator;
-        let theme: Theme = Theme::mock();
-        ctx.state.current_theme = theme.name.clone();
+            theme.colors.line_hl = "#123456".to_string();
+            let ctx = generator.build_render_context(&theme);
+            assert_eq!(ctx.get("line_hl").unwrap().as_str().unwrap(), "#123456");
 
-        let mut task = ctx.log.step("Test", false).muted();
-        generator
-            .apply(&theme, &ctx.paths, &ctx.templater, &mut task)
-            .unwrap();
-        let cache_path = generator.cache_path(&ctx.paths, &theme.name);
-        fs::remove_file(cache_path).unwrap();
+            theme.colors.line_hl = "#cccccc".to_string();
+            theme.colors.sel = "#ff0000".to_string();
+            let ctx = generator.build_render_context(&theme);
 
-        let status = generator.health_check(&ctx.paths, &theme.name);
-        assert!(status.is_error(), "Expected Error, got: {status}");
-        assert!(status.contains("cache") && status.contains("missing"));
-    }
+            assert_eq!(ctx.get("line_hl").unwrap().as_str().unwrap(), "#ff0000");
+            assert!(ctx.get("red").is_some());
+            assert!(ctx.get("br_teal").is_some());
+        }
 
-    #[test]
-    fn should_apply_theme_for_yazi() {
-        let (_, ctx) = create_test_context();
-        let generator = YaziGenerator;
-        let theme: Theme = Theme::mock();
+        #[test]
+        fn should_apply_theme_for_yazi() {
+            let (_, ctx) = mock_context();
+            let generator = YaziGenerator;
+            let theme: Theme = Theme::mock();
 
-        let mut task = ctx.log.step("Test", false);
-        generator
-            .apply(&theme, &ctx.paths, &ctx.templater, &mut task)
-            .unwrap();
+            let mut task = ctx.log.step("Test", false);
+            generator
+                .apply(&theme, &ctx.paths, &ctx.templater, &mut task)
+                .unwrap();
 
-        let expected_yazi_dir = generator.resolve_config_directory(&ctx.paths);
-        let yazi_theme_link = expected_yazi_dir.join("theme.toml");
+            let expected_yazi_dir = generator.resolve_config_directory(&ctx.paths);
+            let yazi_theme_link = expected_yazi_dir.join("theme.toml");
 
-        assert!(
-            yazi_theme_link.exists(),
-            "Symlink missing at {:?}. Check if resolve_config_directory is consistent!",
-            yazi_theme_link
-        );
+            assert!(
+                yazi_theme_link.exists(),
+                "Symlink missing at {:?}. Check if resolve_config_directory is consistent!",
+                yazi_theme_link
+            );
 
-        let cache_content = fs::read_to_string(yazi_theme_link).unwrap();
-        assert!(cache_content.contains("generated by Iris"));
-    }
+            let cache_content = fs::read_to_string(yazi_theme_link).unwrap();
+            assert!(cache_content.contains("generated by Iris"));
+        }
 
-    #[test]
-    fn should_fix_broken_symlink_for_yazi() {
-        let (_, ctx) = create_test_context();
-        let generator = YaziGenerator;
-        let theme: Theme = Theme::mock();
+        #[test]
+        fn should_clear_generated_files_for_yazi() {
+            let (_, ctx) = mock_context();
+            let generator = YaziGenerator;
+            let theme: Theme = Theme::mock();
 
-        let mut task = ctx.log.step("Test", false);
-        generator
-            .apply(&theme, &ctx.paths, &ctx.templater, &mut task)
-            .unwrap();
+            let mut task = ctx.log.step("Test", false);
+            generator
+                .apply(&theme, &ctx.paths, &ctx.templater, &mut task)
+                .unwrap();
 
-        let link_path = generator.link_path(&ctx.paths, &theme.name);
-        let cache_file = generator.cache_path(&ctx.paths, &theme.name);
+            let cache_dir = ctx.paths.generators.join(generator.name());
+            assert!(cache_dir.exists());
 
-        fs::remove_file(&link_path).unwrap();
-
-        let status = generator.health_check(&ctx.paths, &theme.name);
-        assert!(status.is_error());
-        assert!(status.contains("link missing"));
-
-        generator
-            .fix(&status, &theme, &ctx.paths, &ctx.templater, &mut task)
-            .unwrap();
-        assert!(link_path.exists(), "Fix should recreate the symlink");
-
-        #[cfg(unix)]
-        {
-            let target = fs::read_link(&link_path).unwrap();
-            assert_eq!(
-                target, cache_file,
-                "Symlink should point back to the cache file"
+            generator.clear(&ctx.paths).unwrap();
+            assert!(
+                !cache_dir.exists(),
+                "Clear should remove the entire cache dir"
             );
         }
 
-        assert!(generator.health_check(&ctx.paths, &theme.name).is_ok());
+        #[test]
+        fn should_remove_theme_for_yazi() {
+            let (_, ctx) = mock_context();
+            let generator = YaziGenerator;
+            let theme: Theme = Theme::mock();
+
+            let mut task = ctx.log.step("Test", false);
+            generator
+                .apply(&theme, &ctx.paths, &ctx.templater, &mut task)
+                .unwrap();
+
+            let cache_file = generator.cache_path(&ctx.paths, &theme.name);
+            let link_file = generator.theme_path(&ctx.paths, &theme.name);
+
+            assert!(cache_file.exists());
+            assert!(link_file.exists());
+
+            generator.remove_theme(&ctx.paths, &theme.name).unwrap();
+
+            assert!(!cache_file.exists());
+            assert!(!link_file.exists());
+        }
     }
 
-    #[test]
-    fn should_fix_missing_cache_for_yazi() {
-        let (_, ctx) = create_test_context();
-        let generator = YaziGenerator;
-        let theme: Theme = Theme::mock();
-        let mut task = ctx.log.step("Test", false).muted();
+    /// Integration tests for yazi
+    mod integration {
+        use super::*;
+        use crate::skip_if_not_installed;
 
-        generator
-            .apply(&theme, &ctx.paths, &ctx.templater, &mut task)
-            .unwrap();
+        #[test]
+        fn should_return_health_ok_for_yazi() {
+            skip_if_not_installed!(YaziGenerator);
 
-        let cache_file = generator.cache_path(&ctx.paths, &theme.name);
-        fs::remove_file(&cache_file).unwrap();
+            let (_, mut ctx) = mock_context();
+            let generator = YaziGenerator;
+            let theme: Theme = Theme::mock();
 
-        let status = generator.health_check(&ctx.paths, &theme.name);
-        assert!(status.is_error());
-        assert!(status.contains("cache") && status.contains("missing"));
+            ctx.state.current_theme = theme.name.clone();
+            let mut task = ctx.log.step("Test", false);
+            generator
+                .apply(&theme, &ctx.paths, &ctx.templater, &mut task)
+                .unwrap();
 
-        generator
-            .fix(&status, &theme, &ctx.paths, &ctx.templater, &mut task)
-            .unwrap();
-        assert!(cache_file.exists());
-        assert!(generator.health_check(&ctx.paths, &theme.name).is_ok());
-    }
+            let status = generator.health_check(&ctx.paths, &theme.name);
+            assert!(status.is_ok(), "Expected Ok, got: {status}");
+        }
 
-    #[test]
-    fn should_clear_generated_files_for_yazi() {
-        let (_, ctx) = create_test_context();
-        let generator = YaziGenerator;
-        let theme: Theme = Theme::mock();
+        #[test]
+        fn should_return_health_error_missing_link_for_yazi() {
+            skip_if_not_installed!(YaziGenerator);
 
-        let mut task = ctx.log.step("Test", false);
-        generator
-            .apply(&theme, &ctx.paths, &ctx.templater, &mut task)
-            .unwrap();
+            let (_, ctx) = mock_context();
+            let generator = YaziGenerator;
+            let link = generator.link_path(&ctx.paths, "");
 
-        let cache_dir = ctx.paths.generators.join(generator.name());
-        assert!(cache_dir.exists());
+            if link.exists() || link.is_symlink() {
+                let _ = fs::remove_file(&link);
+            }
 
-        generator.clear(&ctx.paths).unwrap();
-        assert!(
-            !cache_dir.exists(),
-            "Clear should remove the entire cache dir"
-        );
-    }
+            let status = generator.health_check(&ctx.paths, &ctx.state.current_theme);
+            assert!(status.is_error(), "Expected Error, got: {status}");
+            assert!(status.contains("missing") || status.contains("not found"));
+        }
 
-    #[test]
-    fn should_remove_theme_for_yazi() {
-        let (_, ctx) = create_test_context();
-        let generator = YaziGenerator;
-        let theme: Theme = Theme::mock();
+        #[test]
+        fn should_return_health_error_missing_cache_for_yazi() {
+            skip_if_not_installed!(YaziGenerator);
 
-        let mut task = ctx.log.step("Test", false);
-        generator
-            .apply(&theme, &ctx.paths, &ctx.templater, &mut task)
-            .unwrap();
+            let (_, mut ctx) = mock_context();
+            let generator = YaziGenerator;
+            let theme: Theme = Theme::mock();
+            ctx.state.current_theme = theme.name.clone();
 
-        let cache_file = generator.cache_path(&ctx.paths, &theme.name);
-        let link_file = generator.theme_path(&ctx.paths, &theme.name);
+            let mut task = ctx.log.step("Test", false).muted();
+            generator
+                .apply(&theme, &ctx.paths, &ctx.templater, &mut task)
+                .unwrap();
+            let cache_path = generator.cache_path(&ctx.paths, &theme.name);
+            fs::remove_file(cache_path).unwrap();
 
-        assert!(cache_file.exists());
-        assert!(link_file.exists());
+            let status = generator.health_check(&ctx.paths, &theme.name);
+            assert!(status.is_error(), "Expected Error, got: {status}");
+            assert!(status.contains("cache") && status.contains("missing"));
+        }
 
-        generator.remove_theme(&ctx.paths, &theme.name).unwrap();
+        #[test]
+        fn should_fix_broken_symlink_for_yazi() {
+            skip_if_not_installed!(YaziGenerator);
 
-        assert!(!cache_file.exists());
-        assert!(!link_file.exists());
+            let (_, ctx) = mock_context();
+            let generator = YaziGenerator;
+            let theme: Theme = Theme::mock();
+
+            let mut task = ctx.log.step("Test", false);
+            generator
+                .apply(&theme, &ctx.paths, &ctx.templater, &mut task)
+                .unwrap();
+
+            let link_path = generator.link_path(&ctx.paths, &theme.name);
+            let cache_file = generator.cache_path(&ctx.paths, &theme.name);
+
+            fs::remove_file(&link_path).unwrap();
+
+            let status = generator.health_check(&ctx.paths, &theme.name);
+            assert!(status.is_error());
+            assert!(status.contains("link missing"));
+
+            generator
+                .fix(&status, &theme, &ctx.paths, &ctx.templater, &mut task)
+                .unwrap();
+            assert!(link_path.exists(), "Fix should recreate the symlink");
+
+            #[cfg(unix)]
+            {
+                let target = fs::read_link(&link_path).unwrap();
+                assert_eq!(
+                    target, cache_file,
+                    "Symlink should point back to the cache file"
+                );
+            }
+
+            assert!(generator.health_check(&ctx.paths, &theme.name).is_ok());
+        }
+
+        #[test]
+        fn should_fix_missing_cache_for_yazi() {
+            skip_if_not_installed!(YaziGenerator);
+
+            let (_, ctx) = mock_context();
+            let generator = YaziGenerator;
+            let theme: Theme = Theme::mock();
+            let mut task = ctx.log.step("Test", false).muted();
+
+            generator
+                .apply(&theme, &ctx.paths, &ctx.templater, &mut task)
+                .unwrap();
+
+            let cache_file = generator.cache_path(&ctx.paths, &theme.name);
+            fs::remove_file(&cache_file).unwrap();
+
+            let status = generator.health_check(&ctx.paths, &theme.name);
+            assert!(status.is_error());
+            assert!(status.contains("cache") && status.contains("missing"));
+
+            generator
+                .fix(&status, &theme, &ctx.paths, &ctx.templater, &mut task)
+                .unwrap();
+            assert!(cache_file.exists());
+            assert!(generator.health_check(&ctx.paths, &theme.name).is_ok());
+        }
     }
 }

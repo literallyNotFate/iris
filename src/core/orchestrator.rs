@@ -258,7 +258,7 @@ impl<'a> ThemeOrchestrator<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::tests::create_test_context;
+    use crate::utils::tests::mock_context;
 
     /// Helper to create dummy json palette for tests
     fn make_dummy_palette_json() -> &'static str {
@@ -267,7 +267,7 @@ mod tests {
 
     #[test]
     fn should_save_and_load_cache() {
-        let (_temp, ctx) = create_test_context();
+        let (_temp, ctx) = mock_context();
         let orchestrator = ThemeOrchestrator::new(&ctx.paths, &ctx.log);
         let theme_name = "catppuccin";
         let cache_path = ctx.paths.themes.join(format!("{}.json", theme_name));
@@ -294,7 +294,7 @@ mod tests {
 
     #[test]
     fn should_read_theme_from_valid_path() {
-        let (_temp, ctx) = create_test_context();
+        let (_temp, ctx) = mock_context();
         let orchestrator = ThemeOrchestrator::new(&ctx.paths, &ctx.log);
         let cache_path = &ctx.paths.current_theme;
 
@@ -309,7 +309,7 @@ mod tests {
 
     #[test]
     fn should_invoke_error_when_theme_file_is_empty() {
-        let (temp, ctx) = create_test_context();
+        let (temp, ctx) = mock_context();
         let cache_path: PathBuf = temp.path().join("empty_theme");
         let orchestrator = ThemeOrchestrator::new(&ctx.paths, &ctx.log);
 
@@ -351,7 +351,7 @@ mod tests {
 
     #[test]
     fn should_read_from_cache_in_default_manager_even_if_external() {
-        let (_temp, mut ctx) = create_test_context();
+        let (_temp, mut ctx) = mock_context();
         ctx.state.manager = PluginManager::Default;
         let orchestrator = ThemeOrchestrator::new(&ctx.paths, &ctx.log);
         let theme = "vesper";
@@ -375,7 +375,7 @@ mod tests {
 
     #[test]
     fn should_ignore_cache_when_force_is_true() {
-        let (_temp, mut ctx) = create_test_context();
+        let (_temp, mut ctx) = mock_context();
         ctx.state.manager = PluginManager::Lazy;
         let orchestrator = ThemeOrchestrator::new(&ctx.paths, &ctx.log);
 
@@ -432,7 +432,7 @@ mod tests {
 
     #[test]
     fn should_only_save_to_cache_when_save_flag_is_true() {
-        let (_temp, ctx) = create_test_context();
+        let (_temp, ctx) = mock_context();
         let orchestrator = ThemeOrchestrator::new(&ctx.paths, &ctx.log);
         let theme = "habamax";
         let cache_path = ctx.paths.themes.join(format!("{}.json", theme));
