@@ -86,11 +86,11 @@ fn handle_remove(theme: &str, ctx: &IrisContext) -> Result<()> {
     let theme_lower: String = theme.to_lowercase();
     let path: PathBuf = ctx.paths.cached_theme(theme);
 
-    if ctx.state.current_theme == theme_lower {
+    if ctx.state.theme.current_theme == theme_lower {
         anyhow::bail!("Cannot remove active theme `{}`.", theme.cyan().bold());
     }
 
-    if ctx.state.fallback_theme == theme_lower {
+    if ctx.state.theme.fallback_theme == theme_lower {
         anyhow::bail!("Cannot remove fallback theme `{}`.", theme.magenta().bold());
     }
 
@@ -124,9 +124,9 @@ fn render_list(ctx: &IrisContext) -> Result<()> {
             let size = fs::metadata(&file_path)?.len();
             let display_name = utils::capitalize(&name);
 
-            let status = if name == ctx.state.current_theme {
+            let status = if name == ctx.state.theme.current_theme {
                 "✓  (active)".green()
-            } else if name == ctx.state.fallback_theme {
+            } else if name == ctx.state.theme.fallback_theme {
                 "󰁯  (fallback)".blue()
             } else {
                 "".into()
@@ -143,9 +143,9 @@ fn render_list(ctx: &IrisContext) -> Result<()> {
         let list = themes
             .iter()
             .map(|name| {
-                if name == &ctx.state.current_theme {
+                if name == &ctx.state.theme.current_theme {
                     format!("{}*", utils::capitalize(name).green().bold())
-                } else if name == &ctx.state.fallback_theme {
+                } else if name == &ctx.state.theme.fallback_theme {
                     format!("{}!", utils::capitalize(name).blue())
                 } else {
                     utils::capitalize(name)
@@ -202,14 +202,16 @@ fn render_info(ctx: &IrisContext) -> Result<()> {
         println!(
             "    {:<12} {}",
             "Theme",
-            utils::capitalize(&ctx.state.current_theme).green().bold()
+            utils::capitalize(&ctx.state.theme.current_theme)
+                .green()
+                .bold()
         );
         println!(
             "    {:<12} {}",
             "Fallback",
-            utils::capitalize(&ctx.state.fallback_theme).blue()
+            utils::capitalize(&ctx.state.theme.fallback_theme).blue()
         );
-        println!("    {:<12} {}", "Manager", ctx.state.manager);
+        println!("    {:<12} {}", "Manager", ctx.state.nvim.manager);
     } else {
         println!(
             "{}  Cache: {} palettes ({}) | Configs: {} | Active: {}",
@@ -217,7 +219,9 @@ fn render_info(ctx: &IrisContext) -> Result<()> {
             palette_count,
             utils::format_size(p_size).yellow(),
             utils::format_size(g_size).yellow(),
-            utils::capitalize(&ctx.state.current_theme).green().bold()
+            utils::capitalize(&ctx.state.theme.current_theme)
+                .green()
+                .bold()
         );
     }
 

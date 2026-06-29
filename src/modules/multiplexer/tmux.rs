@@ -485,7 +485,7 @@ mod tests {
             .unwrap();
 
             let mut task = ctx.log.step("Test", false).muted();
-            ctx.state.current_theme = theme.name.clone();
+            ctx.state.theme.current_theme = theme.name.clone();
             generator
                 .apply(&theme, &ctx.paths, &ctx.templater, &mut task)
                 .expect("Apply failed");
@@ -517,7 +517,7 @@ mod tests {
             .unwrap();
 
             let mut task = ctx.log.step("Test", false).muted();
-            ctx.state.current_theme = theme.name.clone();
+            ctx.state.theme.current_theme = theme.name.clone();
             generator
                 .apply(&theme, &ctx.paths, &ctx.templater, &mut task)
                 .unwrap();
@@ -548,7 +548,7 @@ mod tests {
             fs::create_dir_all(&tmux_dir).unwrap();
             let tmux_conf = tmux_dir.join("tmux.conf");
 
-            ctx.state.current_theme = theme.name.clone();
+            ctx.state.theme.current_theme = theme.name.clone();
             fs::write(
                 &tmux_conf,
                 "source-file ~/.config/tmux/themes/wrong.conf # iris-theme",
@@ -585,7 +585,7 @@ mod tests {
             .unwrap();
 
             let mut task = ctx.log.step("Test", false).muted();
-            ctx.state.current_theme = theme.name.clone();
+            ctx.state.theme.current_theme = theme.name.clone();
             generator
                 .apply(&theme, &ctx.paths, &ctx.templater, &mut task)
                 .unwrap();
@@ -641,7 +641,7 @@ mod tests {
             let (_, mut ctx) = mock_context();
             let generator = TmuxGenerator;
             let theme: Theme = Theme::mock();
-            ctx.state.current_theme = theme.name.clone();
+            ctx.state.theme.current_theme = theme.name.clone();
 
             let mut task = ctx.log.step("Test", false).muted();
             generator
@@ -670,7 +670,7 @@ mod tests {
             let (_, mut ctx) = mock_context();
             let generator = TmuxGenerator;
             let theme: Theme = Theme::mock();
-            ctx.state.current_theme = theme.name.clone();
+            ctx.state.theme.current_theme = theme.name.clone();
 
             let mut task = ctx.log.step("Test", false).muted();
             generator

@@ -52,7 +52,7 @@ impl IrisSetup {
 
     fn setup_initial_state(ctx: &mut IrisContext, task: &Activity) -> Result<()> {
         if ctx.paths.state_file.exists() {
-            task.info("Found existing state.json, loading configuration.");
+            task.info("Found existing state.toml, loading configuration.");
             return Ok(());
         }
 
@@ -68,7 +68,7 @@ impl IrisSetup {
             ));
         }
 
-        ctx.state.manager = manager;
+        ctx.state.nvim.manager = manager;
         task.info("Detecting active Neovim theme...");
 
         let orchestrator = ThemeOrchestrator::new(&ctx.paths, &task.log);
@@ -234,9 +234,9 @@ mod tests {
                 assert!(ctx.paths.cache.exists(), "Cache dir should be created");
                 assert!(
                     ctx.paths.state_file.exists(),
-                    "state.json should be created"
+                    "state file should be created"
                 );
-                assert_eq!(ctx.state.manager, PluginManager::Default);
+                assert_eq!(ctx.state.nvim.manager, PluginManager::Default);
 
                 let zshrc_content = fs::read_to_string(fake_home.join(".zshrc")).unwrap();
                 assert!(zshrc_content.contains("Iris FZF Sync"));

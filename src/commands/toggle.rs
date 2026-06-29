@@ -9,12 +9,12 @@ use crate::{
 pub fn exec(ctx: &mut IrisContext) -> anyhow::Result<()> {
     use colored::Colorize;
 
-    let (target_name, is_fallback) = match &ctx.state.previous_theme {
+    let (target_name, is_fallback) = match &ctx.state.theme.previous_theme {
         Some(prev) => (prev.clone(), false),
-        None => (ctx.state.fallback_theme.clone(), true),
+        None => (ctx.state.theme.fallback_theme.clone(), true),
     };
 
-    let old_theme: String = ctx.state.current_theme.clone();
+    let old_theme: String = ctx.state.theme.current_theme.clone();
     if is_fallback {
         println!(
             "\n{}  No theme history found, using fallback: {}",

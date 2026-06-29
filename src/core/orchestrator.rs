@@ -43,7 +43,7 @@ impl<'a> ThemeOrchestrator<'a> {
 
     /// Get theme sync status
     pub fn get_sync_status(&self, state: &State) -> (String, bool) {
-        let current: &String = &state.current_theme;
+        let current: &String = &state.theme.current_theme;
         let nvim_theme: String = self.get_current_theme().unwrap_or_default();
         let is_sync: bool = nvim_theme.eq_ignore_ascii_case(current);
 
@@ -68,7 +68,7 @@ impl<'a> ThemeOrchestrator<'a> {
     ) -> Result<Theme> {
         let theme_lower: String = theme_name.to_lowercase();
         let theme_cap: String = utils::capitalize(theme_name);
-        let cache_path: PathBuf = self.paths.cached_theme(&theme_name);
+        let cache_path: PathBuf = self.paths.cached_theme(theme_name);
 
         let main_task = self.log.step_with_icon(
             "".magenta().bold(),
@@ -87,7 +87,7 @@ impl<'a> ThemeOrchestrator<'a> {
             }
         }
 
-        if state.manager == PluginManager::Default {
+        if state.nvim.manager == PluginManager::Default {
             let builtins: Vec<String> = NeovimBridge::get_builtin_themes();
             if !builtins.contains(&theme_lower) {
                 if cache_path.exists() {
@@ -148,7 +148,7 @@ impl<'a> ThemeOrchestrator<'a> {
             return true;
         }
 
-        if state.manager == PluginManager::Default {
+        if state.nvim.manager == PluginManager::Default {
             return NeovimBridge::get_builtin_themes().contains(&theme_lower);
         }
 
@@ -270,18 +270,16 @@ mod tests {
         let (_temp, ctx) = mock_context();
         let orchestrator = ThemeOrchestrator::new(&ctx.paths, &ctx.log);
         let theme_name = "catppuccin";
-        let cache_path = ctx.paths.themes.join(format!("{}.json", theme_name));
+        let cache_path = ctx.paths.cached_theme(theme_name);
+
         let dummy_palette: Palette = serde_json::from_str(make_dummy_palette_json()).unwrap();
         let theme_to_cache = Theme::new(&utils::capitalize(theme_name), dummy_palette);
 
         if let Some(parent) = cache_path.parent() {
             fs::create_dir_all(parent).unwrap();
         }
-        fs::write(
-            &cache_path,
-            serde_json::to_string_pretty(&theme_to_cache).unwrap(),
-        )
-        .unwrap();
+
+        theme_to_cache.save_to_cache(&cache_path).unwrap();
         assert!(cache_path.exists());
 
         let result = orchestrator.load_theme(theme_name, false, false, &ctx.state);
@@ -301,7 +299,7 @@ mod tests {
         if let Some(parent) = cache_path.parent() {
             fs::create_dir_all(parent).unwrap();
         }
-        fs::write(&cache_path, "  melange  ").unwrap();
+        fs::write(cache_path, "  melange  ").unwrap();
 
         let result = orchestrator.get_current_theme().unwrap();
         assert_eq!(result, "Melange");
@@ -352,21 +350,18 @@ mod tests {
     #[test]
     fn should_read_from_cache_in_default_manager_even_if_external() {
         let (_temp, mut ctx) = mock_context();
-        ctx.state.manager = PluginManager::Default;
+        ctx.state.nvim.manager = PluginManager::Default;
         let orchestrator = ThemeOrchestrator::new(&ctx.paths, &ctx.log);
         let theme = "vesper";
-        let cache_path = ctx.paths.themes.join(format!("{}.json", theme));
+
+        let cache_path = ctx.paths.cached_theme(theme);
         let dummy_palette: Palette = serde_json::from_str(make_dummy_palette_json()).unwrap();
         let theme_to_cache = Theme::new("Vesper", dummy_palette);
 
         if let Some(parent) = cache_path.parent() {
             fs::create_dir_all(parent).unwrap();
         }
-        fs::write(
-            &cache_path,
-            serde_json::to_string_pretty(&theme_to_cache).unwrap(),
-        )
-        .unwrap();
+        theme_to_cache.save_to_cache(&cache_path).unwrap();
 
         let result = orchestrator.load_theme(theme, false, false, &ctx.state);
         assert!(result.is_ok());
@@ -376,40 +371,20 @@ mod tests {
     #[test]
     fn should_ignore_cache_when_force_is_true() {
         let (_temp, mut ctx) = mock_context();
-        ctx.state.manager = PluginManager::Lazy;
+        ctx.state.nvim.manager = PluginManager::Lazy;
         let orchestrator = ThemeOrchestrator::new(&ctx.paths, &ctx.log);
 
         let theme = "habamax";
-        let cache_path = ctx.paths.themes.join(format!("{}.json", theme));
-        let old_palette_json = r##"{
-            "name": "Habamax",
-            "colors": {
-                "bg": "#000000",
-                "fg": "",
-                "caret": "",
-                "line_hl": "",
-                "sel": "",
-                "gutter_fg": "",
-                "comment": "",
-                "variable": "",
-                "constant": "",
-                "number": "",
-                "string": "",
-                "keyword": "",
-                "operator": "",
-                "func": "",
-                "type_name": "",
-                "tag": "",
-                "attribute": "",
-                "white": "",
-                "ansi": []
-            }
-        }"##;
+        let cache_path = ctx.paths.cached_theme(theme);
+
+        let dummy_palette: Palette = serde_json::from_str(make_dummy_palette_json()).unwrap();
+        let mut theme_to_cache = Theme::new("Habamax", dummy_palette);
+        theme_to_cache.colors.bg = "#000000".to_string();
 
         if let Some(parent) = cache_path.parent() {
             fs::create_dir_all(parent).unwrap();
         }
-        fs::write(&cache_path, old_palette_json).unwrap();
+        theme_to_cache.save_to_cache(&cache_path).unwrap();
 
         let cached_res = orchestrator
             .load_theme(theme, false, false, &ctx.state)
@@ -435,7 +410,7 @@ mod tests {
         let (_temp, ctx) = mock_context();
         let orchestrator = ThemeOrchestrator::new(&ctx.paths, &ctx.log);
         let theme = "habamax";
-        let cache_path = ctx.paths.themes.join(format!("{}.json", theme));
+        let cache_path = ctx.paths.cached_theme(theme);
 
         if cache_path.exists() {
             fs::remove_file(&cache_path).unwrap();

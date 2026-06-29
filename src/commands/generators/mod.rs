@@ -195,7 +195,7 @@ pub fn handle_auto(ctx: &mut IrisContext) -> anyhow::Result<()> {
 
         println!();
         ctx.log
-            .action("Saved configuration to state.json", || ctx.save())?;
+            .action("Saved configuration to state file", || ctx.save())?;
     } else {
         ctx.log.info("All discovered apps are already active.");
     }

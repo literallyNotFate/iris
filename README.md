@@ -89,7 +89,7 @@ What init does:
 
 - Creates `~/.cache/iris/` directory.
 
-- Initializes state.json to track your preferences.
+- Initializes state file to track your preferences.
 
 - Injects a Sync Hook into your `.zshrc`. This hook allows Iris to update the environment (like `fzf` colors) in real-time across all open terminal tabs whenever you switch themes.
 

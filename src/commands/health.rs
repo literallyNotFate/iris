@@ -26,7 +26,8 @@ pub fn exec(fix: bool, ctx: &mut IrisContext) -> anyhow::Result<()> {
             continue;
         }
 
-        let status: HealthStatus = generator.health_check(&ctx.paths, &ctx.state.current_theme);
+        let status: HealthStatus =
+            generator.health_check(&ctx.paths, &ctx.state.theme.current_theme);
         if status.is_ok() {
             healthy.push((generator, status));
         } else {
@@ -51,7 +52,7 @@ pub fn exec(fix: bool, ctx: &mut IrisContext) -> anyhow::Result<()> {
                 let quiet_logger: Logger = Logger::silent();
                 let orchestrator = ThemeOrchestrator::new(&ctx.paths, &quiet_logger);
                 theme_obj = Some(orchestrator.load_theme(
-                    &ctx.state.current_theme,
+                    &ctx.state.theme.current_theme,
                     false,
                     true,
                     &ctx.state,

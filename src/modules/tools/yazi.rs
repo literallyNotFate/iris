@@ -390,7 +390,7 @@ mod tests {
             let generator = YaziGenerator;
             let theme: Theme = Theme::mock();
 
-            ctx.state.current_theme = theme.name.clone();
+            ctx.state.theme.current_theme = theme.name.clone();
             let mut task = ctx.log.step("Test", false);
             generator
                 .apply(&theme, &ctx.paths, &ctx.templater, &mut task)
@@ -412,7 +412,7 @@ mod tests {
                 let _ = fs::remove_file(&link);
             }
 
-            let status = generator.health_check(&ctx.paths, &ctx.state.current_theme);
+            let status = generator.health_check(&ctx.paths, &ctx.state.theme.current_theme);
             assert!(status.is_error(), "Expected Error, got: {status}");
             assert!(status.contains("missing") || status.contains("not found"));
         }
@@ -424,7 +424,7 @@ mod tests {
             let (_, mut ctx) = mock_context();
             let generator = YaziGenerator;
             let theme: Theme = Theme::mock();
-            ctx.state.current_theme = theme.name.clone();
+            ctx.state.theme.current_theme = theme.name.clone();
 
             let mut task = ctx.log.step("Test", false).muted();
             generator

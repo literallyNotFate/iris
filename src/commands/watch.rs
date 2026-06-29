@@ -64,7 +64,7 @@ fn handle_change(path: &PathBuf, ctx: &mut IrisContext) -> anyhow::Result<()> {
     let content: String = fs::read_to_string(path)?;
     let theme_name: String = content.trim().to_string();
 
-    if theme_name.is_empty() || theme_name == ctx.state.current_theme {
+    if theme_name.is_empty() || theme_name == ctx.state.theme.current_theme {
         return Ok(());
     }
 

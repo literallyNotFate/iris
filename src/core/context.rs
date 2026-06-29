@@ -26,14 +26,7 @@ impl IrisContext {
     pub fn new(log: Logger) -> Result<Self> {
         let paths = IrisPaths::new()?;
         let user_templates: Option<PathBuf> = Some(paths.config.join("templates"));
-
-        let state: State = if paths.state_file.exists() {
-            let content: String = fs::read_to_string(&paths.state_file)
-                .with_context(|| format!("Failed to read state at {:?}", &paths.state_file))?;
-            serde_json::from_str(&content).context("Failed to parse state.json")?
-        } else {
-            State::default()
-        };
+        let state: State = State::load_or_default(&paths.state_file);
 
         let ctx = Self {
             paths,
@@ -50,8 +43,8 @@ impl IrisContext {
         self.state.set_theme(name);
         self.paths.ensure_dirs()?;
 
-        let json: String = self.state.to_json()?;
-        fs::write(&self.paths.state_file, json)
+        let toml: String = self.state.to_toml()?;
+        fs::write(&self.paths.state_file, toml)
             .with_context(|| format!("Failed to save state to {:?}", self.paths.state_file))?;
 
         fs::write(&self.paths.current_theme, name).with_context(|| {
@@ -80,7 +73,7 @@ impl IrisContext {
             .map(|s| s.to_lowercase())
             .filter(|s| !s.is_empty())
             .or_else(|| {
-                let current: String = self.state.current_theme.to_lowercase();
+                let current: String = self.state.theme.current_theme.to_lowercase();
                 if current.is_empty() {
                     None
                 } else {
@@ -90,8 +83,8 @@ impl IrisContext {
 
         match target {
             Some(name) if self.is_theme_available(&name) => Ok((name, false)),
-            _ if fallback_enabled && !self.state.fallback_theme.is_empty() => {
-                let fb: String = self.state.fallback_theme.clone();
+            _ if fallback_enabled && !self.state.theme.fallback_theme.is_empty() => {
+                let fb: String = self.state.theme.fallback_theme.clone();
                 if self.is_theme_available(&fb) {
                     Ok((fb, true))
                 } else {
@@ -115,7 +108,7 @@ impl IrisContext {
             return true;
         }
 
-        if self.state.manager == PluginManager::Default {
+        if self.state.nvim.manager == PluginManager::Default {
             let is_builtin: bool = NeovimBridge::get_builtin_themes().iter().any(|t| t == name);
             return is_builtin || self.paths.is_theme_cached(name);
         }
@@ -149,7 +142,7 @@ impl IrisContext {
     /// Check if there are any generators with broken configs
     pub fn is_any_config_broken(&self) -> bool {
         self.registry.all().iter().any(|g| {
-            g.health_check(&self.paths, &self.state.current_theme)
+            g.health_check(&self.paths, &self.state.theme.current_theme)
                 .is_error()
         })
     }
@@ -169,7 +162,7 @@ mod tests {
         ctx.update(theme_name)
             .expect("Should update theme without errors");
 
-        assert_eq!(ctx.state.current_theme, theme_name.to_string());
+        assert_eq!(ctx.state.theme.current_theme, theme_name.to_string());
 
         let state_content = fs::read_to_string(&ctx.paths.state_file).unwrap();
         assert!(state_content.contains(theme_name));
@@ -194,10 +187,10 @@ mod tests {
         let mut ctx = ctx_orig;
         ctx.update("gruvbox").unwrap();
 
-        let state_json = fs::read_to_string(&ctx.paths.state_file).unwrap();
-        let loaded_state: State = serde_json::from_str(&state_json).unwrap();
+        let state_toml = fs::read_to_string(&ctx.paths.state_file).unwrap();
+        let loaded_state: State = toml::from_str(&state_toml).unwrap();
 
-        assert_eq!(loaded_state.current_theme, "gruvbox".to_string());
+        assert_eq!(loaded_state.theme.current_theme, "gruvbox".to_string());
     }
 
     #[test]
@@ -205,7 +198,8 @@ mod tests {
         let (_temp, ctx) = mock_context();
 
         fs::create_dir_all(&ctx.paths.themes).unwrap();
-        fs::write(ctx.paths.themes.join("gruvbox.json"), "{}").unwrap();
+        let cache_path = ctx.paths.cached_theme("gruvbox");
+        fs::write(&cache_path, "{}").unwrap();
 
         let (name, fallback) = ctx.resolve_theme(Some("Gruvbox".into()), false).unwrap();
 
@@ -216,10 +210,11 @@ mod tests {
     #[test]
     fn should_resolve_theme_fallback_to_current() {
         let (_temp, mut ctx) = mock_context();
-        ctx.state.current_theme = "nord".into();
+        ctx.state.theme.current_theme = "nord".into();
 
         fs::create_dir_all(&ctx.paths.themes).unwrap();
-        fs::write(ctx.paths.themes.join("nord.json"), "{}").unwrap();
+        let cache_path = ctx.paths.cached_theme("nord");
+        fs::write(&cache_path, "{}").unwrap();
 
         let (name, fallback) = ctx.resolve_theme(None, false).unwrap();
 
@@ -230,10 +225,11 @@ mod tests {
     #[test]
     fn should_resolve_theme_use_fallback_theme_on_error() {
         let (_temp, mut ctx) = mock_context();
-        ctx.state.fallback_theme = "tokyonight".into();
+        ctx.state.theme.fallback_theme = "tokyonight".into();
 
         fs::create_dir_all(&ctx.paths.themes).unwrap();
-        fs::write(ctx.paths.themes.join("tokyonight.json"), "{}").unwrap();
+        let cache_path = ctx.paths.cached_theme("tokyonight");
+        fs::write(&cache_path, "{}").unwrap();
 
         let (name, fallback) = ctx.resolve_theme(Some("invalid".into()), true).unwrap();
 
@@ -244,7 +240,7 @@ mod tests {
     #[test]
     fn should_check_if_theme_available_builtin() {
         let (_temp, mut ctx) = mock_context();
-        ctx.state.manager = PluginManager::Default;
+        ctx.state.nvim.manager = PluginManager::Default;
 
         assert!(ctx.is_theme_available("habamax"));
         assert!(!ctx.is_theme_available("non-existent-theme-123"));

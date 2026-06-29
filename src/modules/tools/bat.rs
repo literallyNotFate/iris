@@ -450,7 +450,7 @@ mod tests {
 
             temp_env::with_var("BAT_CACHE_PATH", Some(&test_bat_cache), || {
                 let mut task = ctx.log.step("Test", false).muted();
-                ctx.state.current_theme = theme.name.clone();
+                ctx.state.theme.current_theme = theme.name.clone();
 
                 generator
                     .apply(&theme, &ctx.paths, &ctx.templater, &mut task)
@@ -473,7 +473,7 @@ mod tests {
             let generator = BatGenerator;
 
             temp_env::with_var("BAT_CONFIG_PATH", Some("/wrong/path/to/bat/config"), || {
-                let status = generator.health_check(&ctx.paths, &ctx.state.current_theme);
+                let status = generator.health_check(&ctx.paths, &ctx.state.theme.current_theme);
                 assert!(
                     status.is_error(),
                     "Expected Error due to invalid env, got: {status}"

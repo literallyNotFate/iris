@@ -477,7 +477,7 @@ mod tests {
             let theme: Theme = Theme::mock();
 
             let mut task = ctx.log.step("Test", false).muted();
-            ctx.state.current_theme = theme.name.clone();
+            ctx.state.theme.current_theme = theme.name.clone();
             generator
                 .apply(&theme, &ctx.paths, &ctx.templater, &mut task)
                 .unwrap();
@@ -507,7 +507,7 @@ mod tests {
 
             let (_, ctx) = mock_context();
             let generator = BtopGenerator;
-            let status = generator.health_check(&ctx.paths, &ctx.state.current_theme);
+            let status = generator.health_check(&ctx.paths, &ctx.state.theme.current_theme);
 
             assert!(
                 status.is_error(),
@@ -525,7 +525,7 @@ mod tests {
             let theme: Theme = Theme::mock();
 
             let mut task = ctx.log.step("Test", false).muted();
-            ctx.state.current_theme = theme.name.clone();
+            ctx.state.theme.current_theme = theme.name.clone();
             generator
                 .apply(&theme, &ctx.paths, &ctx.templater, &mut task)
                 .unwrap();
@@ -592,7 +592,7 @@ mod tests {
             let theme: Theme = Theme::mock();
             let root = tmp_dir.path();
 
-            ctx.state.current_theme = theme.name.clone();
+            ctx.state.theme.current_theme = theme.name.clone();
             let btop_dir = root.join(".config/btop");
             fs::create_dir_all(btop_dir.join("themes")).unwrap();
 

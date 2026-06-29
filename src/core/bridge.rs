@@ -182,7 +182,7 @@ impl NeovimBridge {
         args.push("-u".into());
         args.push("NONE".into());
 
-        if state.manager != PluginManager::Default {
+        if state.nvim.manager != PluginManager::Default {
             if let Some(rtp_cmd) = state.get_rtp_command() {
                 args.push("-c".into());
                 args.push(rtp_cmd);
@@ -233,7 +233,7 @@ mod tests {
     #[test]
     fn should_test_build_args_for_lazy_manager() {
         let (_temp, mut ctx) = mock_context();
-        ctx.state.manager = PluginManager::Lazy;
+        ctx.state.nvim.manager = PluginManager::Lazy;
         let args = NeovimBridge::build_base_args(&ctx.state);
 
         assert!(args.contains(&"--headless".to_string()));
@@ -249,7 +249,7 @@ mod tests {
     #[test]
     fn should_test_build_args_without_rtp_for_default_manager() {
         let (_temp, mut ctx) = mock_context();
-        ctx.state.manager = PluginManager::Default;
+        ctx.state.nvim.manager = PluginManager::Default;
         let args = NeovimBridge::build_base_args(&ctx.state);
 
         let has_rtp = args.iter().any(|a| a.contains("vim.opt.rtp:append"));

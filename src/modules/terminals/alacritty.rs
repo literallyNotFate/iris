@@ -453,7 +453,7 @@ mod tests {
             let theme: Theme = Theme::mock();
 
             let mut task = ctx.log.step("Test", false).muted();
-            ctx.state.current_theme = theme.name.clone();
+            ctx.state.theme.current_theme = theme.name.clone();
             generator
                 .apply(&theme, &ctx.paths, &ctx.templater, &mut task)
                 .unwrap();
@@ -475,7 +475,7 @@ mod tests {
             let theme: Theme = Theme::mock();
 
             let mut task = ctx.log.step("Test", false).muted();
-            ctx.state.current_theme = theme.name.clone();
+            ctx.state.theme.current_theme = theme.name.clone();
             generator
                 .apply(&theme, &ctx.paths, &ctx.templater, &mut task)
                 .unwrap();
@@ -503,7 +503,7 @@ mod tests {
             let theme: Theme = Theme::mock();
 
             let mut task = ctx.log.step("Test", false).muted();
-            ctx.state.current_theme = theme.name.clone();
+            ctx.state.theme.current_theme = theme.name.clone();
             generator
                 .apply(&theme, &ctx.paths, &ctx.templater, &mut task)
                 .unwrap();

@@ -24,7 +24,7 @@ pub fn mock_context() -> (TempDir, IrisContext) {
         core: root.join(".cache/iris/core"),
         generators: root.join(".cache/iris/generators"),
         bin: root.join(".cache/iris/bin"),
-        state_file: root.join(".config/iris/state.json"),
+        state_file: root.join(".config/iris/state.toml"),
         current_theme: root.join(".cache/iris/core/current_theme"),
         themes: root.join(".cache/iris/core/themes"),
     };

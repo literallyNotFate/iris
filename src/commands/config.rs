@@ -17,16 +17,20 @@ pub fn exec(action: Option<ConfigAction>, ctx: &mut IrisContext) -> anyhow::Resu
         ConfigAction::Show => {
             if ctx.log.is_detailed() {
                 render_config_header("Current Configuration", "󰒓");
-                println!("  {:<18} {}", "Plugin Manager:".dimmed(), ctx.state.manager);
+                println!(
+                    "  {:<18} {}",
+                    "Plugin Manager:".dimmed(),
+                    ctx.state.nvim.manager
+                );
                 println!(
                     "  {:<18} {}",
                     "Current Theme:".dimmed(),
-                    utils::capitalize(&ctx.state.current_theme).green()
+                    utils::capitalize(&ctx.state.theme.current_theme).green()
                 );
                 println!(
                     "  {:<18} {}",
                     "Fallback Theme:".dimmed(),
-                    utils::capitalize(&ctx.state.fallback_theme).magenta()
+                    utils::capitalize(&ctx.state.theme.fallback_theme).magenta()
                 );
                 println!(
                     "  {:<18} {}",
@@ -36,11 +40,13 @@ pub fn exec(action: Option<ConfigAction>, ctx: &mut IrisContext) -> anyhow::Resu
             } else if ctx.log.verbosity == LoggingVerbosity::Minimal {
                 println!(
                     "\n󰒓  Config: Active: {} | Fallback: {} | Manager: {}",
-                    utils::capitalize(&ctx.state.current_theme).green().bold(),
-                    utils::capitalize(&ctx.state.fallback_theme)
+                    utils::capitalize(&ctx.state.theme.current_theme)
+                        .green()
+                        .bold(),
+                    utils::capitalize(&ctx.state.theme.fallback_theme)
                         .magenta()
                         .bold(),
-                    ctx.state.manager
+                    ctx.state.nvim.manager
                 );
             }
         }
@@ -70,19 +76,19 @@ pub fn exec(action: Option<ConfigAction>, ctx: &mut IrisContext) -> anyhow::Resu
                 managers[selection].clone()
             };
 
-            if ctx.state.manager != selected {
+            if ctx.state.nvim.manager != selected {
                 if ctx.log.is_detailed() {
                     ctx.log
                         .info(&format!("Changing plugin manager to {}...", selected));
                 }
 
-                ctx.state.manager = selected;
+                ctx.state.nvim.manager = selected;
                 changed = true;
             } else if ctx.log.verbosity != LoggingVerbosity::Silent {
                 println!(
                     "{}  Plugin manager is already set to {}",
                     "✓".green(),
-                    ctx.state.manager
+                    ctx.state.nvim.manager
                 );
             }
         }
@@ -108,7 +114,7 @@ pub fn exec(action: Option<ConfigAction>, ctx: &mut IrisContext) -> anyhow::Resu
                 );
             }
 
-            if ctx.state.fallback_theme != theme.to_lowercase() {
+            if ctx.state.theme.fallback_theme != theme.to_lowercase() {
                 if ctx.log.is_detailed() {
                     ctx.log.info(&format!(
                         "Selecting {} as a fallback...",
@@ -116,7 +122,7 @@ pub fn exec(action: Option<ConfigAction>, ctx: &mut IrisContext) -> anyhow::Resu
                     ));
                 }
 
-                ctx.state.fallback_theme = theme.to_lowercase();
+                ctx.state.theme.fallback_theme = theme.to_lowercase();
                 changed = true;
                 if ctx.log.verbosity != LoggingVerbosity::Silent {
                     println!(
@@ -135,7 +141,7 @@ pub fn exec(action: Option<ConfigAction>, ctx: &mut IrisContext) -> anyhow::Resu
     }
 
     if changed {
-        ctx.log.action("Saved configuration to state.json", || {
+        ctx.log.action("Saved configuration to state file", || {
             ctx.state.save_to(&ctx.paths.state_file)
         })?;
     } else if !matches!(action, ConfigAction::Show) && ctx.log.is_detailed() {

@@ -4,23 +4,45 @@ pub use serde::{Deserialize, Serialize};
 use std::{collections::BTreeSet, fmt, fs, path::PathBuf};
 
 /// UI State of app which is being saved
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Default, Serialize, Deserialize, Debug, Clone)]
 pub struct State {
-    pub current_theme: String,
-    pub previous_theme: Option<String>,
-    pub enabled_generators: BTreeSet<String>,
-
-    #[serde(default = "retrobox")]
-    pub fallback_theme: String,
+    #[serde(default)]
+    pub nvim: PluginState,
 
     #[serde(default)]
+    pub theme: ThemeState,
+
+    #[serde(default)]
+    pub generators: GeneratorState,
+}
+
+/// All state related to theme
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct ThemeState {
+    #[serde(rename = "current")]
+    pub current_theme: String,
+    #[serde(rename = "previous")]
+    pub previous_theme: Option<String>,
+    #[serde(default = "retrobox", rename = "fallback")]
+    pub fallback_theme: String,
+}
+
+/// All state related to generators
+#[derive(Serialize, Deserialize, Debug, Clone, Default)]
+pub struct GeneratorState {
+    #[serde(rename = "enabled")]
+    pub enabled_generators: BTreeSet<String>,
+}
+
+/// All state related to plugins
+#[derive(Serialize, Deserialize, Debug, Clone, Default)]
+pub struct PluginState {
     pub manager: PluginManager,
 }
 
 /// Plugin manager for nvim (to find themes)
 #[derive(Default, Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
 #[serde(rename_all = "lowercase")]
-#[serde(tag = "type", content = "value")]
 pub enum PluginManager {
     #[default]
     Default,
@@ -31,54 +53,58 @@ pub enum PluginManager {
 impl State {
     pub fn new(current_theme: String, enabled_generators: BTreeSet<String>) -> Self {
         Self {
-            current_theme,
-            enabled_generators,
+            theme: ThemeState {
+                current_theme,
+                previous_theme: None,
+                fallback_theme: retrobox(),
+            },
+            generators: GeneratorState { enabled_generators },
             ..Self::default()
         }
     }
 
     /// Casting to string (serialization) with anyhow error handling
-    pub fn to_json(&self) -> Result<String> {
-        serde_json::to_string_pretty(self).context("Failed to serialize UI state to JSON")
+    pub fn to_toml(&self) -> Result<String> {
+        toml::to_string_pretty(self).context("Failed to serialize UI state to TOML")
     }
 
     /// Set current theme to specific one, saving the previous one
     pub fn set_theme<S: Into<String>>(&mut self, name: S) {
         let new_theme: String = name.into().trim().to_lowercase();
-        if self.current_theme == new_theme {
+        if self.theme.current_theme == new_theme {
             return;
         }
 
-        self.previous_theme = Some(self.current_theme.clone());
-        self.current_theme = new_theme;
+        self.theme.previous_theme = Some(self.theme.current_theme.clone());
+        self.theme.current_theme = new_theme;
     }
 
     /// Toggles between current and previous theme.
     /// If no previous theme exists, falls back to `fallback_theme`.
     /// Returns the name of the newly activated theme.
     pub fn toggle_theme(&mut self) -> String {
-        let target_theme = match &self.previous_theme {
+        let target_theme = match &self.theme.previous_theme {
             Some(prev) => prev.clone(),
-            None => self.fallback_theme.clone(),
+            None => self.theme.fallback_theme.clone(),
         };
 
         self.set_theme(target_theme);
-        self.current_theme.clone()
+        self.theme.current_theme.clone()
     }
 
     /// Enable generator
     pub fn enable_generator(&mut self, name: &str) -> bool {
-        self.enabled_generators.insert(name.to_string())
+        self.generators.enabled_generators.insert(name.to_string())
     }
 
     /// Disable generator
     pub fn disable_generator(&mut self, name: &str) -> bool {
-        self.enabled_generators.remove(name)
+        self.generators.enabled_generators.remove(name)
     }
 
     /// Full list replace (useful for MultiSelect)
     pub fn replace_enabled(&mut self, names: BTreeSet<String>) {
-        self.enabled_generators = names;
+        self.generators.enabled_generators = names;
     }
 
     /// Toggles generator (on/off) and returns new state
@@ -94,15 +120,15 @@ impl State {
 
     /// Check if generator is enabled
     pub fn is_enabled(&self, name: &str) -> bool {
-        self.enabled_generators.contains(name)
+        self.generators.enabled_generators.contains(name)
     }
 
     /// Wrapper to get rtp command
     pub fn get_rtp_command(&self) -> Option<String> {
-        self.manager.get_rtp_command()
+        self.nvim.manager.get_rtp_command()
     }
 
-    /// Save state to disk
+    /// Save state to disk in TOML format
     pub fn save_to(&self, path: &PathBuf) -> Result<()> {
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent).with_context(|| {
@@ -110,12 +136,12 @@ impl State {
             })?;
         }
 
-        let json: String = self.to_json()?;
-        fs::write(path, json)
+        let toml_str: String = self.to_toml()?;
+        fs::write(path, toml_str)
             .with_context(|| format!("Failed to write state file to: {}", path.display()))
     }
 
-    /// Load state from file
+    /// Load state from file (Strict TOML parsing)
     pub fn load_from(path: &PathBuf) -> Result<Self> {
         if !path.exists() {
             return Ok(Self::default());
@@ -124,7 +150,7 @@ impl State {
         let content = fs::read_to_string(path)
             .with_context(|| format!("Failed to read UI state at {:?}", path))?;
 
-        serde_json::from_str(&content).context("Failed to parse state.json")
+        toml::from_str(&content).context("Failed to parse state.toml")
     }
 
     /// Load with reverting to default if problem occurs
@@ -138,14 +164,12 @@ fn retrobox() -> String {
     "retrobox".to_string()
 }
 
-impl Default for State {
+impl Default for ThemeState {
     fn default() -> Self {
         Self {
             current_theme: String::new(),
             previous_theme: None,
-            enabled_generators: BTreeSet::new(),
             fallback_theme: retrobox(),
-            manager: PluginManager::default(),
         }
     }
 }
@@ -204,7 +228,7 @@ mod tests {
         assert!(state.is_enabled("alacritty"));
 
         state.enable_generator("alacritty");
-        assert_eq!(state.enabled_generators.len(), 2);
+        assert_eq!(state.generators.enabled_generators.len(), 2);
 
         state.toggle_generator("alacritty");
         assert!(!state.is_enabled("alacritty"));
@@ -213,139 +237,134 @@ mod tests {
     #[test]
     fn should_handle_theme_transitions_and_toggle() {
         let mut state = State::default();
-        state.current_theme = "melange".to_string();
-        state.fallback_theme = "retrobox".to_string();
+        state.theme.current_theme = "melange".to_string();
+        state.theme.fallback_theme = "retrobox".to_string();
 
         state.set_theme("gruvbox");
-        assert_eq!(state.current_theme, "gruvbox");
-        assert_eq!(state.previous_theme, Some("melange".to_string()));
-
-        state.set_theme("gruvbox");
-        assert_eq!(state.previous_theme, Some("melange".to_string()));
+        assert_eq!(state.theme.current_theme, "gruvbox");
+        assert_eq!(state.theme.previous_theme, Some("melange".to_string()));
 
         let next = state.toggle_theme();
         assert_eq!(next, "melange");
-        assert_eq!(state.current_theme, "melange");
-        assert_eq!(state.previous_theme, Some("gruvbox".to_string()));
-
-        let next_again = state.toggle_theme();
-        assert_eq!(next_again, "gruvbox");
-        assert_eq!(state.current_theme, "gruvbox");
-        assert_eq!(state.previous_theme, Some("melange".to_string()));
     }
 
     #[test]
     fn should_fallback_on_toggle_if_no_previous_theme() {
         let mut state = State::default();
-        state.current_theme = "melange".to_string();
-        state.fallback_theme = "retrobox".to_string();
-        state.previous_theme = None;
+        state.theme.current_theme = "melange".to_string();
+        state.theme.fallback_theme = "retrobox".to_string();
+        state.theme.previous_theme = None;
 
         let result = state.toggle_theme();
         assert_eq!(result, "retrobox");
-        assert_eq!(state.current_theme, "retrobox");
-        assert_eq!(state.previous_theme, Some("melange".to_string()));
+        assert_eq!(state.theme.current_theme, "retrobox");
+        assert_eq!(state.theme.previous_theme, Some("melange".to_string()));
     }
 
     #[test]
-    fn should_handle_state_save_and_load() {
-        let temp_dir: TempDir = TempDir::new("iris_state_test").unwrap();
-        let file_path: PathBuf = temp_dir.path().join("state.json");
+    fn should_handle_state_save_and_load_toml() {
+        let temp_dir: TempDir = TempDir::new("iris_state_toml_test").unwrap();
+        let file_path: PathBuf = temp_dir.path().join("state.toml");
         let mut state: State = State {
-            current_theme: "melange".into(),
-            enabled_generators: BTreeSet::new(),
-            fallback_theme: "retrobox".into(),
-            manager: PluginManager::Default,
-            previous_theme: Some("nord".into()),
+            nvim: PluginState {
+                manager: PluginManager::default(),
+            },
+            theme: ThemeState {
+                current_theme: "melange".into(),
+                previous_theme: Some("nord".into()),
+                fallback_theme: "retrobox".into(),
+            },
+            generators: GeneratorState {
+                enabled_generators: BTreeSet::new(),
+            },
         };
 
         state.enable_generator("kitty");
-        state.save_to(&file_path).expect("Failed to save");
+        state.save_to(&file_path).expect("Failed to save TOML");
 
-        let loaded = State::load_from(&file_path).expect("Failed to load");
-        assert_eq!(loaded.current_theme, "melange");
-        assert_eq!(loaded.fallback_theme, "retrobox");
-        assert_eq!(loaded.previous_theme, Some("nord".to_string()));
+        let loaded = State::load_from(&file_path).expect("Failed to load TOML");
+        assert_eq!(loaded.theme.current_theme, "melange");
+        assert_eq!(loaded.theme.fallback_theme, "retrobox");
+        assert_eq!(loaded.theme.previous_theme, Some("nord".to_string()));
         assert!(loaded.is_enabled("kitty"));
     }
 
     #[test]
     fn should_handle_missing_fields_gracefully() {
         let temp_dir: TempDir = TempDir::new("iris_compat_test").unwrap();
-        let file_path: PathBuf = temp_dir.path().join("old_state.json");
-
-        let old_raw_json = r#"{
-                "current_theme": "melange",
-                "enabled_generators": ["alacritty"]
-            }"#;
-        fs::write(&file_path, old_raw_json).unwrap();
+        let file_path: PathBuf = temp_dir.path().join("old_state.toml");
+        let old_raw_toml = r#"
+            current_theme = "melange"
+            enabled_generators = ["alacritty"]
+        "#;
+        fs::write(&file_path, old_raw_toml).unwrap();
         let loaded: State =
             State::load_from(&file_path).expect("Should parse even without new fields");
 
-        assert_eq!(loaded.current_theme, "melange");
-        assert_eq!(loaded.previous_theme, None);
-        assert_eq!(loaded.manager, PluginManager::Default);
-        assert_eq!(loaded.fallback_theme, "retrobox");
+        assert_eq!(loaded.theme.current_theme, "melange");
+        assert_eq!(loaded.theme.previous_theme, None);
+        assert_eq!(loaded.nvim.manager, PluginManager::Default);
+        assert_eq!(loaded.theme.fallback_theme, "retrobox");
     }
 
     #[test]
     fn should_use_correct_defaults_on_manual_default_call() {
         let state: State = State::default();
-        assert_eq!(state.fallback_theme, "retrobox");
-        assert_eq!(state.current_theme, "");
-        assert_eq!(state.previous_theme, None);
+        assert_eq!(state.theme.fallback_theme, "retrobox");
+        assert_eq!(state.theme.current_theme, "");
+        assert_eq!(state.theme.previous_theme, None);
     }
 
     #[test]
     fn should_handle_load_or_default_logic() {
         let temp_dir: TempDir = TempDir::new("iris_non_existent").unwrap();
-        let file_path: PathBuf = temp_dir.path().join("not_found.json");
+        let file_path: PathBuf = temp_dir.path().join("not_found.toml");
 
         let state = State::load_or_default(&file_path);
-        assert_eq!(state.fallback_theme, "retrobox");
-        assert!(state.enabled_generators.is_empty());
+        assert_eq!(state.theme.fallback_theme, "retrobox");
+        assert!(state.generators.enabled_generators.is_empty());
 
-        fs::write(&file_path, "invalid json").unwrap();
+        fs::write(&file_path, "invalid content").unwrap();
         let state_err = State::load_or_default(&file_path);
-        assert_eq!(state_err.fallback_theme, "retrobox");
+        assert_eq!(state_err.theme.fallback_theme, "retrobox");
     }
 
     #[test]
     fn should_persist_custom_fallback_theme() {
         let temp_dir: TempDir = TempDir::new("iris_fallback_test").unwrap();
-        let file_path: PathBuf = temp_dir.path().join("state.json");
+        let file_path: PathBuf = temp_dir.path().join("state.toml");
 
         let mut state: State = State::default();
-        state.fallback_theme = "tokyonight".to_string();
+        state.theme.fallback_theme = "tokyonight".to_string();
         state.save_to(&file_path).unwrap();
 
         let loaded: State = State::load_from(&file_path).unwrap();
-        assert_eq!(loaded.fallback_theme, "tokyonight");
+        assert_eq!(loaded.theme.fallback_theme, "tokyonight");
     }
 
     #[test]
-    fn should_handle_to_json_logic() {
+    fn should_handle_to_toml_logic() {
         let mut state = State::default();
         state.set_theme("gruvbox");
 
-        let json = state.to_json().unwrap();
-        assert!(json.contains('\n'));
+        let toml_output = state.to_toml().unwrap();
+        assert!(toml_output.contains("current_theme = \"gruvbox\""));
     }
 
     #[test]
     fn should_persist_nvim_manager() {
         let temp_dir: TempDir = TempDir::new("iris_enum_test").unwrap();
-        let file_path: PathBuf = temp_dir.path().join("state.json");
+        let file_path: PathBuf = temp_dir.path().join("state.toml");
 
         let mut state = State::default();
-        state.manager = PluginManager::Lazy;
+        state.nvim.manager = PluginManager::Lazy;
         state.save_to(&file_path).unwrap();
 
         let content = fs::read_to_string(&file_path).unwrap();
-        assert!(content.contains("lazy"));
+        assert!(content.contains("manager = \"lazy\""));
 
         let loaded = State::load_from(&file_path).unwrap();
-        assert_eq!(loaded.manager, PluginManager::Lazy);
+        assert_eq!(loaded.nvim.manager, PluginManager::Lazy);
     }
 
     #[test]

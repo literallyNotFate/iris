@@ -8,7 +8,7 @@ use colored::*;
 pub fn exec(ctx: &IrisContext) -> anyhow::Result<()> {
     let orchestrator: ThemeOrchestrator = ThemeOrchestrator::new(&ctx.paths, &ctx.log);
     let (nvim_theme, is_sync) = orchestrator.get_sync_status(&ctx.state);
-    let current: String = ctx.state.current_theme.clone();
+    let current: String = ctx.state.theme.current_theme.clone();
 
     if !ctx.log.is_detailed() {
         render_quiet(ctx, &current, &nvim_theme, is_sync);
@@ -29,7 +29,7 @@ pub fn exec(ctx: &IrisContext) -> anyhow::Result<()> {
     println!(
         "  {}  Plugin Manager:  {}",
         "⚙".magenta(),
-        ctx.state.manager
+        ctx.state.nvim.manager
     );
 
     let cache_size: u64 = ctx.paths.get_size(&ctx.paths.themes);
@@ -69,7 +69,7 @@ pub fn exec(ctx: &IrisContext) -> anyhow::Result<()> {
 
 /// Helper function to render generators list
 fn render_generators_list(ctx: &IrisContext) {
-    let enabled = &ctx.state.enabled_generators;
+    let enabled = &ctx.state.generators.enabled_generators;
     if enabled.is_empty() {
         println!(
             "    {}",
@@ -125,6 +125,7 @@ fn render_quiet(ctx: &IrisContext, current: &str, nvim_theme: &str, is_sync: boo
 
     let gens = ctx
         .state
+        .generators
         .enabled_generators
         .iter()
         .map(|n| {
@@ -141,7 +142,7 @@ fn render_quiet(ctx: &IrisContext, current: &str, nvim_theme: &str, is_sync: boo
         "\n{} Theme: {}\nPlugin manager: {}\nGenerators: {}",
         sync_icon,
         utils::capitalize(current).cyan().bold(),
-        ctx.state.manager,
+        ctx.state.nvim.manager,
         if gens.is_empty() {
             "none".dimmed().to_string()
         } else {

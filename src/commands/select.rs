@@ -28,7 +28,7 @@ pub fn exec(ctx: &mut IrisContext) -> anyhow::Result<()> {
 
     let mut current_idx: usize = all_names
         .iter()
-        .position(|n| n == &ctx.state.current_theme)
+        .position(|n| n == &ctx.state.theme.current_theme)
         .unwrap_or(0);
 
     let term = Term::stdout();
@@ -44,8 +44,8 @@ pub fn exec(ctx: &mut IrisContext) -> anyhow::Result<()> {
             .map(|name| {
                 render_theme_line(
                     name,
-                    &ctx.state.current_theme,
-                    &ctx.state.fallback_theme,
+                    &ctx.state.theme.current_theme,
+                    &ctx.state.theme.fallback_theme,
                     &cached,
                     &builtins,
                 )

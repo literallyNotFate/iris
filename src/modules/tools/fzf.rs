@@ -395,7 +395,7 @@ mod tests {
 
             let (_, ctx) = mock_context();
             let generator = FzfGenerator;
-            let status = generator.health_check(&ctx.paths, &ctx.state.current_theme);
+            let status = generator.health_check(&ctx.paths, &ctx.state.theme.current_theme);
 
             assert!(
                 status.is_error(),
@@ -415,7 +415,7 @@ mod tests {
 
             fs::write(&zshrc_path, "alias ls='ls --color=auto'").unwrap();
 
-            let status = generator.health_check(&ctx.paths, &ctx.state.current_theme);
+            let status = generator.health_check(&ctx.paths, &ctx.state.theme.current_theme);
 
             assert!(
                 status.is_error(),
@@ -441,7 +441,7 @@ mod tests {
                 fs::remove_file(&cache_file).unwrap();
             }
 
-            let status = generator.health_check(&ctx.paths, &ctx.state.current_theme);
+            let status = generator.health_check(&ctx.paths, &ctx.state.theme.current_theme);
 
             assert!(status.is_error(), "Expected Error, got: {status}");
             assert!(status.contains("missing from cache") || status.contains("not found"));

@@ -15,7 +15,7 @@ pub struct IrisPaths {
     pub generators: PathBuf, // ~/.cache/iris/gen (application)
     pub bin: PathBuf,        // ~/.cache/iris/bin (fzf scripts etc)
 
-    pub state_file: PathBuf,    // ~/.config/iris/state.json
+    pub state_file: PathBuf,    // ~/.config/iris/state.toml
     pub current_theme: PathBuf, // ~/.cache/iris/core/current_theme
     pub themes: PathBuf,        // ~/.cache/iris/core/themes
 }
@@ -39,7 +39,7 @@ impl IrisPaths {
         let bin: PathBuf = cache.join("bin");
 
         Ok(Self {
-            state_file: config.join("state.json"),
+            state_file: config.join("state.toml"),
             current_theme: core.join("current_theme"),
             themes: core.join("themes"),
             config,
@@ -186,7 +186,7 @@ mod tests {
             core: base.join("cache/core"),
             generators: base.join("cache/generators"),
             bin: base.join("cache/bin"),
-            state_file: base.join("config/state.json"),
+            state_file: base.join("config/state.toml"),
             current_theme: base.join("cache/core/current_theme"),
             themes: base.join("cache/core/themes"),
         }
@@ -215,7 +215,7 @@ mod tests {
                 assert_eq!(paths.cache, expected_cache_base, "Cache path mismatch");
                 assert_eq!(
                     paths.state_file,
-                    expected_config_base.join("state.json"),
+                    expected_config_base.join("state.toml"),
                     "State file path mismatch"
                 );
                 assert_eq!(
