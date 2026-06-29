@@ -47,6 +47,9 @@ pub enum Commands {
     /// Interactive theme selection (with cached ones and installed)
     Select,
 
+    /// Toggle between the current and previous theme seamlessly
+    Toggle,
+
     /// Display current status, active theme, and enabled applications
     Status,
 

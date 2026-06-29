@@ -14,6 +14,7 @@ pub mod select;
 pub mod status;
 pub mod switch;
 pub mod sync;
+pub mod toggle;
 pub mod watch;
 
 /// Main entry point for command execution.
@@ -32,6 +33,7 @@ pub fn handle(command: Commands, ctx: &mut IrisContext) -> anyhow::Result<()> {
         Commands::Gen { action } => generators::exec(action, ctx)?,
         Commands::Cache { action } => cache::exec(action, ctx)?,
         Commands::Config { action } => config::exec(action, ctx)?,
+        Commands::Toggle => toggle::exec(ctx)?,
     }
 
     Ok(())

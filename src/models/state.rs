@@ -7,6 +7,7 @@ use std::{collections::BTreeSet, fmt, fs, path::PathBuf};
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct State {
     pub current_theme: String,
+    pub previous_theme: Option<String>,
     pub enabled_generators: BTreeSet<String>,
 
     #[serde(default = "retrobox")]
@@ -41,9 +42,28 @@ impl State {
         serde_json::to_string_pretty(self).context("Failed to serialize UI state to JSON")
     }
 
-    /// Set current theme to specific one
+    /// Set current theme to specific one, saving the previous one
     pub fn set_theme<S: Into<String>>(&mut self, name: S) {
-        self.current_theme = name.into().trim().to_lowercase();
+        let new_theme: String = name.into().trim().to_lowercase();
+        if self.current_theme == new_theme {
+            return;
+        }
+
+        self.previous_theme = Some(self.current_theme.clone());
+        self.current_theme = new_theme;
+    }
+
+    /// Toggles between current and previous theme.
+    /// If no previous theme exists, falls back to `fallback_theme`.
+    /// Returns the name of the newly activated theme.
+    pub fn toggle_theme(&mut self) -> String {
+        let target_theme = match &self.previous_theme {
+            Some(prev) => prev.clone(),
+            None => self.fallback_theme.clone(),
+        };
+
+        self.set_theme(target_theme);
+        self.current_theme.clone()
     }
 
     /// Enable generator
@@ -122,6 +142,7 @@ impl Default for State {
     fn default() -> Self {
         Self {
             current_theme: String::new(),
+            previous_theme: None,
             enabled_generators: BTreeSet::new(),
             fallback_theme: retrobox(),
             manager: PluginManager::default(),
@@ -172,7 +193,6 @@ impl fmt::Display for PluginManager {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::fs;
     use tempdir::TempDir;
 
     #[test]
@@ -191,6 +211,43 @@ mod tests {
     }
 
     #[test]
+    fn should_handle_theme_transitions_and_toggle() {
+        let mut state = State::default();
+        state.current_theme = "melange".to_string();
+        state.fallback_theme = "retrobox".to_string();
+
+        state.set_theme("gruvbox");
+        assert_eq!(state.current_theme, "gruvbox");
+        assert_eq!(state.previous_theme, Some("melange".to_string()));
+
+        state.set_theme("gruvbox");
+        assert_eq!(state.previous_theme, Some("melange".to_string()));
+
+        let next = state.toggle_theme();
+        assert_eq!(next, "melange");
+        assert_eq!(state.current_theme, "melange");
+        assert_eq!(state.previous_theme, Some("gruvbox".to_string()));
+
+        let next_again = state.toggle_theme();
+        assert_eq!(next_again, "gruvbox");
+        assert_eq!(state.current_theme, "gruvbox");
+        assert_eq!(state.previous_theme, Some("melange".to_string()));
+    }
+
+    #[test]
+    fn should_fallback_on_toggle_if_no_previous_theme() {
+        let mut state = State::default();
+        state.current_theme = "melange".to_string();
+        state.fallback_theme = "retrobox".to_string();
+        state.previous_theme = None;
+
+        let result = state.toggle_theme();
+        assert_eq!(result, "retrobox");
+        assert_eq!(state.current_theme, "retrobox");
+        assert_eq!(state.previous_theme, Some("melange".to_string()));
+    }
+
+    #[test]
     fn should_handle_state_save_and_load() {
         let temp_dir: TempDir = TempDir::new("iris_state_test").unwrap();
         let file_path: PathBuf = temp_dir.path().join("state.json");
@@ -199,6 +256,7 @@ mod tests {
             enabled_generators: BTreeSet::new(),
             fallback_theme: "retrobox".into(),
             manager: PluginManager::Default,
+            previous_theme: Some("nord".into()),
         };
 
         state.enable_generator("kitty");
@@ -207,6 +265,7 @@ mod tests {
         let loaded = State::load_from(&file_path).expect("Failed to load");
         assert_eq!(loaded.current_theme, "melange");
         assert_eq!(loaded.fallback_theme, "retrobox");
+        assert_eq!(loaded.previous_theme, Some("nord".to_string()));
         assert!(loaded.is_enabled("kitty"));
     }
 
@@ -224,6 +283,7 @@ mod tests {
             State::load_from(&file_path).expect("Should parse even without new fields");
 
         assert_eq!(loaded.current_theme, "melange");
+        assert_eq!(loaded.previous_theme, None);
         assert_eq!(loaded.manager, PluginManager::Default);
         assert_eq!(loaded.fallback_theme, "retrobox");
     }
@@ -233,6 +293,7 @@ mod tests {
         let state: State = State::default();
         assert_eq!(state.fallback_theme, "retrobox");
         assert_eq!(state.current_theme, "");
+        assert_eq!(state.previous_theme, None);
     }
 
     #[test]
