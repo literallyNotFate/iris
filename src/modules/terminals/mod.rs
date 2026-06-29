@@ -1,5 +1,6 @@
 pub mod alacritty;
 pub mod ghostty;
+pub mod kitty;
 pub mod wezterm;
 
 use super::Generator;
@@ -10,5 +11,6 @@ pub fn get_all() -> Vec<Arc<dyn Generator>> {
         Arc::new(alacritty::AlacrittyGenerator),
         Arc::new(ghostty::GhosttyGenerator),
         Arc::new(wezterm::WezTermGenerator),
+        Arc::new(kitty::KittyGenerator),
     ]
 }
