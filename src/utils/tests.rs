@@ -21,19 +21,21 @@ pub fn mock_context() -> (TempDir, IrisContext) {
     let paths = IrisPaths {
         config: root.join(".config/iris"),
         cache: root.join(".cache/iris"),
-        core: root.join(".cache/iris/core"),
-        generators: root.join(".cache/iris/generators"),
+        generators: root.join(".cache/iris/gen"),
         bin: root.join(".cache/iris/bin"),
         state_file: root.join(".config/iris/state.toml"),
-        current_theme: root.join(".cache/iris/core/current_theme"),
-        themes: root.join(".cache/iris/core/themes"),
+        current_theme: root.join(".cache/nvim/iris_current_theme"),
+        themes: root.join(".cache/iris/themes"),
     };
 
     std::fs::create_dir_all(&paths.config).expect("Failed to create .config/iris");
-    std::fs::create_dir_all(&paths.core).expect("Failed to create .cache/iris/core");
-    std::fs::create_dir_all(&paths.themes).expect("Failed to create .cache/iris/core/themes");
-    std::fs::create_dir_all(&paths.generators).expect("Failed to create .cache/iris/generators");
+    std::fs::create_dir_all(&paths.themes).expect("Failed to create .cache/iris/themes");
+    std::fs::create_dir_all(&paths.generators).expect("Failed to create .cache/iris/gen");
     std::fs::create_dir_all(&paths.bin).expect("Failed to create .cache/iris/bin");
+
+    if let Some(parent) = paths.current_theme.parent() {
+        std::fs::create_dir_all(parent).expect("Failed to create mock .cache/nvim");
+    }
 
     let templates_path = paths.config.join("templates");
     std::fs::create_dir_all(&templates_path).expect("Failed to create .config/iris/templates");

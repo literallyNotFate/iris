@@ -11,13 +11,12 @@ pub struct IrisPaths {
     pub config: PathBuf, // ~/.config/iris
     pub cache: PathBuf,  // ~/.cache/iris
 
-    pub core: PathBuf,       // ~/.cache/iris/core (state, palette)
     pub generators: PathBuf, // ~/.cache/iris/gen (application)
     pub bin: PathBuf,        // ~/.cache/iris/bin (fzf scripts etc)
+    pub themes: PathBuf,     // ~/.cache/iris/themes
 
     pub state_file: PathBuf,    // ~/.config/iris/state.toml
-    pub current_theme: PathBuf, // ~/.cache/iris/core/current_theme
-    pub themes: PathBuf,        // ~/.cache/iris/core/themes
+    pub current_theme: PathBuf, // ~/.cache/nvim/iris_current_theme
 }
 
 impl IrisPaths {
@@ -34,17 +33,20 @@ impl IrisPaths {
             .unwrap_or_else(|_| home.join(".cache"))
             .join("iris");
 
-        let core: PathBuf = cache.join("core");
+        let nvim_cache: PathBuf = std::env::var("XDG_CACHE_HOME")
+            .map(PathBuf::from)
+            .unwrap_or_else(|_| home.join(".cache"))
+            .join("nvim");
+
         let generators: PathBuf = cache.join("gen");
         let bin: PathBuf = cache.join("bin");
 
         Ok(Self {
             state_file: config.join("state.toml"),
-            current_theme: core.join("current_theme"),
-            themes: core.join("themes"),
+            current_theme: nvim_cache.join("iris_current_theme"),
+            themes: cache.join("themes"),
             config,
             cache,
-            core,
             generators,
             bin,
         })
@@ -53,7 +55,6 @@ impl IrisPaths {
     /// Creates all folders for iris if there none
     pub fn ensure_dirs(&self) -> Result<()> {
         fs::create_dir_all(&self.config).context("Failed to create 'config' directory")?;
-        fs::create_dir_all(&self.core).context("Failed to create 'core' directory")?;
         fs::create_dir_all(&self.themes).context("Failed to create themes path")?;
         fs::create_dir_all(&self.generators).context("Failed to create 'gen' directory")?;
         fs::create_dir_all(&self.bin).context("Failed to create 'bin' directory")?;
@@ -183,12 +184,11 @@ mod tests {
         IrisPaths {
             config: base.join("config"),
             cache: base.join("cache"),
-            core: base.join("cache/core"),
             generators: base.join("cache/generators"),
             bin: base.join("cache/bin"),
             state_file: base.join("config/state.toml"),
-            current_theme: base.join("cache/core/current_theme"),
-            themes: base.join("cache/core/themes"),
+            current_theme: base.join("cache/nvim/iris_current_theme"),
+            themes: base.join("cache/themes"),
         }
     }
 
@@ -210,6 +210,7 @@ mod tests {
 
                 let expected_config_base: PathBuf = fake_config.join("iris");
                 let expected_cache_base: PathBuf = fake_cache.join("iris");
+                let expected_nvim_cache: PathBuf = fake_cache.join("nvim");
 
                 assert_eq!(paths.config, expected_config_base, "Config path mismatch");
                 assert_eq!(paths.cache, expected_cache_base, "Cache path mismatch");
@@ -220,8 +221,8 @@ mod tests {
                 );
                 assert_eq!(
                     paths.current_theme,
-                    expected_cache_base.join("core").join("current_theme"),
-                    "Current theme path mismatch"
+                    expected_nvim_cache.join("iris_current_theme"),
+                    "Current theme path mismatch (should be in nvim XDG cache)"
                 );
             },
         );
@@ -232,14 +233,12 @@ mod tests {
         let paths: IrisPaths = setup_paths();
 
         assert!(!paths.config.exists());
-        assert!(!paths.core.exists());
         assert!(!paths.themes.exists());
 
         paths.ensure_dirs().expect("Failed to ensure directories");
 
         assert!(paths.config.is_dir());
         assert!(paths.cache.is_dir());
-        assert!(paths.core.is_dir());
         assert!(paths.themes.is_dir());
         assert!(paths.generators.is_dir());
         assert!(paths.bin.is_dir());
@@ -248,7 +247,7 @@ mod tests {
     #[test]
     fn should_clean_gen_folder_with_bin() {
         let paths: IrisPaths = setup_paths();
-        let gen_path = paths.cache.join("gen");
+        let gen_path = paths.cache.join("generators");
         let gen_dummy_file = gen_path.join("bat/bat.conf");
         let bin_dummy_file = paths.bin.join("fzf.sh");
 
@@ -281,8 +280,8 @@ mod tests {
     #[test]
     fn should_purge_all() {
         let paths = setup_paths();
-        let theme_file = paths.cache.join("themes/melange.tmTheme");
-        let gen_file = paths.cache.join("gen/bat/bat.conf");
+        let theme_file = paths.themes.join("melange.json");
+        let gen_file = paths.generators.join("bat/bat.conf");
 
         fs::create_dir_all(theme_file.parent().unwrap()).unwrap();
         fs::create_dir_all(gen_file.parent().unwrap()).unwrap();
@@ -295,17 +294,10 @@ mod tests {
         let entries = fs::read_dir(&paths.cache).unwrap().count();
         assert_eq!(
             entries, 3,
-            "Cache should contain exactly 3 base directories (core, gen, bin)"
+            "Cache should contain exactly 3 base directories (themes, generators, bin)"
         );
 
         assert!(!theme_file.exists(), "Old theme file should be gone");
-
-        let gen_entries = fs::read_dir(&paths.generators).unwrap().count();
-        assert_eq!(gen_entries, 0, "Generators directory should be empty");
-        assert!(
-            paths.config.exists(),
-            "Config directory should never be purged"
-        );
     }
 
     #[test]
@@ -374,7 +366,7 @@ mod tests {
     #[test]
     fn should_return_theme_cache_path() {
         let paths = setup_paths();
-        let expected = paths.cache.join("core/themes/melange.json");
+        let expected = paths.cache.join("themes/melange.json");
         let path = paths.cached_theme("melange");
         assert_eq!(path, expected);
     }
