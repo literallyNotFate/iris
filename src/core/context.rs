@@ -8,7 +8,7 @@ use crate::{
 };
 use anyhow::{Context as _, Result};
 use colored::*;
-use std::{fs, path::PathBuf};
+use std::{collections::BTreeSet, fs, path::PathBuf};
 
 /// Application context with state and paths (config/cache/base)
 #[derive(Clone)]
@@ -145,6 +145,58 @@ impl IrisContext {
             g.health_check(&self.paths, &self.state.theme.current_theme)
                 .is_error()
         })
+    }
+
+    /// Get all available themes (builtin ones and cache) for autocompletion
+    pub fn get_available_themes(&self) -> Result<Vec<String>> {
+        let mut themes: BTreeSet<String> = BTreeSet::new();
+
+        let builtin_themes = [
+            "retrobox",
+            "melange",
+            "habamax",
+            "sorbet",
+            "blue",
+            "darkblue",
+            "default",
+            "delek",
+            "desert",
+            "elflord",
+            "industry",
+            "koehler",
+            "lunaperche",
+            "morning",
+            "murphy",
+            "pmenu",
+            "ron",
+            "shine",
+            "slate",
+            "torte",
+            "zellner",
+        ];
+        for theme in builtin_themes {
+            themes.insert(theme.to_string());
+        }
+
+        let themes_path: PathBuf = self.paths.themes.clone();
+        if themes_path.exists() {
+            if let Ok(entries) = fs::read_dir(themes_path) {
+                for entry in entries.flatten() {
+                    let path: PathBuf = entry.path();
+                    if path.is_file() {
+                        if let Some(file_stem) = path.file_stem() {
+                            if let Some(theme_name) = file_stem.to_str() {
+                                themes.insert(theme_name.to_string());
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        let mut result: Vec<String> = themes.into_iter().collect();
+        result.sort();
+        Ok(result)
     }
 }
 

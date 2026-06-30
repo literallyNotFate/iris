@@ -94,4 +94,8 @@ pub enum Commands {
         #[command(subcommand)]
         action: Option<ConfigAction>,
     },
+
+    /// Internal command for shell completions
+    #[command(hide = true)]
+    CompleteList,
 }

@@ -34,6 +34,14 @@ pub fn handle(command: Commands, ctx: &mut IrisContext) -> anyhow::Result<()> {
         Commands::Cache { action } => cache::exec(action, ctx)?,
         Commands::Config { action } => config::exec(action, ctx)?,
         Commands::Toggle => toggle::exec(ctx)?,
+        Commands::CompleteList => {
+            if let Ok(themes) = ctx.get_available_themes() {
+                for theme in themes {
+                    println!("{}", theme);
+                }
+            }
+            return Ok(());
+        }
     }
 
     Ok(())
