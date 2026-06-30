@@ -1,14 +1,21 @@
 use clap::Parser;
-use colored::Colorize;
 use iris::{cli::Cli, commands, core::IrisContext, log::Logger};
 
+/// Main entry point
 fn main() {
+    use colored::Colorize;
+    use std::io::{IsTerminal, stdout};
+
     let cli: Cli = Cli::parse();
-    let reporter: Logger = if cli.quiet {
+    let mut reporter: Logger = if cli.quiet {
         Logger::minimal()
     } else {
         Logger::new()
     };
+
+    if !stdout().is_terminal() {
+        reporter.verbosity = iris::log::LoggingVerbosity::Silent;
+    }
 
     if let Err(err) = run(cli, reporter) {
         eprintln!(
@@ -22,6 +29,7 @@ fn main() {
     }
 }
 
+/// Run application
 fn run(cli: Cli, reporter: Logger) -> anyhow::Result<()> {
     let mut ctx: IrisContext = IrisContext::new(reporter)?;
     commands::handle(cli.command, &mut ctx)?;

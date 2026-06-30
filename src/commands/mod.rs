@@ -1,6 +1,7 @@
 use crate::{
     cli::Commands,
     core::{IrisContext, IrisSetup},
+    log::LoggingVerbosity,
     models::Theme,
 };
 
@@ -21,7 +22,14 @@ pub mod watch;
 /// Routes CLI commands to their respective logic modules
 pub fn handle(command: Commands, ctx: &mut IrisContext) -> anyhow::Result<()> {
     match command {
-        Commands::Init => IrisSetup::run(ctx)?,
+        Commands::Init => {
+            if ctx.log.verbosity == LoggingVerbosity::Silent {
+                IrisSetup::emit_zsh_hook(ctx)?;
+                return Ok(());
+            }
+
+            IrisSetup::run(ctx)?;
+        }
         Commands::Switch(args) => switch::exec(args, ctx)?,
         Commands::Sync { force } => sync::exec(force, ctx)?,
         Commands::Apply(args) => apply::exec(args, ctx)?,

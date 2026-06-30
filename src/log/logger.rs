@@ -76,14 +76,14 @@ impl Logger {
     /// Logs a dim informational message intended to be used within a task
     pub fn info(&self, msg: &str) {
         if self.verbosity == LoggingVerbosity::Detailed {
-            println!("{}{} {}", self.gutter, "•".dimmed(), msg.dimmed());
+            eprintln!("{}{} {}", self.gutter, "•".dimmed(), msg.dimmed());
         }
     }
 
     /// Logs a warning message highlighted in yellow
     pub fn warn(&self, message: &str) {
         if self.verbosity != LoggingVerbosity::Silent {
-            println!(
+            eprintln!(
                 "{} {} {}",
                 self.gutter,
                 "!".yellow().bold(),
@@ -101,7 +101,7 @@ impl Logger {
                 format!("{}", "└─ ".blue())
             };
 
-            println!(
+            eprintln!(
                 "{}{}{} {}",
                 self.gutter,
                 prefix,
@@ -120,7 +120,7 @@ impl Logger {
         let start: Instant = Instant::now();
 
         if self.verbosity == LoggingVerbosity::Detailed {
-            print!("{}{} {}", self.gutter, "✓".green(), message.green().bold());
+            eprint!("{}{} {}", self.gutter, "✓".green(), message.green().bold());
             let _ = io::stdout().flush();
         }
 
@@ -128,7 +128,7 @@ impl Logger {
         let duration = utils::format_duration(start.elapsed()).dimmed();
 
         if self.verbosity == LoggingVerbosity::Detailed {
-            println!(" {}", duration);
+            eprintln!(" {}", duration);
         }
 
         result

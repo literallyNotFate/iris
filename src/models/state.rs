@@ -294,8 +294,11 @@ mod tests {
         let temp_dir: TempDir = TempDir::new("iris_compat_test").unwrap();
         let file_path: PathBuf = temp_dir.path().join("old_state.toml");
         let old_raw_toml = r#"
-            current_theme = "melange"
-            enabled_generators = ["alacritty"]
+            [theme]
+            current = "melange"
+
+            [generator]
+            enabled = ["alacritty"]
         "#;
         fs::write(&file_path, old_raw_toml).unwrap();
         let loaded: State =
@@ -348,7 +351,7 @@ mod tests {
         state.set_theme("gruvbox");
 
         let toml_output = state.to_toml().unwrap();
-        assert!(toml_output.contains("current_theme = \"gruvbox\""));
+        assert!(toml_output.contains("current = \"gruvbox\""));
     }
 
     #[test]

@@ -4,28 +4,24 @@ use crate::{
     models::PluginManager,
     utils,
 };
-use anyhow::{Context as _, Result};
 use colored::Colorize;
-use std::{
-    fs::{self, OpenOptions},
-    io::Write,
-    path::PathBuf,
-};
 
 /// Struct for initializing state of application
 pub struct IrisSetup;
 
 impl IrisSetup {
-    pub fn run(ctx: &mut IrisContext) -> Result<()> {
+    pub fn run(ctx: &mut IrisContext) -> anyhow::Result<()> {
         if ctx.log.is_detailed() {
-            println!();
-            println!("{}  {}", "󰒓".purple().bold(), "Iris initialization".bold());
-            println!();
+            eprintln!();
+            eprintln!("{}  {}", "󰒓".purple().bold(), "Iris initialization".bold());
+            eprintln!();
         }
 
         ctx.log
             .action("Infrastructure prepared", || ctx.paths.ensure_dirs())?;
-        println!();
+        if ctx.log.is_detailed() {
+            eprintln!();
+        }
 
         {
             let task =
@@ -35,22 +31,18 @@ impl IrisSetup {
             task.done_with("System state initialized");
         }
 
-        {
-            let task =
-                ctx.log
-                    .step_with_icon(&"󰒍".green().bold(), "Integrating with shell (zsh)", true);
-            Self::setup_zsh_hook(ctx, &task)?;
-            task.done_with("`zsh` synchronization hook installed");
-        }
+        Self::emit_zsh_hook(ctx)?;
 
         ctx.log
             .success("Iris is now fully configured and ready to go!");
-        println!();
+        if ctx.log.is_detailed() {
+            eprintln!();
+        }
 
         Ok(())
     }
 
-    fn setup_initial_state(ctx: &mut IrisContext, task: &Activity) -> Result<()> {
+    fn setup_initial_state(ctx: &mut IrisContext, task: &Activity) -> anyhow::Result<()> {
         if ctx.paths.state_file.exists() {
             task.info("Found existing state.toml, loading configuration.");
             return Ok(());
@@ -98,30 +90,13 @@ impl IrisSetup {
         Ok(())
     }
 
-    pub fn setup_zsh_hook(ctx: &IrisContext, task: &Activity) -> anyhow::Result<()> {
-        let home: PathBuf = dirs::home_dir().context("Home directory not found")?;
-        let zshrc: PathBuf = home.join(".zshrc");
-
-        if !zshrc.exists() {
-            ctx.log.warn(".zshrc not found, skipping hook injection.");
-            return Ok(());
-        }
-
-        let hook_id: &str = "# --- Iris FZF Sync ---";
-        let content: String = fs::read_to_string(&zshrc)
-            .with_context(|| format!("Failed to read {}", utils::pretty_path(&zshrc)))?;
-
-        if content.contains(hook_id) {
-            task.info("`zsh` hook already present in .zshrc.");
-            return Ok(());
-        }
-
-        let cache_file: PathBuf = ctx.paths.cache.join("fzf.sh");
-        task.info("Injecting synchronization hook into .zshrc...");
+    /// Generates initializing script right into stdout for eval
+    pub fn emit_zsh_hook(ctx: &IrisContext) -> anyhow::Result<()> {
+        let cache_file = ctx.paths.cache.join("fzf.sh");
 
         let hook: String = format!(
-            r#"
-# --- Iris FZF Sync ---
+            r#"# --- Iris Dynamic Shell Integration ---
+
 _iris_completion() {{
     local line state
     _arguments -C \
@@ -144,6 +119,7 @@ _iris_completion() {{
 esac
 }}
 compdef _iris_completion iris
+
 autoload -Uz add-zsh-hook
 _iris_fzf_sync() {{
     local cache_file="{}"
@@ -156,25 +132,11 @@ _iris_fzf_sync() {{
     fi
 }}
 add-zsh-hook precmd _iris_fzf_sync
-# ---------------------
 "#,
             cache_file.display()
         );
 
-        let mut file = OpenOptions::new()
-            .append(true)
-            .open(&zshrc)
-            .with_context(|| {
-                format!(
-                    "Failed to open {} for appending",
-                    utils::pretty_path(&zshrc)
-                )
-            })?;
-
-        writeln!(file, "\n{}", hook.trim())
-            .with_context(|| format!("Failed to write to {}", utils::pretty_path(&zshrc)))?;
-
-        task.info("Hook successfully appended.");
+        println!("{}", hook.trim());
         Ok(())
     }
 }
@@ -184,41 +146,21 @@ add-zsh-hook precmd _iris_fzf_sync
 mod tests {
     use super::*;
     use crate::utils::tests::mock_context;
-    use temp_env;
 
     #[test]
-    fn should_handle_setup_zsh_hook_injection() {
-        let (tmp, ctx) = mock_context();
-        let fake_home = tmp.path();
-        let zshrc_path = fake_home.join(".zshrc");
+    fn should_generate_zsh_hook_correctly() {
+        let (_tmp, ctx) = mock_context();
+        let fzf_cache = ctx.paths.cache.join("fzf.sh");
+        let cache_str = fzf_cache.display().to_string();
 
-        fs::write(&zshrc_path, "export PATH=$HOME/bin:$PATH\n").unwrap();
-
-        temp_env::with_var("HOME", Some(fake_home), || {
-            let task = ctx.log.step("Test Task", true);
-
-            let result = IrisSetup::setup_zsh_hook(&ctx, &task);
-            assert!(result.is_ok());
-
-            let updated_content = fs::read_to_string(&zshrc_path).unwrap();
-
-            assert!(updated_content.contains("# --- Iris FZF Sync ---"));
-            assert!(updated_content.contains("_iris_fzf_sync"));
-
-            let result_second = IrisSetup::setup_zsh_hook(&ctx, &task);
-            assert!(result_second.is_ok());
-
-            let final_content = fs::read_to_string(&zshrc_path).unwrap();
-            let occurrences = final_content.matches("# --- Iris FZF Sync ---").count();
-            assert_eq!(occurrences, 1, "Hook should not be duplicated");
-        });
+        assert!(cache_str.contains("fzf.sh"));
     }
 
     #[test]
     fn should_skip_initial_setup_if_exists() {
         let (_tmp, mut ctx) = mock_context();
 
-        fs::write(
+        std::fs::write(
             &ctx.paths.state_file,
             r#"{"current_theme": "nord", "enabled_generators": []}"#,
         )
@@ -234,8 +176,6 @@ mod tests {
     fn should_handle_full_setup_logic() {
         let (tmp, mut ctx) = mock_context();
         let fake_home = tmp.path();
-
-        fs::write(fake_home.join(".zshrc"), "").unwrap();
 
         temp_env::with_vars(
             [
@@ -259,9 +199,6 @@ mod tests {
                     "state file should be created"
                 );
                 assert_eq!(ctx.state.nvim.manager, PluginManager::Default);
-
-                let zshrc_content = fs::read_to_string(fake_home.join(".zshrc")).unwrap();
-                assert!(zshrc_content.contains("Iris FZF Sync"));
             },
         );
     }

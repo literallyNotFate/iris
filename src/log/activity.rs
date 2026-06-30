@@ -33,7 +33,7 @@ impl Activity {
             let icon_str = icon.to_string();
             let extra_space = if icon_str.contains("●") { "" } else { " " };
 
-            println!(
+            eprintln!(
                 "{}{} {}{}",
                 parent.gutter,
                 icon,
@@ -93,7 +93,7 @@ impl Activity {
 
         match self.parent_logger.verbosity {
             LoggingVerbosity::Detailed => {
-                println!(
+                eprintln!(
                     "{}{} {} {}",
                     self.parent_logger.gutter,
                     "✓".green(),
@@ -102,14 +102,14 @@ impl Activity {
                 );
 
                 if !self.is_last {
-                    println!("{}{}", self.parent_logger.gutter, "│".dimmed());
+                    eprintln!("{}{}", self.parent_logger.gutter, "│".dimmed());
                 } else if self.parent_logger.gutter.is_empty() {
-                    println!();
+                    eprintln!();
                 }
             }
             LoggingVerbosity::Minimal => {
                 if self.parent_logger.gutter.is_empty() {
-                    println!(
+                    eprintln!(
                         "{} {} {}",
                         "✓".green().bold(),
                         final_msg.green().bold(),
@@ -146,7 +146,7 @@ impl Drop for Activity {
     /// it still prints an "incomplete" status to maintain log integrity
     fn drop(&mut self) {
         if !self.finished && self.parent_logger.verbosity == LoggingVerbosity::Detailed {
-            println!("{}{}", self.parent_logger.gutter, self.message.dimmed());
+            eprintln!("{}{}", self.parent_logger.gutter, self.message.dimmed());
         }
     }
 }
