@@ -53,6 +53,9 @@ pub enum Commands {
     /// Display current status, active theme, and enabled applications
     Status,
 
+    /// Returns current theme applied in Neovim
+    Current,
+
     /// Display the colors of a theme
     Preview {
         /// Name of the theme to preview (defaults to current)
