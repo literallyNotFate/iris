@@ -6,21 +6,22 @@ pub enum ConfigAction {
     /// Show current active configuration
     Show,
 
-    /// Configure Neovim integration
-    Nvim {
-        /// Force a specific plugin manager (lazy, packer, default)
-        #[clap(long, short)]
-        manager: Option<PluginManager>,
+    /// Open config/state file in editor of choice
+    Edit,
 
-        /// Run auto-detection and update state
-        #[clap(long, short)]
-        detect: bool,
-    },
+    /// Set or update a configuration option
+    Set {
+        /// Configuration key to update
+        #[arg(value_enum)]
+        key: ConfigKey,
 
-    /// Set a fallback theme to use when the requested theme is unavailable
-    Fallback {
-        /// Name of the fallback theme (e.g., 'retrobox')
-        #[arg(value_name = "THEME")]
-        name: Option<String>,
+        /// New value for the option (omitting this triggers interactive mode/auto-detect)
+        value: Option<String>,
     },
+#[derive(ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ConfigKey {
+    /// Neovim plugin manager (lazy, packer, default)
+    Manager,
+    /// Fallback theme name
+    Fallback,
 }

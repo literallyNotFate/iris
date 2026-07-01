@@ -1,17 +1,20 @@
 use crate::{
-    cli::ConfigAction,
+    cli::{ConfigAction, config::ConfigKey},
     core::{IrisContext, ThemeOrchestrator},
     log::LoggingVerbosity,
     models::PluginManager,
     utils::{self, colors::select_theme},
 };
+use anyhow::{Context, Result};
 use colored::*;
 use dialoguer::{Input, Select};
+use std::{env, process::Command};
 
 /// Handle application config command
-pub fn exec(action: Option<ConfigAction>, ctx: &mut IrisContext) -> anyhow::Result<()> {
+pub fn exec(action: Option<ConfigAction>, ctx: &mut IrisContext) -> Result<()> {
     let mut changed: bool = false;
     let action: ConfigAction = action.unwrap_or(ConfigAction::Show);
+    let is_display_or_edit: bool = matches!(action, ConfigAction::Show | ConfigAction::Edit);
 
     match action {
         ConfigAction::Show => {
@@ -51,91 +54,134 @@ pub fn exec(action: Option<ConfigAction>, ctx: &mut IrisContext) -> anyhow::Resu
             }
         }
 
-        ConfigAction::Nvim { manager, detect } => {
-            if ctx.log.is_detailed() {
-                render_config_header("Neovim Configuration", "⚙");
-            }
+        ConfigAction::Set { key, value } => {
             let orchestrator = ThemeOrchestrator::new(&ctx.paths, &ctx.log);
 
-            let selected: PluginManager = if detect || manager.is_some() {
-                orchestrator.choose_manager(manager, detect)?
-            } else {
-                if ctx.log.verbosity != LoggingVerbosity::Silent {
-                    println!(
-                        "{}  No flags provided. Choose your plugin manager manually:",
-                        "ℹ".blue()
-                    );
+            match key {
+                ConfigKey::Manager => {
+                    if ctx.log.is_detailed() {
+                        render_config_header("Neovim Configuration", "⚙");
+                    }
+
+                    let selected: PluginManager = match value {
+                        Some(val) => match val.trim().to_lowercase().as_str() {
+                            "lazy" => PluginManager::Lazy,
+                            "packer" => PluginManager::Packer,
+                            "default" => PluginManager::Default,
+                            _ => anyhow::bail!(
+                                "Invalid manager type. Available: lazy, packer, default"
+                            ),
+                        },
+                        None => {
+                            if let Ok(detected) = orchestrator.choose_manager(None, true) {
+                                if ctx.log.verbosity != LoggingVerbosity::Silent {
+                                    println!(
+                                        "{}  Auto-detected plugin manager: {}",
+                                        "✓".green(),
+                                        detected
+                                    );
+                                }
+                                detected
+                            } else {
+                                if ctx.log.verbosity != LoggingVerbosity::Silent {
+                                    println!(
+                                        "{}  Could not auto-detect. Choose manually:",
+                                        "ℹ".blue()
+                                    );
+                                }
+                                let managers = PluginManager::all();
+                                let selection = Select::with_theme(&select_theme())
+                                    .items(&managers)
+                                    .default(0)
+                                    .interact()?;
+                                managers[selection].clone()
+                            }
+                        }
+                    };
+
+                    if ctx.state.nvim.manager != selected {
+                        if ctx.log.is_detailed() {
+                            ctx.log.info(&format!(
+                                "Changing plugin manager to {}...",
+                                selected.to_string().cyan().bold()
+                            ));
+                        }
+                        ctx.state.nvim.manager = selected;
+                        changed = true;
+                    } else if ctx.log.verbosity != LoggingVerbosity::Silent {
+                        println!(
+                            "{}  Plugin manager is already set to {}",
+                            "✓".green(),
+                            ctx.state.nvim.manager
+                        );
+                    }
                 }
 
-                let managers: [PluginManager; 3] = PluginManager::all();
-                let selection: usize = Select::with_theme(&select_theme())
-                    .items(&managers)
-                    .default(0)
-                    .interact()?;
+                ConfigKey::Fallback => {
+                    if ctx.log.is_detailed() {
+                        render_config_header("Fallback Configuration", "⚙");
+                    }
 
-                managers[selection].clone()
-            };
+                    let input_name = match value {
+                        Some(val) => val,
+                        None => Input::<String>::with_theme(&select_theme())
+                            .with_prompt("Enter fallback theme name:")
+                            .interact_text()?,
+                    };
 
-            if ctx.state.nvim.manager != selected {
-                if ctx.log.is_detailed() {
-                    ctx.log
-                        .info(&format!("Changing plugin manager to {}...", selected));
+                    let theme = utils::capitalize(input_name.trim());
+                    if !orchestrator.theme_exists(&theme, &ctx.state) {
+                        anyhow::bail!(
+                            "Theme `{}` does not exist in Neovim or cache.",
+                            theme.cyan().bold()
+                        );
+                    }
+
+                    if ctx.state.theme.fallback_theme != theme.to_lowercase() {
+                        if ctx.log.is_detailed() {
+                            ctx.log.info(&format!(
+                                "Selecting {} as a fallback...",
+                                theme.magenta().bold()
+                            ));
+                        }
+                        ctx.state.theme.fallback_theme = theme.to_lowercase();
+                        changed = true;
+                        if ctx.log.verbosity != LoggingVerbosity::Silent {
+                            println!(
+                                "\n{}",
+                                "✓ Fallback theme updated successfully!".green().bold()
+                            );
+                        }
+                    } else if ctx.log.verbosity != LoggingVerbosity::Silent {
+                        println!(
+                            "\n{} {}",
+                            "✓ Fallback theme is already set to".green().bold(),
+                            theme.magenta().bold()
+                        );
+                    }
                 }
-
-                ctx.state.nvim.manager = selected;
-                changed = true;
-            } else if ctx.log.verbosity != LoggingVerbosity::Silent {
-                println!(
-                    "{}  Plugin manager is already set to {}",
-                    "✓".green(),
-                    ctx.state.nvim.manager
-                );
             }
         }
 
-        ConfigAction::Fallback { ref name } => {
+        ConfigAction::Edit => {
+            println!();
+            let editor = env::var("EDITOR").unwrap_or_else(|_| "nvim".to_string());
+
             if ctx.log.is_detailed() {
-                render_config_header("Fallback Configuration", "⚙");
+                ctx.log.info(&format!(
+                    "Opening {} in {}...",
+                    utils::pretty_path(&ctx.paths.state_file).cyan().italic(),
+                    editor.green().bold()
+                ));
             }
 
-            let orchestrator = ThemeOrchestrator::new(&ctx.paths, &ctx.log);
-            let input_name: String = match name {
-                Some(n) => n.to_owned(),
-                None => Input::<String>::with_theme(&select_theme())
-                    .with_prompt("Enter fallback theme name:")
-                    .interact_text()?,
-            };
+            let status = Command::new(&editor)
+                .arg(&ctx.paths.state_file)
+                .status()
+                .with_context(|| format!("Failed to run editor: '{editor}'"))?;
 
-            let theme: String = utils::capitalize(input_name.trim());
-            if !orchestrator.theme_exists(&theme, &ctx.state) {
-                anyhow::bail!(
-                    "Theme `{}` does not exist in Neovim or cache.",
-                    theme.cyan().bold()
-                );
-            }
-
-            if ctx.state.theme.fallback_theme != theme.to_lowercase() {
-                if ctx.log.is_detailed() {
-                    ctx.log.info(&format!(
-                        "Selecting {} as a fallback...",
-                        theme.magenta().bold()
-                    ));
-                }
-
-                ctx.state.theme.fallback_theme = theme.to_lowercase();
-                changed = true;
-                if ctx.log.verbosity != LoggingVerbosity::Silent {
-                    println!(
-                        "\n{}",
-                        "✓ Fallback theme updated successfully!".green().bold()
-                    );
-                }
-            } else if ctx.log.verbosity != LoggingVerbosity::Silent {
-                println!(
-                    "\n{} {}",
-                    "✓ Fallback theme is already set to".green().bold(),
-                    theme.magenta().bold()
-                );
+            if !status.success() {
+                anyhow::bail!("Editor exited with a non-zero status code.");
             }
         }
     }
@@ -144,7 +190,7 @@ pub fn exec(action: Option<ConfigAction>, ctx: &mut IrisContext) -> anyhow::Resu
         ctx.log.action("Saved configuration to state file", || {
             ctx.state.save_to(&ctx.paths.state_file)
         })?;
-    } else if !matches!(action, ConfigAction::Show) && ctx.log.is_detailed() {
+    } else if !is_display_or_edit && ctx.log.is_detailed() {
         println!(
             "{}  No changes detected, state file left untouched.",
             "ℹ".blue()
