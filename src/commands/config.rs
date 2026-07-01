@@ -2,19 +2,22 @@ use crate::{
     cli::{ConfigAction, config::ConfigKey},
     core::{IrisContext, ThemeOrchestrator},
     log::LoggingVerbosity,
-    models::PluginManager,
+    models::{PluginManager, State},
     utils::{self, colors::select_theme},
 };
 use anyhow::{Context, Result};
 use colored::*;
-use dialoguer::{Input, Select};
+use dialoguer::{Confirm, Input, Select};
 use std::{env, process::Command};
 
 /// Handle application config command
 pub fn exec(action: Option<ConfigAction>, ctx: &mut IrisContext) -> Result<()> {
     let mut changed: bool = false;
     let action: ConfigAction = action.unwrap_or(ConfigAction::Show);
-    let is_display_or_edit: bool = matches!(action, ConfigAction::Show | ConfigAction::Edit);
+    let is_display_or_helper: bool = matches!(
+        action,
+        ConfigAction::Show | ConfigAction::Edit | ConfigAction::Check | ConfigAction::Reset
+    );
 
     match action {
         ConfigAction::Show => {
@@ -63,51 +66,16 @@ pub fn exec(action: Option<ConfigAction>, ctx: &mut IrisContext) -> Result<()> {
                         render_config_header("Neovim Configuration", "⚙");
                     }
 
-                    let selected: PluginManager = match value {
-                        Some(val) => match val.trim().to_lowercase().as_str() {
-                            "lazy" => PluginManager::Lazy,
-                            "packer" => PluginManager::Packer,
-                            "default" => PluginManager::Default,
-                            _ => anyhow::bail!(
-                                "Invalid manager type. Available: lazy, packer, default"
-                            ),
-                        },
-                        None => {
-                            if let Ok(detected) = orchestrator.choose_manager(None, true) {
-                                if ctx.log.verbosity != LoggingVerbosity::Silent {
-                                    println!(
-                                        "{}  Auto-detected plugin manager: {}",
-                                        "✓".green(),
-                                        detected
-                                    );
-                                }
-                                detected
-                            } else {
-                                if ctx.log.verbosity != LoggingVerbosity::Silent {
-                                    println!(
-                                        "{}  Could not auto-detect. Choose manually:",
-                                        "ℹ".blue()
-                                    );
-                                }
-                                let managers = PluginManager::all();
-                                let selection = Select::with_theme(&select_theme())
-                                    .items(&managers)
-                                    .default(0)
-                                    .interact()?;
-                                managers[selection].clone()
-                            }
-                        }
-                    };
+                    let selected = resolve_manager(value, &orchestrator, ctx.log.verbosity)?;
+                    changed = ctx.state.set_nvim_manager(selected);
 
-                    if ctx.state.nvim.manager != selected {
+                    if changed {
                         if ctx.log.is_detailed() {
                             ctx.log.info(&format!(
                                 "Changing plugin manager to {}...",
                                 selected.to_string().cyan().bold()
                             ));
                         }
-                        ctx.state.nvim.manager = selected;
-                        changed = true;
                     } else if ctx.log.verbosity != LoggingVerbosity::Silent {
                         println!(
                             "{}  Plugin manager is already set to {}",
@@ -122,30 +90,10 @@ pub fn exec(action: Option<ConfigAction>, ctx: &mut IrisContext) -> Result<()> {
                         render_config_header("Fallback Configuration", "⚙");
                     }
 
-                    let input_name = match value {
-                        Some(val) => val,
-                        None => Input::<String>::with_theme(&select_theme())
-                            .with_prompt("Enter fallback theme name:")
-                            .interact_text()?,
-                    };
+                    let raw_name: String = resolve_fallback_name(value)?;
+                    changed = ctx.state.set_fallback_theme(&raw_name, &orchestrator)?;
 
-                    let theme = utils::capitalize(input_name.trim());
-                    if !orchestrator.theme_exists(&theme, &ctx.state) {
-                        anyhow::bail!(
-                            "Theme `{}` does not exist in Neovim or cache.",
-                            theme.cyan().bold()
-                        );
-                    }
-
-                    if ctx.state.theme.fallback_theme != theme.to_lowercase() {
-                        if ctx.log.is_detailed() {
-                            ctx.log.info(&format!(
-                                "Selecting {} as a fallback...",
-                                theme.magenta().bold()
-                            ));
-                        }
-                        ctx.state.theme.fallback_theme = theme.to_lowercase();
-                        changed = true;
+                    if changed {
                         if ctx.log.verbosity != LoggingVerbosity::Silent {
                             println!(
                                 "\n{}",
@@ -156,7 +104,9 @@ pub fn exec(action: Option<ConfigAction>, ctx: &mut IrisContext) -> Result<()> {
                         println!(
                             "\n{} {}",
                             "✓ Fallback theme is already set to".green().bold(),
-                            theme.magenta().bold()
+                            utils::capitalize(&ctx.state.theme.fallback_theme)
+                                .magenta()
+                                .bold()
                         );
                     }
                 }
@@ -184,13 +134,55 @@ pub fn exec(action: Option<ConfigAction>, ctx: &mut IrisContext) -> Result<()> {
                 anyhow::bail!("Editor exited with a non-zero status code.");
             }
         }
+
+        ConfigAction::Check => {
+            render_config_header("Environment Health Check", "󰍉");
+            let errors: usize = ctx.paths.check_health(ctx.log.verbosity);
+
+            println!();
+            if errors == 0 {
+                println!("{}", "✓ Iris environment is healthy.".green().bold());
+            } else {
+                anyhow::bail!("Environment check failed with {} error(s).", errors);
+            }
+        }
+
+        ConfigAction::Reset => {
+            render_config_header("Reset Configuration", "!");
+
+            println!(
+                "{} This will restore default settings in {} and overwrite current modifications.",
+                "!".yellow().bold(),
+                utils::pretty_path(&ctx.paths.state_file).dimmed()
+            );
+
+            let proceed = Confirm::with_theme(&select_theme())
+                .with_prompt("Are you absolutely sure you want to reset your config?")
+                .default(false)
+                .interact()?;
+
+            if !proceed {
+                println!("\n{} Reset aborted.\n", "ℹ".blue());
+                return Ok(());
+            }
+
+            ctx.state = State::default();
+            changed = true;
+
+            println!(
+                "\n{}",
+                "✓ Configuration reset to factory defaults successfully!"
+                    .green()
+                    .bold()
+            );
+        }
     }
 
     if changed {
         ctx.log.action("Saved configuration to state file", || {
             ctx.state.save_to(&ctx.paths.state_file)
         })?;
-    } else if !is_display_or_edit && ctx.log.is_detailed() {
+    } else if !is_display_or_helper && ctx.log.is_detailed() {
         println!(
             "{}  No changes detected, state file left untouched.",
             "ℹ".blue()
@@ -207,4 +199,51 @@ pub fn exec(action: Option<ConfigAction>, ctx: &mut IrisContext) -> Result<()> {
 /// Helper function to render header for config
 fn render_config_header(title: &str, icon: &str) {
     println!("\n{}  {}\n", icon.bright_yellow().bold(), title.bold());
+}
+
+/// Helper function to resolve plugin manager
+fn resolve_manager(
+    value: Option<String>,
+    orchestrator: &ThemeOrchestrator,
+    verbosity: LoggingVerbosity,
+) -> Result<PluginManager> {
+    if let Some(val) = value {
+        return match val.trim().to_lowercase().as_str() {
+            "lazy" => Ok(PluginManager::Lazy),
+            "packer" => Ok(PluginManager::Packer),
+            "default" => Ok(PluginManager::Default),
+            _ => anyhow::bail!("Invalid manager type. Available: lazy, packer, default"),
+        };
+    }
+
+    if let Ok(detected) = orchestrator.choose_manager(None, true) {
+        if verbosity != LoggingVerbosity::Silent {
+            println!(
+                "{}  Auto-detected plugin manager: {}",
+                "✓".green(),
+                detected
+            );
+        }
+        return Ok(detected);
+    }
+
+    if verbosity != LoggingVerbosity::Silent {
+        println!("{}  Could not auto-detect. Choose manually:", "ℹ".blue());
+    }
+    let managers = PluginManager::all();
+    let selection = Select::with_theme(&select_theme())
+        .items(&managers)
+        .default(0)
+        .interact()?;
+    Ok(managers[selection].clone())
+}
+
+/// Helper function to resolve fallback theme
+fn resolve_fallback_name(value: Option<String>) -> Result<String> {
+    match value {
+        Some(val) => Ok(val),
+        None => Ok(Input::<String>::with_theme(&select_theme())
+            .with_prompt("Enter fallback theme name:")
+            .interact_text()?),
+    }
 }

@@ -1,8 +1,10 @@
-use crate::models::PluginManager;
+use crate::{log::LoggingVerbosity, models::PluginManager};
 use anyhow::{Context, Result};
+use colored::*;
 use std::{
     fs,
     path::{Path, PathBuf},
+    process::Command,
 };
 
 /// Paths manager for application
@@ -167,6 +169,66 @@ impl IrisPaths {
 
         themes.sort();
         Ok(themes)
+    }
+
+    /// Runs a health check on system paths and dependencies.
+    /// Returns the number of critical errors encountered
+    pub fn check_health(&self, verbosity: LoggingVerbosity) -> usize {
+        let mut errors = 0;
+        let is_silent = verbosity == LoggingVerbosity::Silent;
+
+        macro_rules! check_step {
+            ($label:expr, $condition:expr, $err_msg:expr) => {
+                if !is_silent {
+                    print!("  {:<35}", $label.dimmed());
+                }
+                if $condition {
+                    if !is_silent {
+                        println!("{}", "[ OK ]".green().bold());
+                    }
+                } else {
+                    if !is_silent {
+                        println!("{}", "[ MISSING ]".red().bold());
+                    }
+                    $err_msg;
+                }
+            };
+        }
+
+        check_step!(
+            "Application state file...",
+            self.state_file.exists(),
+            errors += 1
+        );
+        check_step!("Themes cache directory...", self.cache.exists(), {
+            if !is_silent {
+                println!(
+                    "    {} Cache directory is missing, will be created on save.",
+                    "ℹ".blue()
+                );
+            }
+        });
+
+        let expected_lua_path: PathBuf = self.nvim_data_dir().join("site/plugin/iris_sync.lua");
+        check_step!("Neovim autoloader script...", expected_lua_path.exists(), {
+            errors += 1;
+            if !is_silent {
+                println!(
+                    "    {} Run {} to fix Neovim integration.",
+                    "ℹ".blue(),
+                    "iris setup".yellow().bold()
+                );
+            }
+        });
+
+        let nvim_available: bool = Command::new("nvim").arg("--version").output().is_ok();
+        check_step!("Neovim executable...", nvim_available, {
+            if !is_silent {
+                println!("    {} Neovim is not in your $PATH.", "⚠".yellow());
+            }
+        });
+
+        errors
     }
 }
 
@@ -369,5 +431,38 @@ mod tests {
         let expected = paths.cache.join("themes/melange.json");
         let path = paths.cached_theme("melange");
         assert_eq!(path, expected);
+    }
+
+    #[test]
+    fn should_check_health_and_return_correct_error_count() {
+        let paths = setup_paths();
+        let errors_missing = paths.check_health(LoggingVerbosity::Silent);
+        assert!(
+            errors_missing >= 2,
+            "Should detect missing state file and lua script"
+        );
+
+        paths.ensure_dirs().expect("Failed to ensure directories");
+
+        fs::write(&paths.state_file, "[theme] current = 'melange'")
+            .expect("Failed to write mock state");
+
+        let errors_partial = paths.check_health(LoggingVerbosity::Silent);
+        assert_eq!(
+            errors_partial,
+            errors_missing - 1,
+            "Error count should drop after creating state.toml"
+        );
+
+        let lua_dir = paths.nvim_data_dir().join("site/plugin");
+        fs::create_dir_all(&lua_dir).expect("Failed to create mock nvim plugin dir");
+        fs::write(lua_dir.join("iris_sync.lua"), "-- mock")
+            .expect("Failed to write mock lua script");
+
+        let errors_nominal = paths.check_health(LoggingVerbosity::Silent);
+        assert_eq!(
+            errors_nominal, 0,
+            "Should have 0 errors when all files exist"
+        );
     }
 }

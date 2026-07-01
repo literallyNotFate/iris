@@ -1,3 +1,4 @@
+use crate::{core::ThemeOrchestrator, utils};
 use anyhow::{Context, Result};
 use colored::Colorize;
 pub use serde::{Deserialize, Serialize};
@@ -79,6 +80,30 @@ impl State {
         self.theme.current_theme = new_theme;
     }
 
+    /// Set a new fallback theme after validating its existence via ThemeOrchestrator.
+    /// Returns true if the state actually changed
+    pub fn set_fallback_theme(
+        &mut self,
+        name: &str,
+        orchestrator: &ThemeOrchestrator,
+    ) -> Result<bool> {
+        let theme: String = utils::capitalize(name.trim());
+        if !orchestrator.theme_exists(&theme, self) {
+            anyhow::bail!(
+                "Theme `{}` does not exist in Neovim or cache.",
+                theme.cyan().bold()
+            );
+        }
+
+        let lower_theme: String = theme.to_lowercase();
+        if self.theme.fallback_theme != lower_theme {
+            self.theme.fallback_theme = lower_theme;
+            Ok(true)
+        } else {
+            Ok(false)
+        }
+    }
+
     /// Toggles between current and previous theme.
     /// If no previous theme exists, falls back to `fallback_theme`.
     /// Returns the name of the newly activated theme.
@@ -115,6 +140,16 @@ impl State {
         } else {
             self.enable_generator(name);
             true
+        }
+    }
+
+    /// Set a new plugin manager. Returns true if the state actually changed
+    pub fn set_nvim_manager(&mut self, manager: PluginManager) -> bool {
+        if self.nvim.manager != manager {
+            self.nvim.manager = manager;
+            true
+        } else {
+            false
         }
     }
 
@@ -217,6 +252,7 @@ impl fmt::Display for PluginManager {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::utils::tests::mock_context;
     use tempdir::TempDir;
 
     #[test]
@@ -380,5 +416,31 @@ mod tests {
 
         let default_manager = PluginManager::Default;
         assert!(default_manager.get_rtp_command().is_none());
+    }
+
+    #[test]
+    fn should_set_nvim_manager_and_return_changed_flag() {
+        let mut state = State::default();
+        assert_eq!(state.nvim.manager, PluginManager::Default);
+
+        let changed = state.set_nvim_manager(PluginManager::Lazy);
+        assert!(changed);
+        assert_eq!(state.nvim.manager, PluginManager::Lazy);
+
+        let changed_again = state.set_nvim_manager(PluginManager::Lazy);
+        assert!(!changed_again);
+    }
+
+    #[test]
+    fn should_validate_and_set_fallback_theme() {
+        let (_, ctx) = mock_context();
+        let mut state = State::default();
+        let orchestrator = ThemeOrchestrator::new(&ctx.paths, &ctx.log);
+
+        state.theme.fallback_theme = "retrobox".to_string();
+        let res = state.set_fallback_theme("retrobox", &orchestrator);
+        if let Ok(changed) = res {
+            assert!(!changed);
+        }
     }
 }

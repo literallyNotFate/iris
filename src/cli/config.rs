@@ -1,5 +1,4 @@
-use crate::models::PluginManager;
-use clap::Subcommand;
+use clap::{Subcommand, ValueEnum};
 
 #[derive(Subcommand)]
 pub enum ConfigAction {
@@ -18,6 +17,14 @@ pub enum ConfigAction {
         /// New value for the option (omitting this triggers interactive mode/auto-detect)
         value: Option<String>,
     },
+
+    /// Check health and validity of the configuration and environment
+    Check,
+
+    /// Reset configuration file to default factory values
+    Reset,
+}
+
 #[derive(ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ConfigKey {
     /// Neovim plugin manager (lazy, packer, default)
