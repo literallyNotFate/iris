@@ -1,0 +1,59 @@
+[styles]
+
+[styles.widgets]
+bg_colour = "{{ bg }}"
+border_colour = "{{ gutter_fg }}"
+selected_border_colour = "{{ keyword }}"
+
+widget_title = { colour = "{{ func }}", bold = true }
+text = { colour = "{{ fg }}" }
+selected_text = { colour = "{{ fg }}", bg_colour = "{{ line_hl }}", bold = true }
+disabled_text = { colour = "{{ comment }}" }
+thread_text = { colour = "{{ operator }}" }
+
+[styles.graphs]
+graph_colour = "{{ comment }}"
+legend_text = { colour = "{{ fg }}" }
+
+[styles.tables]
+headers = { colour = "{{ type_name }}", bold = true }
+
+[styles.cpu]
+all_entry_colour = "{{ caret }}"
+avg_entry_colour = "{{ number }}"
+cpu_core_colours = [
+    "{{ ansi.4 }}",
+    "{{ ansi.2 }}",
+    "{{ ansi.6 }}",
+    "{{ ansi.5 }}",
+    "{{ ansi.3 }}",
+    "{{ ansi.1 }}"
+]
+
+[styles.temp_graph]
+temp_graph_colour_styles = [
+    "{{ ansi.6 }}",
+    "{{ ansi.4 }}",
+    "{{ ansi.5 }}"
+]
+
+[styles.memory]
+ram_colour = "{{ ansi.4 }}"
+cache_colour = "{{ ansi.6 }}"
+swap_colour = "{{ ansi.3 }}"
+arc_colour = "{{ ansi.5 }}"
+gpu_colours = [
+    "{{ ansi.2 }}",
+    "{{ ansi.3 }}"
+]
+
+[styles.network]
+rx_colour = "{{ ansi.2 }}"
+tx_colour = "{{ ansi.1 }}"
+rx_total_colour = "{{ ansi.6 }}"
+tx_total_colour = "{{ ansi.5 }}"
+
+[styles.battery]
+high_battery_colour = "{{ ansi.2 }}"
+medium_battery_colour = "{{ ansi.3 }}"
+low_battery_colour = "{{ ansi.1 }}"
