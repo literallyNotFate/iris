@@ -32,6 +32,9 @@ pub struct Palette {
     pub tag: String,
     pub attribute: String,
     pub white: String,
+    pub added: String,
+    pub deleted: String,
+    pub changed: String,
     pub ansi: Vec<String>,
 }
 
@@ -107,6 +110,9 @@ impl Theme {
                 tag: "#f7768e".into(),
                 attribute: "#e0af68".into(),
                 white: "#ffffff".into(),
+                added: "#9ece6a".into(),
+                deleted: "#f7768e".into(),
+                changed: "#e0af68".into(),
                 ansi: (0..16).map(|_| "#ffffff".to_string()).collect(),
             },
         }
@@ -117,6 +123,13 @@ impl Palette {
     /// Lua script to fetch palette from nvim
     pub fn fetch_lua_script() -> &'static str {
         r##"
+        local function normalize(hex)
+            if type(hex) == 'string' then
+                return hex:lower()
+            end
+            return hex
+        end
+
         local function g(name, attr)
             local max_depth = 15
             local current = name
@@ -168,6 +181,33 @@ impl Palette {
         local fg = g('Normal', 'fg') or '#cccccc'
         local bg = g('Normal', 'bg') or '#1c1c1c'
 
+        local p_red     = chain('fg', { 'DiagnosticError', 'ErrorMsg' },    { 'DiffDelete' })
+        local p_green   = chain('fg', { 'DiagnosticOk', 'DiagnosticHint' }, { 'String', '@string' })
+        local p_yellow  = chain('fg', { 'DiagnosticWarn', 'WarningMsg' },   { 'Number', '@number' })
+        local p_blue    = chain('fg', { 'Function', '@function' },         { 'Directory' })
+        local p_magenta = chain('fg', { 'Keyword', '@keyword' },           { 'Special' })
+        local p_cyan    = chain('fg', { 'Type', '@type' },                 { 'Identifier' })
+        local p_dim     = chain('fg', { 'Comment', '@comment' },           { 'NonText' })
+
+        local semantic_fallback = {
+            bg,
+            p_red,
+            p_green,
+            p_yellow,
+            p_blue,
+            p_magenta,
+            p_cyan,
+            p_dim,
+            p_dim,
+            p_red,
+            p_green,
+            p_yellow,
+            p_blue,
+            p_magenta,
+            p_cyan,
+            fg,
+        }
+
         local function resolve_ansi()
             local result = {}
             local has_any = false
@@ -183,40 +223,17 @@ impl Palette {
                 for i = 0, 15 do
                     local color = vim.g['terminal_color_' .. i]
                     if type(color) == 'string' then
-                        table.insert(result, color)
+                        table.insert(result, normalize(color))
                     elseif type(color) == 'number' then
                         table.insert(result, string.format('#%06x', color))
                     else
-                        table.insert(result, i < 8 and bg or fg)
+                        table.insert(result, normalize(semantic_fallback[i + 1]))
                     end
                 end
             else
-                local p_red     = chain('fg', { 'DiagnosticError', 'ErrorMsg' },    { 'DiffDelete' })
-                local p_green   = chain('fg', { 'DiagnosticOk', 'DiagnosticHint' }, { 'String', '@string' })
-                local p_yellow  = chain('fg', { 'DiagnosticWarn', 'WarningMsg' },   { 'Number', '@number' })
-                local p_blue    = chain('fg', { 'Function', '@function' },           { 'Directory' })
-                local p_magenta = chain('fg', { 'Keyword', '@keyword' },             { 'Special' })
-                local p_cyan    = chain('fg', { 'Type', '@type' },                   { 'Identifier' })
-                local p_dim     = chain('fg', { 'Comment', '@comment' },             { 'NonText' })
-
-                result = {
-                    bg,
-                    p_red,
-                    p_green,
-                    p_yellow,
-                    p_blue,
-                    p_magenta,
-                    p_cyan,
-                    p_dim,
-                    p_dim,
-                    p_red,
-                    p_green,
-                    p_yellow,
-                    p_blue,
-                    p_magenta,
-                    p_cyan,
-                    fg,
-                }
+                for i = 1, 16 do
+                    table.insert(result, normalize(semantic_fallback[i]))
+                end
             end
             return result
         end
@@ -261,13 +278,13 @@ impl Palette {
 
             variable  = chain('fg',
                 { '@variable', '@variable.member', '@variable.parameter' },
-                { 'Identifier' },
-                { 'Normal' }
+                { 'Identifier' }
             ),
 
             constant  = chain('fg',
                 { '@constant', '@constant.builtin', '@constant.macro' },
-                { 'Constant', 'Special' }
+                { 'Constant', 'Special' },
+                { '@number', 'Number' }
             ),
 
             number    = chain('fg',
@@ -282,14 +299,13 @@ impl Palette {
             ),
 
             keyword   = chain('fg',
-                { '@keyword', '@keyword.function', '@keyword.operator', '@keyword.import', '@keyword.return' },
+                { '@keyword', '@keyword.function', '@keyword.import', '@keyword.return' },
                 { 'Keyword', 'Statement', 'Conditional', 'Repeat' }
             ),
 
             operator  = chain('fg',
                 { '@operator', '@keyword.operator' },
-                { 'Operator' },
-                { 'Normal' }
+                { 'Operator' }
             ),
 
             func      = chain('fg',
@@ -324,9 +340,15 @@ impl Palette {
                 { 'DiffChange', 'GitSignsChange', '@diff.delta', 'Changed' }
             ),
 
-            white     = white,
+            white     = normalize(white),
             ansi      = resolve_ansi(),
         }
+
+        for k, v in pairs(res) do
+            if type(v) == 'string' then
+                res[k] = normalize(v)
+            end
+        end
 
         io.write(vim.fn.json_encode(res))
         "##
