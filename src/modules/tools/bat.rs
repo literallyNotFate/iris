@@ -80,12 +80,12 @@ impl Generator for BatGenerator {
     }
 
     fn build_render_context(&self, theme: &Theme) -> tera::Context {
-        let mut c = tera::Context::new();
         let fix = |h: &str| -> String {
             let hex = h.trim_start_matches('#');
             format!("#{}", hex)
         };
 
+        let mut c = tera::Context::new();
         c.insert("theme_name", &theme.name);
         c.insert("bg", &fix(&theme.colors.bg));
         c.insert("fg", &fix(&theme.colors.fg));
@@ -95,17 +95,7 @@ impl Generator for BatGenerator {
         let processed_rules: Vec<serde_json::Value> = RULES
             .iter()
             .map(|r| {
-                let color = match r.color_key {
-                    "keyword" => &theme.colors.keyword,
-                    "func" => &theme.colors.func,
-                    "type_name" => &theme.colors.type_name,
-                    "string" => &theme.colors.string,
-                    "operator" => &theme.colors.operator,
-                    "number" => &theme.colors.number,
-                    "comment" => &theme.colors.comment,
-                    _ => &theme.colors.fg,
-                };
-
+                let color: &str = r.color_key.resolve(&theme.colors);
                 let style = if r.style.is_empty() || r.style == "normal" {
                     None
                 } else {
@@ -130,7 +120,7 @@ impl Generator for BatGenerator {
             return HealthStatus::Warning("`bat` binary not found".into());
         }
 
-        let expected_env: PathBuf = paths.generators.join(self.name()).join("bat.conf");
+        let expected_env: PathBuf = paths.bin.join("bat.conf");
         let current_env: String = env::var("BAT_CONFIG_PATH").unwrap_or_default();
 
         if current_env != expected_env.to_string_lossy() {
@@ -286,15 +276,10 @@ impl BatGenerator {
             name = theme.name.to_lowercase()
         );
 
-        let generator_dir: PathBuf = paths.generators.join(self.name());
-        let config_path: PathBuf = generator_dir.join("bat.conf");
-
-        fs::create_dir_all(&generator_dir).with_context(|| {
-            format!(
-                "Failed to create `bat` generator directory: {}",
-                generator_dir.display()
-            )
-        })?;
+        let config_path: PathBuf = paths.bin.join("bat.conf");
+        if let Some(parent) = config_path.parent() {
+            fs::create_dir_all(parent).context("Failed to create bin directory for `bat`")?;
+        }
 
         fs::write(&config_path, config_content)
             .with_context(|| format!("Failed to write bat config: {}", config_path.display()))?;
@@ -376,10 +361,11 @@ mod tests {
 
                 let cache_theme_path: PathBuf =
                     ctx.paths.generators.join("bat").join(&expected_file_name);
-                let bat_conf_path: PathBuf = ctx.paths.generators.join("bat").join("bat.conf");
 
-                assert!(cache_theme_path.exists());
-                assert!(bat_conf_path.exists());
+                let bat_conf_path: PathBuf = ctx.paths.bin.join("bat.conf");
+
+                assert!(cache_theme_path.exists(), "Theme file missing in cache");
+                assert!(bat_conf_path.exists(), "bat.conf missing in bin/");
 
                 let conf_content = fs::read_to_string(bat_conf_path).unwrap();
                 assert!(conf_content.contains(&format!("--theme=\"{}\"", expected_theme_name)));
@@ -400,10 +386,15 @@ mod tests {
                     .unwrap();
 
                 let cache_dir: PathBuf = ctx.paths.generators.join(generator.name());
+                let bat_conf_path: PathBuf = ctx.paths.bin.join("bat.conf");
+
                 assert!(cache_dir.exists());
+                assert!(bat_conf_path.exists());
 
                 generator.clear(&ctx.paths).unwrap();
-                assert!(!cache_dir.exists());
+
+                assert!(!cache_dir.exists(),);
+                assert!(!bat_conf_path.exists(),);
             });
         }
 
@@ -456,7 +447,7 @@ mod tests {
                     .apply(&theme, &ctx.paths, &ctx.templater, &mut task)
                     .unwrap();
 
-                let expected_config = ctx.paths.generators.join(generator.name()).join("bat.conf");
+                let expected_config = ctx.paths.bin.join("bat.conf");
 
                 temp_env::with_var("BAT_CONFIG_PATH", Some(expected_config), || {
                     let status = generator.health_check(&ctx.paths, &theme.name);
@@ -499,7 +490,7 @@ mod tests {
                     ("BAT_CACHE_PATH", Some(test_bat_cache.as_os_str())),
                 ],
                 || {
-                    let expected_env = ctx.paths.generators.join(generator.name()).join("bat.conf");
+                    let expected_env = ctx.paths.bin.join("bat.conf");
 
                     temp_env::with_var("BAT_CONFIG_PATH", Some(expected_env.as_os_str()), || {
                         let mut task = ctx.log.step("Test", false).muted();

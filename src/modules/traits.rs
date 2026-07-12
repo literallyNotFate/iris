@@ -126,6 +126,13 @@ pub trait Generator: Send + Sync {
             }
         }
 
+        if name == "bat" {
+            let bin_config: PathBuf = paths.cache.join("bin").join("bat.conf");
+            if bin_config.exists() {
+                let _ = fs::remove_file(&bin_config).context("Failed to remove bat.conf file");
+            }
+        }
+
         let static_link: PathBuf = self.link_path(paths, "");
         if static_link.is_symlink() || static_link.exists() {
             let _ = fs::remove_file(&static_link);
