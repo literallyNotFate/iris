@@ -7,7 +7,7 @@ pub fn exec(args: SwitchArgs, ctx: &mut IrisContext) -> anyhow::Result<()> {
 
     if is_fb {
         println!(
-            "\n{}  Using fallback: {}",
+            "\n{}  Using fallback: {}...",
             "󰁯".blue(),
             crate::utils::capitalize(&target_name).green().bold()
         );

@@ -34,12 +34,12 @@ fn render_header(theme: &str, fallback: bool, requested: Option<String>) {
     if fallback {
         if let Some(req) = requested {
             println!(
-                "{}  Theme `{}` not found, showing fallback",
+                "{}  Theme `{}` not found, showing fallback...",
                 "󰁯".blue(),
                 req.dimmed()
             );
         } else {
-            println!("     {} Showing active system theme", "✓".blue());
+            println!("     {} Showing active system theme...", "✓".blue());
         }
     }
 

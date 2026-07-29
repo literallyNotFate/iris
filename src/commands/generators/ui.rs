@@ -84,13 +84,13 @@ pub(super) fn render_list_footer(total: usize, enabled: usize, no_filter: bool) 
         println!(
             " {} {}",
             "⚠".yellow(),
-            "No generators match criteria".italic().dimmed()
+            "No generators match criteria!".italic().dimmed()
         );
     } else if enabled == 0 && no_filter {
         println!(
             " {} {}",
             "󰚔".yellow(),
-            "Tip: use `iris gen enable <name>` to start".dimmed()
+            "Tip: use `iris gen enable <name>` to start.".dimmed()
         );
     }
 }

@@ -151,7 +151,7 @@ fn render_quiet(ctx: &IrisContext, current: &str, nvim_theme: &str, is_sync: boo
         println!(
             "{} {}",
             "󰚔".cyan(),
-            format!("Sync mismatch: Neovim is using `{}`", nvim_theme).dimmed()
+            format!("Sync mismatch: `nvim` is using `{}`", nvim_theme).dimmed()
         );
     }
     println!();

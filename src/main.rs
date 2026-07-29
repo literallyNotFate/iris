@@ -19,12 +19,22 @@ fn main() {
 
     if let Err(err) = run(cli, reporter) {
         eprintln!(
-            "\n{} {} {}\n",
+            "\n{} {} {}",
             "✘".red().bold(),
-            "Error:".red().bold(),
-            format!("{:#}", err).white()
+            "Execution failed:".red().bold(),
+            err.to_string().white().bold()
         );
 
+        let mut cause = err.source();
+        if cause.is_some() {
+            eprintln!("\n{}", "Caused by:".dimmed().underline());
+            while let Some(src) = cause {
+                eprintln!("  {} {}", "•".dimmed(), src.to_string().dimmed());
+                cause = src.source();
+            }
+        }
+
+        eprintln!();
         std::process::exit(1);
     }
 }

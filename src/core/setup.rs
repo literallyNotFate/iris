@@ -17,25 +17,27 @@ impl IrisSetup {
         eprintln!();
 
         ctx.log
-            .action("Infrastructure prepared", || ctx.paths.ensure_dirs())?;
+            .action("Prepared file structure.", || ctx.paths.ensure_dirs())?;
         if ctx.log.is_detailed() {
             eprintln!();
         }
 
         {
-            let task =
-                ctx.log
-                    .step_with_icon(&"󰏘".red().bold(), "Initializing application state", false);
-            Self::setup_initial_state(ctx, &task)?;
-            task.done_with("System state initialized");
+            let activity = ctx.log.step_with_icon(
+                &"󰏘".red().bold(),
+                "Initializing application state...",
+                false,
+            );
+            Self::setup_initial_state(ctx, &activity)?;
+            activity.done_with("System state initialized");
         }
 
         {
-            let task = ctx
-                .log
-                .step_with_icon(&"󰒓".green().bold(), "Integrating with Neovim", true);
-            Self::setup_nvim_automation(ctx, &task)?;
-            task.done_with("Neovim automation hook generated smoothly");
+            let activity =
+                ctx.log
+                    .step_with_icon(&"󰒓".green().bold(), "Integrating with `nvim`...", true);
+            Self::setup_nvim_automation(ctx, &activity)?;
+            activity.done_with("`nvim` automation hook generated smoothly");
         }
 
         ctx.log
@@ -46,38 +48,38 @@ impl IrisSetup {
     }
 
     /// Initializes state
-    fn setup_initial_state(ctx: &mut IrisContext, task: &Activity) -> anyhow::Result<()> {
+    fn setup_initial_state(ctx: &mut IrisContext, activity: &Activity) -> anyhow::Result<()> {
         if ctx.paths.state_file.exists() {
-            task.info("Found existing state.toml, loading configuration.");
+            activity.info("Found existing state.toml file, loading configuration...");
             return Ok(());
         }
 
-        task.info("Detecting Neovim plugin manager...");
+        activity.info("Detecting `nvim` plugin manager...");
         let manager: PluginManager = NeovimBridge::detect(&ctx.paths);
 
-            task.info(&format!(
-                "Found {} with {} plugins installed.",
         if !manager.is_default() {
             let count: usize = NeovimBridge::count(&ctx.paths, &manager);
+            activity.info(&format!(
+                "Found {} with {} plugins installed!",
                 manager,
                 count.to_string().yellow().bold()
             ));
         }
 
         ctx.state.nvim.manager = manager;
-        task.info("Detecting active Neovim theme...");
+        activity.info("Detecting active `nvim` theme...");
 
         let service: ThemeService<'_> = ThemeService::new(&ctx.paths, &activity.log);
         let current_theme: String = service.current().unwrap_or_else(|_| "".to_string());
 
-        task.info("Scanning for compatible tools...");
+        activity.info("Scanning for compatible tools...");
         let installed = ctx.registry.installed();
 
         if installed.is_empty() {
-            task.info("No compatible tools found.");
+            activity.info("No compatible tools found.");
         } else {
             for generator in installed.iter() {
-                task.info(&format!("Found: {}", generator.name().green().bold()));
+                activity.info(&format!("Found: {}", generator.name().green().bold()));
                 ctx.state.enable_generator(generator.name());
             }
         }
@@ -85,16 +87,15 @@ impl IrisSetup {
         ctx.state.set_theme(current_theme);
         ctx.save()?;
 
-        task.info(&format!(
-            "Configuration persisted to {}",
+        activity.info(&format!(
+            "Configuration persisted to {}.",
             utils::pretty_path(&ctx.paths.state_file).dimmed()
         ));
         Ok(())
     }
 
     /// Generates Neovim site plugin script for automatic synchronization
-    fn setup_nvim_automation(ctx: &IrisContext, task: &Activity) -> anyhow::Result<()> {
-        let nvim_plugin_dir: PathBuf = ctx.paths.nvim_data_dir().join("site/plugin");
+    fn setup_nvim_automation(ctx: &IrisContext, activity: &Activity) -> anyhow::Result<()> {
         let nvim_plugin_dir: PathBuf = ctx.paths.nvim_data_path().join("site/plugin");
         let plugin_file: PathBuf = nvim_plugin_dir.join("iris_sync.lua");
 
@@ -118,18 +119,18 @@ vim.api.nvim_create_autocmd("ColorScheme", {
         if plugin_file.exists() {
             if let Ok(existing_content) = fs::read_to_string(&plugin_file) {
                 if existing_content == lua_code {
-                    task.info("Neovim integration is already up to date.");
+                    activity.info("`nvim` integration is already up to date!");
                     return Ok(());
                 }
             }
         }
 
-        task.info("Writing Neovim autoloader plugin...");
+        activity.info("Writing `nvim` autoloader plugin...");
         fs::create_dir_all(&nvim_plugin_dir)?;
         fs::write(&plugin_file, lua_code)?;
 
-        task.info(&format!(
-            "Automation persisted to {}",
+        activity.info(&format!(
+            "Automation persisted to {}.",
             crate::utils::pretty_path(&plugin_file).dimmed()
         ));
 
@@ -211,8 +212,8 @@ mod tests {
         )
         .unwrap();
 
-        let task = ctx.log.step("Initial State Test", true);
-        let result = IrisSetup::setup_initial_state(&mut ctx, &task);
+        let activity = ctx.log.step("Initial State Test", true);
+        let result = IrisSetup::setup_initial_state(&mut ctx, &activity);
 
         assert!(result.is_ok());
     }

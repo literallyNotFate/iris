@@ -10,7 +10,7 @@ pub fn exec(ctx: &mut crate::core::IrisContext) -> anyhow::Result<()> {
     let old_theme: String = ctx.state.theme.current_theme.clone();
     if is_fallback {
         println!(
-            "\n{}  No theme history found, using fallback: {}",
+            "\n{}  No theme history found, using fallback: {}...",
             "󰁯".blue(),
             crate::utils::capitalize(&target_name).green().bold()
         );

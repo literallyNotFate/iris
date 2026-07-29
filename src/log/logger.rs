@@ -46,8 +46,8 @@ impl Logger {
     }
 
     /// Wraps Logger into Activity.
-    /// Allows using methods like .action() inside functions accepting &mut Task as a parameter
-    pub fn as_task(&self) -> Activity {
+    /// Allows using methods like .action() inside functions accepting &mut activity as a parameter
+    pub fn activity(&self) -> Activity {
         Activity {
             log: self.clone(),
             message: String::new(),
@@ -58,12 +58,12 @@ impl Logger {
         }
     }
 
-    /// Starts a new tracked task with its own lifecycle and duration
+    /// Starts a new tracked activity with its own lifecycle and duration
     pub fn step(&self, message: &str, is_last: bool) -> Activity {
         Activity::new(message.to_string(), is_last, self)
     }
 
-    /// Starts a new tracked task with a custom icon and message
+    /// Starts a new tracked activity with a custom icon and message
     pub fn step_with_icon<D: std::fmt::Display>(
         &self,
         icon: D,
@@ -73,7 +73,7 @@ impl Logger {
         Activity::new_with_icon(message.to_string(), icon, is_last, self)
     }
 
-    /// Logs a dim informational message intended to be used within a task
+    /// Logs a dim informational message intended to be used within a activity
     pub fn info(&self, msg: &str) {
         if self.verbosity == LoggingVerbosity::Detailed {
             eprintln!("{}{} {}", self.gutter, "•".dimmed(), msg.dimmed());

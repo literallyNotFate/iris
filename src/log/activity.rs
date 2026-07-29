@@ -17,7 +17,7 @@ pub struct Activity {
 }
 
 impl Activity {
-    /// Internal constructor for creating a task via `Reporter::step`
+    /// Internal constructor for creating an activity via `Reporter::step`
     pub fn new(message: String, is_last: bool, parent: &Logger) -> Self {
         Self::new_with_icon(message, "●".blue().bold(), is_last, parent)
     }

@@ -77,7 +77,7 @@ pub fn exec(fix: bool, ctx: &mut IrisContext) -> anyhow::Result<()> {
                         let _ = io::stdout().flush();
                     }
 
-                    let mut task = ctx.log.as_task();
+                    let mut activity = ctx.log.activity();
                     generator.fix(status, &engine, &mut activity)?;
                 }
 
@@ -126,7 +126,7 @@ pub fn exec(fix: bool, ctx: &mut IrisContext) -> anyhow::Result<()> {
         if issues_found && !fix {
             if ctx.log.is_detailed() {
                 ctx.log.info(&format!(
-                    "Run `{}` to resolve issues automatically",
+                    "Run `{}` to resolve issues automatically.",
                     "iris health --fix".cyan().bold()
                 ));
             } else {

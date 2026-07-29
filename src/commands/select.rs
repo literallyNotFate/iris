@@ -3,9 +3,8 @@ use colored::Colorize;
 use dialoguer::{Select, console::Term};
 
 /// Handle select theme command
-pub fn exec(ctx: &mut IrisContext) -> anyhow::Result<()> {
-    println!("\n{}  Scanning Neovim themes...", "󱑠".yellow());
 pub fn exec(ctx: &mut crate::core::IrisContext) -> anyhow::Result<()> {
+    println!("\n{}  Scanning `nvim` themes...", "󱑠".yellow());
 
     let builtins: Vec<String> = NeovimBridge::builtin_themes();
     let mut cached: Vec<String> = ctx.paths.cached_themes().unwrap_or_default();
@@ -15,7 +14,7 @@ pub fn exec(ctx: &mut crate::core::IrisContext) -> anyhow::Result<()> {
         println!(
             "{}  {}",
             "󰀦".red().bold(),
-            "No themes found! Check your Neovim configuration.".red()
+            "No themes found! Check your `nvim` configuration.".red()
         );
         return Ok(());
     }

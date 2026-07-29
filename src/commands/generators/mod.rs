@@ -187,7 +187,7 @@ pub fn handle_auto(ctx: &mut IrisContext) -> anyhow::Result<()> {
             "{} {} {} {}",
             "└──".dimmed(),
             "Added".bold(),
-            format!("{} new generators to configuration", added)
+            format!("{} new generators to configuration!", added)
                 .cyan()
                 .bold(),
             "✓".green()
@@ -195,7 +195,7 @@ pub fn handle_auto(ctx: &mut IrisContext) -> anyhow::Result<()> {
 
         println!();
         ctx.log
-            .action("Saved configuration to state file", || ctx.save())?;
+            .action("Saved configuration to state file!", || ctx.save())?;
     } else {
         ctx.log.info("All discovered apps are already active.");
     }
