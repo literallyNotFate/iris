@@ -2,65 +2,65 @@
 # vim:fileencoding=utf-8:foldmethod=marker
 
 [manager]
-cwd = { fg = "{{ br_red }}", bold = true }
+cwd = { fg = "{{ ansi.9 }}", bold = true }
 
-hovered         = { fg = "{{ bg }}", bg = "{{ orange }}", bold = true }
+hovered         = { fg = "{{ bg }}", bg = "{{ ansi.3 }}", bold = true }
 preview_hovered = { underline = true }
-symlink_target = { fg = "{{ gutter_fg }}" }
+symlink_target  = { fg = "{{ ansi.8 }}" }
 
-find_keyword  = { fg = "{{ br_orange }}", bold = true }
-find_position = { fg = "{{ br_magenta }}" }
+find_keyword  = { fg = "{{ ansi.11 }}", bold = true }
+find_position = { fg = "{{ ansi.13 }}" }
 
-marker_selected = { fg = "{{ br_green }}", bold = true }
-marker_copied   = { fg = "{{ br_orange }}", bold = true }
-marker_cut      = { fg = "{{ br_red }}", bold = true }
+marker_selected = { fg = "{{ ansi.10 }}", bold = true }
+marker_copied   = { fg = "{{ ansi.11 }}", bold = true }
+marker_cut      = { fg = "{{ ansi.1 }}", bold = true }
 
-tab_active   = { fg = "{{ bg }}", bg = "{{ teal }}", bold = true }
-tab_inactive = { fg = "{{ tan }}", bg = "{{ line_hl }}" }
+tab_active   = { fg = "{{ bg }}", bg = "{{ ansi.6 }}", bold = true }
+tab_inactive = { fg = "{{ ansi.7 }}", bg = "{{ line_hl }}" }
 tab_width    = 1
 
 border_symbol = "│"
-border_style  = { fg = "{{ tan }}" }
+border_style  = { fg = "{{ ansi.7 }}" }
 
 [status]
 separator_open  = ""
 separator_close = ""
 separator_style = { fg = "{{ line_hl }}", bg = "{{ line_hl }}" }
 
-mode_normal = { fg = "{{ bg }}", bg = "{{ br_teal }}",    bold = true }
-mode_select = { fg = "{{ bg }}", bg = "{{ br_green }}",   bold = true }
-mode_unset  = { fg = "{{ bg }}", bg = "{{ br_magenta }}", bold = true }
+mode_normal = { fg = "{{ bg }}", bg = "{{ ansi.14 }}",    bold = true }
+mode_select = { fg = "{{ bg }}", bg = "{{ ansi.10 }}",   bold = true }
+mode_unset  = { fg = "{{ bg }}", bg = "{{ ansi.13 }}", bold = true }
 
-filename    = { fg = "{{ white }}", bold = true }
-filesize    = { fg = "{{ tan }}" }
-permissions = { fg = "{{ comment }}" }
+filename    = { fg = "{{ fg }}", bold = true }
+filesize    = { fg = "{{ ansi.7 }}" }
+permissions = { fg = "{{ ansi.8 }}" }
 
-progress_label  = { fg = "{{ br_orange }}", bold = true }
-progress_normal = { fg = "{{ teal }}" }
-progress_error  = { fg = "{{ red }}" }
+progress_label  = { fg = "{{ ansi.11 }}", bold = true }
+progress_normal = { fg = "{{ ansi.6 }}" }
+progress_error  = { fg = "{{ ansi.1 }}" }
 
-permissions_t = { fg = "{{ br_teal }}" }
-permissions_r = { fg = "{{ br_orange }}" }
-permissions_w = { fg = "{{ red }}" }
-permissions_x = { fg = "{{ br_green }}" }
-permissions_s = { fg = "{{ tan }}" }
+permissions_t = { fg = "{{ ansi.14 }}" }
+permissions_r = { fg = "{{ ansi.11 }}" }
+permissions_w = { fg = "{{ ansi.1 }}" }
+permissions_x = { fg = "{{ ansi.10 }}" }
+permissions_s = { fg = "{{ ansi.7 }}" }
 
 [filetype]
 rules = [
-  { name = "*/",                            fg = "{{ br_green }}", bold = true },
-  { mime = "text/x-shellscript",            fg = "{{ green }}", bold = true },
-  { mime = "image/*",                       fg = "{{ br_teal }}" },
-  { mime = "video/*",                       fg = "{{ br_orange }}" },
-  { mime = "audio/*",                       fg = "{{ magenta }}" },
-  { mime = "application/pdf",               fg = "{{ red }}", bold = true },
-  { mime = "text/markdown",                 fg = "{{ br_orange }}", italic = true },
-  { mime = "text/x-rust",                   fg = "{{ br_red }}" },
+  { name = "*/",                            fg = "{{ ansi.10 }}", bold = true },
+  { mime = "text/x-shellscript",            fg = "{{ ansi.2 }}", bold = true },
+  { mime = "image/*",                       fg = "{{ ansi.14 }}" },
+  { mime = "video/*",                       fg = "{{ ansi.11 }}" },
+  { mime = "audio/*",                       fg = "{{ ansi.5 }}" },
+  { mime = "application/pdf",               fg = "{{ ansi.1 }}", bold = true },
+  { mime = "text/markdown",                 fg = "{{ ansi.11 }}", italic = true },
+  { mime = "text/x-rust",                   fg = "{{ ansi.9 }}" },
   { name = "*",                             fg = "{{ fg }}" },
 ]
 
 [icon]
 conds = [
-  { if = "dir & hovered", text = "󰉖",  fg = "{{ bg }}",  bg = "{{ orange }}" },
-  { if = "dir",           text = "󰉖",  fg = "{{ br_green }}" },
+  { if = "dir & hovered", text = "󰉖",  fg = "{{ bg }}",  bg = "{{ ansi.3 }}" },
+  { if = "dir",           text = "󰉖",  fg = "{{ ansi.10 }}" },
   { if = "!dir",          text = "󰈔",  fg = "{{ fg }}" },
 ]

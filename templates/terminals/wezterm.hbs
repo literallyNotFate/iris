@@ -4,43 +4,68 @@ return {
   colors = {
     foreground = "{{ fg }}",
     background = "{{ bg }}",
-    cursor_bg = "{{ cursor }}",
-    cursor_fg = "{{ bg }}",
-    selection_bg = "{{ cursor }}",
-    selection_fg = "{{ bg }}",
+
+    cursor_bg = "{{ sel }}",
+    cursor_fg = "{{ white }}",
+    cursor_border = "{{ sel }}",
+
+    selection_bg = "{{ sel }}",
+    selection_fg = "{{ fg }}",
+
+    split = "{{ ansi.8 }}",
+    visual_bell = "{{ ansi.3 }}",
 
     tab_bar = {
       background = "{{ bg }}",
+
       active_tab = {
-        bg_color = "{{ cursor }}",
-        fg_color = "{{ bg }}",
+        bg_color = "{{ sel }}",
+        fg_color = "{{ fg }}",
+        intensity = "Bold",
       },
+
       inactive_tab = {
         bg_color = "{{ bg }}",
+        fg_color = "{{ ansi.8 }}",
+      },
+
+      inactive_tab_hover = {
+        bg_color = "{{ ansi.0 }}",
+        fg_color = "{{ fg }}",
+        italic = true,
+      },
+
+      new_tab = {
+        bg_color = "{{ bg }}",
+        fg_color = "{{ ansi.8 }}",
+      },
+
+      new_tab_hover = {
+        bg_color = "{{ sel }}",
         fg_color = "{{ fg }}",
       },
     },
 
     ansi = {
-      "{{ ansi[0] }}",
-      "{{ ansi[1] }}",
-      "{{ ansi[2] }}",
-      "{{ ansi[3] }}",
-      "{{ ansi[4] }}",
-      "{{ ansi[5] }}",
-      "{{ ansi[6] }}",
-      "{{ ansi[7] }}",
+      "{{ ansi.0 }}",
+      "{{ ansi.1 }}",
+      "{{ ansi.2 }}",
+      "{{ ansi.3 }}",
+      "{{ ansi.4 }}",
+      "{{ ansi.5 }}",
+      "{{ ansi.6 }}",
+      "{{ ansi.7 }}",
     },
 
     brights = {
-      "{{ ansi[8] }}",
-      "{{ ansi[9] }}",
-      "{{ ansi[10] }}",
-      "{{ ansi[11] }}",
-      "{{ ansi[12] }}",
-      "{{ ansi[13] }}",
-      "{{ ansi[14] }}",
-      "{{ ansi[15] }}",
+      "{{ ansi.8 }}",
+      "{{ ansi.9 }}",
+      "{{ ansi.10 }}",
+      "{{ ansi.11 }}",
+      "{{ ansi.12 }}",
+      "{{ ansi.13 }}",
+      "{{ ansi.14 }}",
+      "{{ ansi.15 }}",
     },
   }
 }
