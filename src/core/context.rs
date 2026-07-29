@@ -10,6 +10,9 @@ use anyhow::{Context as _, Result};
 use colored::*;
 use std::{collections::BTreeSet, fs, path::PathBuf};
 
+#[cfg(test)]
+use tempdir::TempDir;
+
 /// Application context with state and paths (config/cache/base)
 #[derive(Clone)]
 pub struct IrisContext {
@@ -201,15 +204,82 @@ impl IrisContext {
     }
 }
 
+/// Mocks
+#[cfg(test)]
+impl IrisContext {
+    /// Default mock context
+    pub fn mock() -> (TempDir, Self) {
+        let def_templates = [
+            ("terminals/ghostty", "mock-ghostty-content"),
+            ("terminals/alacritty", "mock-alacritty-content"),
+            ("terminals/kitty", "mock-kitty-content"),
+            ("terminals/wezterm", "mock-wezterm-content"),
+            ("prompts/starship", "mock-starship-content"),
+            ("system/bottom", "mock-bottom-content"),
+            ("system/btop", "mock-btop-content"),
+            ("multiplexer/herdr", "mock-herdr-content"),
+            ("multiplexer/tmux", "mock-tmux-content"),
+            ("tools/yazi", "mock-yazi-content"),
+            ("tools/fzf", "mock-fzf-content"),
+            ("tools/bat", "mock-bat-content"),
+        ];
+
+        Self::with_templates(def_templates.to_vec())
+    }
+
+    /// Mock with premade templates
+    pub fn with_templates(templates: Vec<(&str, &str)>) -> (TempDir, Self) {
+        use crate::{
+            infra::{IrisPaths, Templater},
+            log::Logger,
+            models::State,
+            modules::GeneratorRegistry,
+        };
+
+        let temp_dir: TempDir = TempDir::new("iris_test").unwrap();
+        let root = temp_dir.path();
+
+        let paths = IrisPaths {
+            config: root.join(".config/iris"),
+            cache: root.join(".cache/iris"),
+            generators: root.join(".cache/iris/gen"),
+            bin: root.join(".cache/iris/bin"),
+            state_file: root.join(".config/iris/state.toml"),
+            current_theme: root.join(".cache/nvim/iris_current_theme"),
+            themes: root.join(".cache/iris/themes"),
+        };
+
+        for dir in [
+            &paths.config,
+            &paths.themes,
+            &paths.generators,
+            &paths.bin,
+            paths.current_theme.parent().unwrap(),
+        ] {
+            fs::create_dir_all(dir).unwrap();
+        }
+
+        let ctx = IrisContext {
+            paths,
+            state: State::default(),
+            registry: GeneratorRegistry::default(),
+            log: Logger::silent(),
+            templater: Templater::mock(templates),
+        };
+
+        (temp_dir, ctx)
+    }
+}
+
 /// Unit-tests for context
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::utils::tests::mock_context;
+    use crate::core::IrisContext;
 
     #[test]
     fn should_handle_context_update_theme_persistence() {
-        let (_tmp, mut ctx) = mock_context();
+        let (_tmp, mut ctx) = IrisContext::mock();
         let theme_name = "melange";
 
         ctx.update(theme_name)
@@ -226,7 +296,7 @@ mod tests {
 
     #[test]
     fn should_handle_context_save_state() {
-        let (_tmp, mut ctx) = mock_context();
+        let (_tmp, mut ctx) = IrisContext::mock();
         ctx.state.enable_generator("yazi");
         ctx.save().expect("Should save state");
 
@@ -236,7 +306,7 @@ mod tests {
 
     #[test]
     fn should_handle_loading_context_from_existing_file() {
-        let (_tmp, ctx_orig) = mock_context();
+        let (_tmp, ctx_orig) = IrisContext::mock();
         let mut ctx = ctx_orig;
         ctx.update("gruvbox").unwrap();
 
@@ -248,7 +318,7 @@ mod tests {
 
     #[test]
     fn should_resolve_theme_explicit_exists() {
-        let (_temp, ctx) = mock_context();
+        let (_temp, ctx) = IrisContext::mock();
 
         fs::create_dir_all(&ctx.paths.themes).unwrap();
         let cache_path = ctx.paths.cached_theme("gruvbox");
@@ -262,7 +332,7 @@ mod tests {
 
     #[test]
     fn should_resolve_theme_fallback_to_current() {
-        let (_temp, mut ctx) = mock_context();
+        let (_temp, mut ctx) = IrisContext::mock();
         ctx.state.theme.current_theme = "nord".into();
 
         fs::create_dir_all(&ctx.paths.themes).unwrap();
@@ -277,7 +347,7 @@ mod tests {
 
     #[test]
     fn should_resolve_theme_use_fallback_theme_on_error() {
-        let (_temp, mut ctx) = mock_context();
+        let (_temp, mut ctx) = IrisContext::mock();
         ctx.state.theme.fallback_theme = "tokyonight".into();
 
         fs::create_dir_all(&ctx.paths.themes).unwrap();
@@ -292,7 +362,7 @@ mod tests {
 
     #[test]
     fn should_check_if_theme_available_builtin() {
-        let (_temp, mut ctx) = mock_context();
+        let (_temp, mut ctx) = IrisContext::mock();
         ctx.state.nvim.manager = PluginManager::Default;
 
         assert!(ctx.is_theme_available("habamax"));
@@ -301,7 +371,7 @@ mod tests {
 
     #[test]
     fn should_handle_resolve_generator_not_found() {
-        let (_temp, ctx) = mock_context();
+        let (_temp, ctx) = IrisContext::mock();
         let result = ctx.resolve_generator("ghostty");
         assert!(result.is_err());
 

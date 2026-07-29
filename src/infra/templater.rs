@@ -84,6 +84,21 @@ impl Templater {
     }
 }
 
+/// Mocks
+#[cfg(test)]
+impl Templater {
+    /// Creates instance for tests with templates from the memory
+    pub fn mock(templates: Vec<(&str, &str)>) -> Self {
+        let mut tera: Tera = Tera::default();
+        for (name, content) in templates {
+            tera.add_raw_template(name, content)
+                .expect("Failed to add mock template");
+        }
+
+        Self { tera }
+    }
+}
+
 /// Unit-tests for templater
 #[cfg(test)]
 mod tests {

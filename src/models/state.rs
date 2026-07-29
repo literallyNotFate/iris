@@ -253,7 +253,7 @@ impl fmt::Display for PluginManager {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::utils::tests::mock_context;
+    use crate::core::IrisContext;
     use tempdir::TempDir;
 
     #[test]
@@ -434,7 +434,7 @@ mod tests {
 
     #[test]
     fn should_validate_and_set_fallback_theme() {
-        let (_, ctx) = mock_context();
+        let (_, ctx) = IrisContext::mock();
         let mut state = State::default();
         let service = ThemeService::new(&ctx.paths, &ctx.log);
 
