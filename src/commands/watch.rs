@@ -1,10 +1,4 @@
-use crate::{
-    commands::apply_theme,
-    core::{IrisContext, ThemeOrchestrator},
-    guards::CursorGuard,
-    models::Theme,
-    utils,
-};
+use crate::core::IrisContext;
 use colored::Colorize;
 use dialoguer::console::Term;
 use notify_debouncer_mini::{new_debouncer, notify::*};
@@ -32,7 +26,7 @@ pub fn exec(interval_ms: u64, ctx: &mut IrisContext) -> anyhow::Result<()> {
     })?;
 
     let term: Term = Term::stdout();
-    let _cursor_guard = CursorGuard::new(&term);
+    let _cursor_guard = crate::guards::CursorGuard::new(&term);
 
     render_watch_ui(&cache_path);
 
@@ -76,10 +70,10 @@ fn handle_change(path: &PathBuf, ctx: &mut IrisContext) -> anyhow::Result<()> {
     );
 
     let start = Instant::now();
-    let orchestrator: ThemeOrchestrator = ThemeOrchestrator::new(&ctx.paths, &ctx.log);
-    let theme_obj: Theme = orchestrator.load_theme(&theme_name, false, true, &ctx.state)?;
+    let service = crate::service::ThemeService::new(&ctx.paths, &ctx.log);
+    let theme_obj = service.load_theme(&theme_name, false, true, &ctx.state)?;
 
-    apply_theme(&theme_obj, ctx)?;
+    crate::commands::apply_theme(&theme_obj, ctx)?;
     render_watch_ui(path);
 
     println!(
@@ -102,7 +96,7 @@ fn render_watch_ui(path: &PathBuf) {
     println!(
         " {}  Watching: {}",
         "󰈚".dimmed(),
-        utils::pretty_path(path).dimmed()
+        crate::utils::pretty_path(path).dimmed()
     );
     println!(" {}  {}", "󰜺".red(), "Press Ctrl+C to exit".dimmed());
     println!();

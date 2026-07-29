@@ -1,8 +1,9 @@
 use crate::{
     cli::{ConfigAction, config::ConfigKey},
-    core::{IrisContext, ThemeOrchestrator},
+    core::IrisContext,
     log::LoggingVerbosity,
     models::{PluginManager, State},
+    service::{PluginManagerService, ThemeService},
     utils::{self, colors::select_theme},
 };
 use anyhow::{Context, Result};
@@ -57,61 +58,59 @@ pub fn exec(action: Option<ConfigAction>, ctx: &mut IrisContext) -> Result<()> {
             }
         }
 
-        ConfigAction::Set { key, value } => {
-            let orchestrator = ThemeOrchestrator::new(&ctx.paths, &ctx.log);
-
-            match key {
-                ConfigKey::Manager => {
-                    if ctx.log.is_detailed() {
-                        render_config_header("Neovim Configuration", "⚙");
-                    }
-
-                    let selected = resolve_manager(value, &orchestrator, ctx.log.verbosity)?;
-                    changed = ctx.state.set_nvim_manager(selected);
-
-                    if changed {
-                        if ctx.log.is_detailed() {
-                            ctx.log.info(&format!(
-                                "Changing plugin manager to {}...",
-                                selected.to_string().cyan().bold()
-                            ));
-                        }
-                    } else if ctx.log.verbosity != LoggingVerbosity::Silent {
-                        println!(
-                            "{}  Plugin manager is already set to {}",
-                            "✓".green(),
-                            ctx.state.nvim.manager
-                        );
-                    }
+        ConfigAction::Set { key, value } => match key {
+            ConfigKey::Manager => {
+                if ctx.log.is_detailed() {
+                    render_config_header("Neovim Configuration", "⚙");
                 }
 
-                ConfigKey::Fallback => {
+                let manager_service = PluginManagerService::new(&ctx.paths, &ctx.log);
+                let selected = resolve_manager(value, &manager_service, ctx.log.verbosity)?;
+                changed = ctx.state.set_manager(selected);
+
+                if changed {
                     if ctx.log.is_detailed() {
-                        render_config_header("Fallback Configuration", "⚙");
+                        ctx.log.info(&format!(
+                            "Changing plugin manager to {}...",
+                            selected.to_string().cyan().bold()
+                        ));
                     }
-
-                    let raw_name: String = resolve_fallback_name(value)?;
-                    changed = ctx.state.set_fallback_theme(&raw_name, &orchestrator)?;
-
-                    if changed {
-                        if ctx.log.verbosity != LoggingVerbosity::Silent {
-                            println!(
-                                "\n{}",
-                                "✓ Fallback theme updated successfully!".green().bold()
-                            );
-                        }
-                    } else if ctx.log.verbosity != LoggingVerbosity::Silent {
-                        println!(
-                            "\n{} {}",
-                            "✓ Fallback theme is already set to".green().bold(),
-                            utils::capitalize(&ctx.state.theme.fallback_theme)
-                                .magenta()
-                                .bold()
-                        );
-                    }
+                } else if ctx.log.verbosity != LoggingVerbosity::Silent {
+                    println!(
+                        "{}  Plugin manager is already set to {}!",
+                        "✓".green(),
+                        ctx.state.nvim.manager
+                    );
                 }
             }
-        }
+
+            ConfigKey::Fallback => {
+                if ctx.log.is_detailed() {
+                    render_config_header("Fallback Configuration", "⚙");
+                }
+
+                let theme_service = ThemeService::new(&ctx.paths, &ctx.log);
+                let raw_name: String = resolve_fallback_name(value)?;
+                changed = ctx.state.set_fallback(&raw_name, &theme_service)?;
+
+                if changed {
+                    if ctx.log.verbosity != LoggingVerbosity::Silent {
+                        println!(
+                            "\n{}",
+                            "✓ Fallback theme updated successfully!".green().bold()
+                        );
+                    }
+                } else if ctx.log.verbosity != LoggingVerbosity::Silent {
+                    println!(
+                        "\n{} {}",
+                        "✓ Fallback theme is already set to".green().bold(),
+                        utils::capitalize(&ctx.state.theme.fallback_theme)
+                            .magenta()
+                            .bold()
+                    );
+                }
+            }
+        },
 
         ConfigAction::Edit => {
             println!();
@@ -179,7 +178,7 @@ pub fn exec(action: Option<ConfigAction>, ctx: &mut IrisContext) -> Result<()> {
     }
 
     if changed {
-        ctx.log.action("Saved configuration to state file", || {
+        ctx.log.action("Saved configuration to state file!", || {
             ctx.state.save_to(&ctx.paths.state_file)
         })?;
     } else if !is_display_or_helper && ctx.log.is_detailed() {
@@ -204,7 +203,7 @@ fn render_config_header(title: &str, icon: &str) {
 /// Helper function to resolve plugin manager
 fn resolve_manager(
     value: Option<String>,
-    orchestrator: &ThemeOrchestrator,
+    manager_service: &PluginManagerService,
     verbosity: LoggingVerbosity,
 ) -> Result<PluginManager> {
     if let Some(val) = value {
@@ -216,7 +215,7 @@ fn resolve_manager(
         };
     }
 
-    if let Ok(detected) = orchestrator.choose_manager(None, true) {
+    if let Ok(detected) = manager_service.choose(None, true) {
         if verbosity != LoggingVerbosity::Silent {
             println!(
                 "{}  Auto-detected plugin manager: {}",

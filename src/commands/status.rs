@@ -1,13 +1,10 @@
-use crate::{
-    core::{IrisContext, ThemeOrchestrator},
-    utils::{self},
-};
+use crate::{core::IrisContext, service::ThemeService};
 use colored::*;
 
 /// Handle application status command
 pub fn exec(ctx: &IrisContext) -> anyhow::Result<()> {
-    let orchestrator: ThemeOrchestrator = ThemeOrchestrator::new(&ctx.paths, &ctx.log);
-    let (nvim_theme, is_sync) = orchestrator.get_sync_status(&ctx.state);
+    let service: ThemeService = ThemeService::new(&ctx.paths, &ctx.log);
+    let (nvim_theme, is_sync) = service.sync_status(&ctx.state);
     let current: String = ctx.state.theme.current_theme.clone();
 
     if !ctx.log.is_detailed() {
@@ -24,7 +21,7 @@ pub fn exec(ctx: &IrisContext) -> anyhow::Result<()> {
     println!(
         "\n  {}  Active theme:    {}",
         "󰏘".red(),
-        utils::capitalize(&current).bold().blue()
+        crate::utils::capitalize(&current).bold().blue()
     );
     println!(
         "  {}  Plugin Manager:  {}",
@@ -40,13 +37,13 @@ pub fn exec(ctx: &IrisContext) -> anyhow::Result<()> {
     println!(
         "  {}  Config path:     {}",
         "󰉖".white(),
-        utils::pretty_path(&ctx.paths.config).bright_black()
+        crate::utils::pretty_path(&ctx.paths.config).bright_black()
     );
     println!(
         "  {}  Cache:           {} {} ({} files)",
         "󰉉".bright_black(),
-        utils::pretty_path(&ctx.paths.themes).bright_black(),
-        format!("({})", utils::format_size(cache_size))
+        crate::utils::pretty_path(&ctx.paths.themes).bright_black(),
+        format!("({})", crate::utils::format_size(cache_size))
             .yellow()
             .dimmed(),
         cached_count
@@ -141,7 +138,7 @@ fn render_quiet(ctx: &IrisContext, current: &str, nvim_theme: &str, is_sync: boo
     println!(
         "\n{} Theme: {}\nPlugin manager: {}\nGenerators: {}",
         sync_icon,
-        utils::capitalize(current).cyan().bold(),
+        crate::utils::capitalize(current).cyan().bold(),
         ctx.state.nvim.manager,
         if gens.is_empty() {
             "none".dimmed().to_string()

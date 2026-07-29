@@ -40,6 +40,10 @@ impl IrisContext {
             log,
         })
     }
+
+    /// Creates engine fast using refs that are already in the context itself
+    pub fn engine<'t>(&self, theme: &'t Theme) -> IrisEngine<'_, 't> {
+        IrisEngine::new(&self.paths, &self.templater, theme)
     }
 
     /// Switch to specifc theme

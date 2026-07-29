@@ -1,21 +1,15 @@
-use crate::{
-    commands::apply_theme,
-    core::{IrisContext, NeovimBridge, ThemeOrchestrator},
-    guards::CursorGuard,
-    log::Logger,
-    models::Palette,
-    utils::colors::select_theme,
-};
+use crate::{infra::NeovimBridge, log::Logger, models::Palette, service::ThemeService};
 use colored::Colorize;
 use dialoguer::{Select, console::Term};
 
 /// Handle select theme command
 pub fn exec(ctx: &mut IrisContext) -> anyhow::Result<()> {
     println!("\n{}  Scanning Neovim themes...", "󱑠".yellow());
+pub fn exec(ctx: &mut crate::core::IrisContext) -> anyhow::Result<()> {
 
-    let builtins: Vec<String> = NeovimBridge::get_builtin_themes();
-    let mut cached: Vec<String> = ctx.paths.get_cached_themes().unwrap_or_default();
-    let all_names: Vec<String> = NeovimBridge::get_all_themes()?;
+    let builtins: Vec<String> = NeovimBridge::builtin_themes();
+    let mut cached: Vec<String> = ctx.paths.cached_themes().unwrap_or_default();
+    let all_names: Vec<String> = NeovimBridge::installed_themes()?;
 
     if all_names.is_empty() {
         println!(
@@ -32,11 +26,11 @@ pub fn exec(ctx: &mut IrisContext) -> anyhow::Result<()> {
         .unwrap_or(0);
 
     let term = Term::stdout();
-    let quiet_logger: Logger = Logger::silent();
-    let orchestrator = ThemeOrchestrator::new(&ctx.paths, &quiet_logger);
+    let quiet: Logger = Logger::silent();
+    let service = ThemeService::new(&ctx.paths, &quiet);
 
     term.hide_cursor()?;
-    let _guard = CursorGuard::new(&term);
+    let _guard = crate::guards::CursorGuard::new(&term);
 
     loop {
         let labels: Vec<String> = all_names
@@ -59,7 +53,7 @@ pub fn exec(ctx: &mut IrisContext) -> anyhow::Result<()> {
             "Iris Theme Manager".bold()
         );
 
-        let selection = Select::with_theme(&select_theme())
+        let selection = Select::with_theme(&crate::utils::colors::select_theme())
             .with_prompt("Search or select theme (Press Esc to exit)\n")
             .items(&labels)
             .default(current_idx)
@@ -80,20 +74,20 @@ pub fn exec(ctx: &mut IrisContext) -> anyhow::Result<()> {
                 selected_name
             ))?;
 
-            let theme_obj = orchestrator.load_theme(selected_name, false, true, &ctx.state)?;
+            let theme_obj = service.load_theme(selected_name, false, true, &ctx.state)?;
             cached.push(selected_name.clone());
 
             term.clear_screen()?;
             render_preview_flow(&theme_obj.name, &theme_obj.colors)?;
         } else {
-            let theme_obj = orchestrator.load_theme(selected_name, false, false, &ctx.state)?;
+            let theme_obj = service.load_theme(selected_name, false, false, &ctx.state)?;
             term.clear_screen()?;
             render_preview_flow(&theme_obj.name, &theme_obj.colors)?;
         }
 
         println!();
 
-        let action = Select::with_theme(&select_theme())
+        let action = Select::with_theme(&crate::utils::colors::select_theme())
             .items(&vec!["Apply this theme", "Back to list", "Exit"])
             .default(0)
             .interact_on_opt(&term)?;
@@ -101,11 +95,10 @@ pub fn exec(ctx: &mut IrisContext) -> anyhow::Result<()> {
         match action {
             Some(0) => {
                 term.clear_screen()?;
-                let final_theme =
-                    orchestrator.load_theme(selected_name, false, true, &ctx.state)?;
+                let final_theme = service.load_theme(selected_name, false, true, &ctx.state)?;
 
                 term.show_cursor()?;
-                return apply_theme(&final_theme, ctx);
+                return crate::commands::apply_theme(&final_theme, ctx);
             }
             Some(1) => continue,
             _ => break,

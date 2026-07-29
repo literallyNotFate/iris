@@ -1,4 +1,4 @@
-use crate::{cli::CacheAction, core::IrisContext, utils};
+use crate::{cli::CacheAction, core::IrisContext, log::Logger, service::ThemeService, utils};
 use anyhow::{Context, Result};
 use colored::Colorize;
 use dialoguer::Confirm;
@@ -69,10 +69,14 @@ fn handle_clear(all: bool, gen_name: Option<String>, ctx: &IrisContext) -> Resul
             utils::external::clear_bat_cache();
             Ok(())
         })
-    } else if let Some(ref g) = generator {
+    } else if let Some(g) = generator {
+        let cleanable_generator = g
+            .as_cleanable()
+            .ok_or_else(|| anyhow::anyhow!("Generator `{}` is not cleanable", g.name().cyan()))?;
+
         ctx.log.action(
             &format!("Cleaned `{}` cache\n", g.name().cyan().bold()),
-            || g.clear(&ctx.paths),
+            || cleanable_generator.cleanup(&ctx.paths),
         )
     } else {
         ctx.log.action("Cleaned generated configurations\n", || {
@@ -94,12 +98,19 @@ fn handle_remove(theme: &str, ctx: &IrisContext) -> Result<()> {
         anyhow::bail!("Cannot remove fallback theme `{}`.", theme.magenta().bold());
     }
 
-    for generator in ctx.registry.all() {
-        let _ = generator.remove_theme(&ctx.paths, &theme_lower);
-    }
-
     if !path.exists() {
         anyhow::bail!("Theme not found in cache.");
+    }
+
+    let silent: Logger = Logger::silent();
+    let service = ThemeService::new(&ctx.paths, &silent);
+    let target = service.load_theme(theme, false, false, &ctx.state)?;
+    let engine = ctx.engine(&target);
+
+    for generator in ctx.registry.all() {
+        if let Some(cleanable) = generator.as_cleanable() {
+            let _ = engine.execute_remove_theme(cleanable);
+        }
     }
 
     println!();
@@ -114,7 +125,7 @@ fn handle_remove(theme: &str, ctx: &IrisContext) -> Result<()> {
 
 /// List of cached themes
 fn render_list(ctx: &IrisContext) -> Result<()> {
-    let themes: Vec<String> = ctx.paths.get_cached_themes()?;
+    let themes: Vec<String> = ctx.paths.cached_themes()?;
     println!();
 
     if ctx.log.is_detailed() {

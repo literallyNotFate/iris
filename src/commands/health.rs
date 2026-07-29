@@ -1,7 +1,8 @@
 use crate::{
-    core::{IrisContext, ThemeOrchestrator},
-    log::{Logger, LoggingVerbosity},
     models::{HealthStatus, Theme},
+    core::IrisContext,
+    log::Logger,
+    service::ThemeService,
 };
 use colored::*;
 use std::io::{self, Write};
@@ -9,7 +10,6 @@ use std::io::{self, Write};
 /// Handle application health command with fix option
 pub fn exec(fix: bool, ctx: &mut IrisContext) -> anyhow::Result<()> {
     println!();
-    let verbosity: LoggingVerbosity = ctx.log.verbosity;
 
     if ctx.log.is_detailed() {
         println!("{}\n", "󰓦  Iris System Health".bright_red().bold());
@@ -50,8 +50,9 @@ pub fn exec(fix: bool, ctx: &mut IrisContext) -> anyhow::Result<()> {
 
             if theme_obj.is_none() {
                 let quiet_logger: Logger = Logger::silent();
-                let orchestrator = ThemeOrchestrator::new(&ctx.paths, &quiet_logger);
-                theme_obj = Some(orchestrator.load_theme(
+                let service = ThemeService::new(&ctx.paths, &quiet_logger);
+
+                theme_obj = Some(service.load_theme(
                     &ctx.state.theme.current_theme,
                     false,
                     true,
@@ -60,6 +61,8 @@ pub fn exec(fix: bool, ctx: &mut IrisContext) -> anyhow::Result<()> {
             }
 
             if let Some(theme) = &theme_obj {
+                let engine = ctx.engine(theme);
+
                 for (i, (generator, status)) in errors.iter().enumerate() {
                     if ctx.log.is_detailed() {
                         if i > 0 {
@@ -108,7 +111,7 @@ pub fn exec(fix: bool, ctx: &mut IrisContext) -> anyhow::Result<()> {
                 }
                 println!();
             }
-        } else if verbosity == LoggingVerbosity::Minimal && issues_found {
+        } else if !ctx.log.is_detailed() && issues_found {
             println!(
                 "{}  Found {} issue(s), operational: {}/{}",
                 "󰀦".yellow().bold(),
@@ -119,7 +122,7 @@ pub fn exec(fix: bool, ctx: &mut IrisContext) -> anyhow::Result<()> {
         }
     }
 
-    if verbosity != LoggingVerbosity::Silent {
+    if ctx.log.is_detailed() {
         if issues_found && !fix {
             if ctx.log.is_detailed() {
                 ctx.log.info(&format!(

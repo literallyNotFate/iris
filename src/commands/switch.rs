@@ -1,10 +1,4 @@
-use crate::{
-    cli::switch::SwitchArgs,
-    commands::apply_theme,
-    core::{IrisContext, ThemeOrchestrator},
-    models::Theme,
-    utils,
-};
+use crate::{cli::switch::SwitchArgs, core::IrisContext, models::Theme, service::ThemeService};
 
 /// Handle application switch (main entry point for changing themes)
 pub fn exec(args: SwitchArgs, ctx: &mut IrisContext) -> anyhow::Result<()> {
@@ -15,14 +9,14 @@ pub fn exec(args: SwitchArgs, ctx: &mut IrisContext) -> anyhow::Result<()> {
         println!(
             "\n{}  Using fallback: {}",
             "󰁯".blue(),
-            utils::capitalize(&target_name).green().bold()
+            crate::utils::capitalize(&target_name).green().bold()
         );
     }
 
     println!();
 
-    let orchestrator: ThemeOrchestrator = ThemeOrchestrator::new(&ctx.paths, &ctx.log);
-    let theme_obj: Theme = orchestrator.load_theme(&target_name, args.force, true, &ctx.state)?;
+    let service: ThemeService = ThemeService::new(&ctx.paths, &ctx.log);
+    let theme_obj: Theme = service.load_theme(&target_name, args.force, true, &ctx.state)?;
 
-    apply_theme(&theme_obj, ctx)
+    crate::commands::apply_theme(&theme_obj, ctx)
 }

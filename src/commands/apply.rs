@@ -1,8 +1,9 @@
 use crate::{
     cli::switch::ApplyArgs,
-    core::{IrisContext, ThemeOrchestrator},
+    core::{IrisContext, IrisEngine},
     models::Theme,
     modules::Generator,
+    service::ThemeService,
 };
 use colored::Colorize;
 
@@ -23,10 +24,11 @@ pub fn exec(args: ApplyArgs, ctx: &mut IrisContext) -> anyhow::Result<()> {
     }
     println!();
 
-    let orchestrator = ThemeOrchestrator::new(&ctx.paths, &ctx.log);
-    let theme_obj: Theme = orchestrator.load_theme(&theme_name, false, true, &ctx.state)?;
+    let service: ThemeService = ThemeService::new(&ctx.paths, &ctx.log);
+    let theme_obj: Theme = service.load_theme(&theme_name, false, true, &ctx.state)?;
 
-    ensure_generator_health(generator, &theme_obj, ctx, false)?;
+    let engine: IrisEngine = ctx.engine(&theme_obj);
+    ensure_generator_health(generator, ctx, &engine, false)?;
 
     let gen_color = generator.generator_type().color();
     let mut step = ctx.log.step_with_icon(
@@ -39,7 +41,7 @@ pub fn exec(args: ApplyArgs, ctx: &mut IrisContext) -> anyhow::Result<()> {
         true,
     );
 
-    let result = generator.apply(&theme_obj, &ctx.paths, &ctx.templater, &mut step);
+    let result = engine.execute_apply(generator, &mut step);
     let final_msg: String = if was_fallback {
         format!(
             "Applied theme {} to {} {}",
@@ -68,11 +70,11 @@ pub fn exec(args: ApplyArgs, ctx: &mut IrisContext) -> anyhow::Result<()> {
 /// Helper function to ensure generator health
 fn ensure_generator_health(
     g: &dyn Generator,
-    theme: &Theme,
     ctx: &IrisContext,
+    engine: &IrisEngine<'_, '_>,
     is_last: bool,
 ) -> anyhow::Result<()> {
-    let status = g.health_check(&ctx.paths, &theme.name);
+    let status = g.health_check(&ctx.paths, &engine.theme.name);
 
     if !status.is_ok() {
         let mut fix_step = ctx.log.step(

@@ -1,8 +1,7 @@
-use crate::core::IrisContext;
-use colored::*;
-
 /// Handle application current command
-pub fn exec(ctx: &IrisContext) -> anyhow::Result<()> {
+pub fn exec(ctx: &crate::core::IrisContext) -> anyhow::Result<()> {
+    use colored::*;
+
     let active_theme: String = if ctx.paths.current_theme.exists() {
         let content: String = std::fs::read_to_string(&ctx.paths.current_theme)?;
         let trimmed: String = content.trim().to_string();
