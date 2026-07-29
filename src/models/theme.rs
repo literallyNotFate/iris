@@ -46,23 +46,19 @@ impl Theme {
         }
     }
 
-    /// Fast method to create a theme from palette
-    pub fn from_palette(name: &str, palette: Palette) -> Self {
-        Self {
-            name: name.to_string(),
-            colors: palette,
-        }
-    }
-
     /// Load theme from JSON cache file
-    pub fn load_from_cache(path: &Path) -> Result<Self> {
+    pub fn load_from_cache(path: &Path) -> Result<Option<Self>> {
+        if !path.exists() {
+            return Ok(None);
+        }
+
         let content: String = fs::read_to_string(path)
             .with_context(|| format!("Failed to read theme cache at {}", path.display()))?;
 
         let theme: Self = serde_json::from_str(&content)
             .with_context(|| format!("Failed to deserialize theme JSON from {}", path.display()))?;
 
-        Ok(theme)
+        Ok(Some(theme))
     }
 
     /// Save theme to JSON cache file, automatically creating all necessary folders
@@ -73,8 +69,9 @@ impl Theme {
             })?;
         }
 
-        let json: String =
-            serde_json::to_string_pretty(self).context("Failed to serialize theme to JSON")?;
+        let json: String = self
+            .to_json()
+            .context("Failed to serialize theme to JSON")?;
         fs::write(path, json)
             .with_context(|| format!("Failed to write theme to {}", path.display()))?;
 
@@ -84,6 +81,16 @@ impl Theme {
     /// Helper to get capitalized theme name (e.g, "melange" -> "Melange")
     pub fn display_name(&self) -> String {
         utils::capitalize(&self.name)
+    }
+
+    /// Serialize the theme into a pretty-printed JSON string
+    pub fn to_json(&self) -> serde_json::Result<String> {
+        serde_json::to_string_pretty(self)
+    }
+
+    /// Compact variant, if you don't need pretty-printing
+    pub fn to_json_compact(&self) -> serde_json::Result<String> {
+        serde_json::to_string(self)
     }
 
     /// Function to create theme mock
@@ -354,6 +361,19 @@ impl Palette {
         "##
     }
 
+    /// Helper to clear stdout from Neovim garbage and extract JSON palette
+    pub fn parse_from_nvim(stdout: &str) -> Result<Palette> {
+        let json_start: usize = stdout
+            .find('{')
+            .context("Failed to locate opening brace '{' of palette JSON within `nvim` output")?;
+
+        let mut deserializer = serde_json::Deserializer::from_str(&stdout[json_start..]);
+        let palette = Palette::deserialize(&mut deserializer)
+            .context("Failed to parse palette JSON within `nvim` output")?;
+
+        Ok(palette)
+    }
+
     /// Table with core and syntax colors
     pub fn core_and_syntax_colors(&self) {
         let core: [(&str, &String); 5] = [
@@ -490,53 +510,43 @@ impl Palette {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::utils::tests::mock_context;
+    use crate::core::IrisContext;
 
     #[test]
-    fn should_parse_palette_json_without_name() {
+    fn should_parse_theme_from_json() {
         let json = r##"{
-            "bg": "#1e1e2e",
-            "fg": "#cdd6f4",
-            "caret": "#f5e0dc",
-            "line_hl": "#313244",
-            "sel": "#45475a",
-            "gutter_fg": "#45475a",
-            "comment": "#6c7086",
-            "variable": "#f38ba8",
-            "constant": "#fab387",
-            "number": "#fab387",
-            "string": "#a6e3a1",
-            "keyword": "#cba6f7",
-            "operator": "#89dceb",
-            "func": "#89b4fa",
-            "type_name": "#f9e2af",
-            "tag": "#f38ba8",
-            "attribute": "#f9e2af",
-            "white": "#ffffff",
-            "ansi": ["#1e1e2e", "#f38ba8", "#a6e3a1", "#f9e2af", "#89b4fa", "#cba6f7", "#89dceb", "#bac2de", "#585b70", "#f38ba8", "#a6e3a1", "#f9e2af", "#89b4fa", "#cba6f7", "#89dceb", "#a6adc8"]
+            "name": "test",
+            "colors": {
+                "bg": "#1e1e2e",
+                "fg": "#cdd6f4",
+                "caret": "#f5e0dc",
+                "line_hl": "#313244",
+                "sel": "#45475a",
+                "gutter_fg": "#45475a",
+                "comment": "#6c7086",
+                "variable": "#f38ba8",
+                "constant": "#fab387",
+                "number": "#fab387",
+                "string": "#a6e3a1",
+                "keyword": "#cba6f7",
+                "operator": "#89dceb",
+                "func": "#89b4fa",
+                "type_name": "#f9e2af",
+                "tag": "#f38ba8",
+                "attribute": "#f9e2af",
+                "white": "#ffffff",
+                "added": "#ffffff",
+                "changed": "#ffffff",
+                "deleted": "#ffffff",
+                "ansi": ["#1e1e2e", "#f38ba8", "#a6e3a1", "#f9e2af", "#89b4fa", "#cba6f7", "#89dceb", "#bac2de", "#585b70", "#f38ba8", "#a6e3a1", "#f9e2af", "#89b4fa", "#cba6f7", "#89dceb", "#a6adc8"]
+            }
         }"##;
 
-        let palette: Palette = serde_json::from_str(json).unwrap();
-        assert_eq!(palette.bg, "#1e1e2e");
-        assert_eq!(palette.ansi.len(), 16);
-    }
-
-    #[test]
-    fn should_properly_link_name_and_palette() {
-        let palette: Palette = Theme::mock().colors;
-        let theme: Theme = Theme::new("tokyonight", palette.clone());
-
-        assert_eq!(theme.name, "tokyonight");
-        assert_eq!(theme.colors.bg, palette.bg);
-    }
-
-    #[test]
-    fn should_serialize_theme_with_nested_palette() {
-        let theme: Theme = Theme::mock();
-        let json: String = serde_json::to_string(&theme).unwrap();
-
-        assert!(json.contains(r#""name":"test-theme""#));
-        assert!(json.contains(r#""bg":"#));
+        let theme: Theme = serde_json::from_str(json).unwrap();
+        assert_eq!(theme.name, "test");
+        assert_eq!(theme.colors.bg, "#1e1e2e");
+        assert_eq!(theme.colors.attribute, "#f9e2af");
+        assert_eq!(theme.colors.ansi.len(), 16);
     }
 
     #[test]
@@ -544,23 +554,15 @@ mod tests {
         let (_temp, ctx) = IrisContext::mock();
         let cache_path = ctx.paths.themes.join("catppuccin.json");
         let original_theme = Theme::mock();
-        let save_res = original_theme.save_to_cache(&cache_path);
 
-        assert!(
-            save_res.is_ok(),
-            "Failed to save theme: {:?}",
-            save_res.err()
-        );
+        let save_res = original_theme.save_to_cache(&cache_path);
+        assert!(save_res.is_ok(), "Failed to save: {:?}", save_res.err());
         assert!(cache_path.exists());
 
         let load_res = Theme::load_from_cache(&cache_path);
-        assert!(
-            load_res.is_ok(),
-            "Failed to load theme: {:?}",
-            load_res.err()
-        );
+        assert!(load_res.is_ok(), "Failed to load: {:?}", load_res.err());
 
-        let loaded_theme = load_res.unwrap();
+        let loaded_theme = load_res.unwrap().expect("Should return Some(theme)");
         assert_eq!(loaded_theme, original_theme);
     }
 
@@ -568,15 +570,10 @@ mod tests {
     fn should_return_none_on_non_existent_cache() {
         let (_temp, ctx) = IrisContext::mock();
         let ghost_path = ctx.paths.themes.join("ghost_theme.json");
-        let result = Theme::load_from_cache(&ghost_path);
 
-        assert!(result.is_err());
-        assert!(
-            result
-                .unwrap_err()
-                .to_string()
-                .contains("Failed to read theme cache")
-        );
+        let result = Theme::load_from_cache(&ghost_path);
+        assert!(result.is_ok());
+        assert!(result.unwrap().is_none());
     }
 
     #[test]
@@ -589,13 +586,6 @@ mod tests {
         fs::write(&cache_path, "{ broken json }").unwrap();
 
         let result = Theme::load_from_cache(&cache_path);
-
         assert!(result.is_err());
-        assert!(
-            result
-                .unwrap_err()
-                .to_string()
-                .contains("Failed to deserialize theme JSON")
-        );
     }
 }

@@ -1,7 +1,7 @@
 use crate::{
-    models::{HealthStatus, Theme},
     core::IrisContext,
     log::Logger,
+    models::{HealthStatus, Theme, health::IssueSeverity},
     service::ThemeService,
 };
 use colored::*;
@@ -178,13 +178,14 @@ fn render_status_line(name: &str, status: &HealthStatus, is_last: bool, log: &Lo
         HealthStatus::Ok => {
             println!("{}", "healthy".blue().bold());
         }
-        HealthStatus::Warning(msg) => {
-            println!("{}", msg.yellow());
-        }
-        HealthStatus::Error { message, fix_hint } => {
-            println!("{}", message.red());
+        HealthStatus::Issue(severity, _, _) => {
+            let msg = status.message();
+            match severity {
+                IssueSeverity::Warning => println!("{}", msg.yellow()),
+                IssueSeverity::Error => println!("{}", msg.red()),
+            }
 
-            if let Some(hint) = fix_hint {
+            if let Some(hint) = status.hint() {
                 let indent = if is_last { "   " } else { "│  " };
                 println!(
                     "{}   {}{} {}",
