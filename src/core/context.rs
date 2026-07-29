@@ -1,8 +1,8 @@
-use super::IrisPaths;
 use crate::{
-    core::{NeovimBridge, Templater},
+    core::IrisEngine,
+    infra::*,
     log::Logger,
-    models::{PluginManager, State},
+    models::{PluginManager, State, Theme},
     modules::{Generator, GeneratorRegistry},
     utils,
 };
@@ -27,15 +27,16 @@ impl IrisContext {
         let paths = IrisPaths::new()?;
         let user_templates: Option<PathBuf> = Some(paths.config.join("templates"));
         let state: State = State::load_or_default(&paths.state_file);
+        let templater: Templater = Templater::new(user_templates);
 
-        let ctx = Self {
+        Ok(Self {
             paths,
             state,
             registry: GeneratorRegistry::new(),
+            templater,
             log,
-            templater: Templater::new(user_templates),
-        };
-        Ok(ctx)
+        })
+    }
     }
 
     /// Switch to specifc theme
@@ -109,7 +110,7 @@ impl IrisContext {
         }
 
         if self.state.nvim.manager == PluginManager::Default {
-            let is_builtin: bool = NeovimBridge::get_builtin_themes().iter().any(|t| t == name);
+            let is_builtin: bool = NeovimBridge::builtin_themes().iter().any(|t| t == name);
             return is_builtin || self.paths.is_theme_cached(name);
         }
 

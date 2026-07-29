@@ -1,4 +1,4 @@
-use crate::{core::ThemeOrchestrator, utils};
+use crate::service::ThemeService;
 use anyhow::{Context, Result};
 use colored::Colorize;
 pub use serde::{Deserialize, Serialize};
@@ -66,7 +66,7 @@ impl State {
 
     /// Casting to string (serialization) with anyhow error handling
     pub fn to_toml(&self) -> Result<String> {
-        toml::to_string_pretty(self).context("Failed to serialize UI state to TOML")
+        toml::to_string_pretty(self).context("Failed to serialize UI state to TOML!")
     }
 
     /// Set current theme to specific one, saving the previous one
@@ -80,17 +80,13 @@ impl State {
         self.theme.current_theme = new_theme;
     }
 
-    /// Set a new fallback theme after validating its existence via ThemeOrchestrator.
+    /// Set a new fallback theme after validating its existence via ThemeService.
     /// Returns true if the state actually changed
-    pub fn set_fallback_theme(
-        &mut self,
-        name: &str,
-        orchestrator: &ThemeOrchestrator,
-    ) -> Result<bool> {
-        let theme: String = utils::capitalize(name.trim());
-        if !orchestrator.theme_exists(&theme, self) {
+    pub fn set_fallback(&mut self, name: &str, service: &ThemeService) -> Result<bool> {
+        let theme: String = crate::utils::capitalize(name.trim());
+        if !service.exists(&theme, self) {
             anyhow::bail!(
-                "Theme `{}` does not exist in Neovim or cache.",
+                "Theme `{}` does not exist in `nvim` or cache.",
                 theme.cyan().bold()
             );
         }
@@ -144,7 +140,7 @@ impl State {
     }
 
     /// Set a new plugin manager. Returns true if the state actually changed
-    pub fn set_nvim_manager(&mut self, manager: PluginManager) -> bool {
+    pub fn set_manager(&mut self, manager: PluginManager) -> bool {
         if self.nvim.manager != manager {
             self.nvim.manager = manager;
             true
@@ -225,6 +221,11 @@ impl PluginManager {
             PluginManager::Packer => Some("site/pack/packer/start"),
             PluginManager::Default => None,
         }
+    }
+
+    /// Checks if plugin manager is set to default
+    pub fn is_default(&self) -> bool {
+        self == &PluginManager::Default
     }
 
     /// Generates Lua-command for runtimepath extension
@@ -423,11 +424,11 @@ mod tests {
         let mut state = State::default();
         assert_eq!(state.nvim.manager, PluginManager::Default);
 
-        let changed = state.set_nvim_manager(PluginManager::Lazy);
+        let changed = state.set_manager(PluginManager::Lazy);
         assert!(changed);
         assert_eq!(state.nvim.manager, PluginManager::Lazy);
 
-        let changed_again = state.set_nvim_manager(PluginManager::Lazy);
+        let changed_again = state.set_manager(PluginManager::Lazy);
         assert!(!changed_again);
     }
 
@@ -435,10 +436,10 @@ mod tests {
     fn should_validate_and_set_fallback_theme() {
         let (_, ctx) = mock_context();
         let mut state = State::default();
-        let orchestrator = ThemeOrchestrator::new(&ctx.paths, &ctx.log);
+        let service = ThemeService::new(&ctx.paths, &ctx.log);
 
         state.theme.fallback_theme = "retrobox".to_string();
-        let res = state.set_fallback_theme("retrobox", &orchestrator);
+        let res = state.set_fallback("retrobox", &service);
         if let Ok(changed) = res {
             assert!(!changed);
         }

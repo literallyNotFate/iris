@@ -1,11 +1,7 @@
 use crate::{log::LoggingVerbosity, models::PluginManager};
 use anyhow::{Context, Result};
 use colored::*;
-use std::{
-    fs,
-    path::{Path, PathBuf},
-    process::Command,
-};
+use std::{fs, path::PathBuf, process::Command};
 
 /// Paths manager for application
 #[derive(Clone)]
@@ -23,7 +19,7 @@ pub struct IrisPaths {
 
 impl IrisPaths {
     pub fn new() -> Result<Self> {
-        let home: PathBuf = dirs::home_dir().with_context(|| "Could not find home directory")?;
+        let home: PathBuf = dirs::home_dir().with_context(|| "Could not find home directory!")?;
 
         let config: PathBuf = std::env::var("XDG_CONFIG_HOME")
             .map(PathBuf::from)
@@ -56,31 +52,31 @@ impl IrisPaths {
 
     /// Creates all folders for iris if there none
     pub fn ensure_dirs(&self) -> Result<()> {
-        fs::create_dir_all(&self.config).context("Failed to create 'config' directory")?;
-        fs::create_dir_all(&self.themes).context("Failed to create themes path")?;
-        fs::create_dir_all(&self.generators).context("Failed to create 'gen' directory")?;
-        fs::create_dir_all(&self.bin).context("Failed to create 'bin' directory")?;
+        fs::create_dir_all(&self.config).context("Failed to create 'config' directory!")?;
+        fs::create_dir_all(&self.themes).context("Failed to create themes path!")?;
+        fs::create_dir_all(&self.generators).context("Failed to create 'gen' directory!")?;
+        fs::create_dir_all(&self.bin).context("Failed to create 'bin' directory!")?;
         Ok(())
     }
 
     /// Cleans only 'gen' folder, where all themes located (e.g bat.conf)
     pub fn clean_gen(&self) -> Result<()> {
         if self.generators.exists() {
-            fs::remove_dir_all(&self.generators).context("Cannot remove the 'gen' folder")?;
+            fs::remove_dir_all(&self.generators).context("Cannot remove the 'gen' folder!")?;
         }
         if self.bin.exists() {
-            fs::remove_dir_all(&self.bin).context("Cannot remove the 'bin' folder")?;
+            fs::remove_dir_all(&self.bin).context("Cannot remove the 'bin' folder!")?;
         }
 
-        fs::create_dir_all(&self.generators).context("Failed to recreate 'gen' directory")?;
-        fs::create_dir_all(&self.bin).context("Failed to recreate 'bin' directory")?;
+        fs::create_dir_all(&self.generators).context("Failed to recreate 'gen' directory!")?;
+        fs::create_dir_all(&self.bin).context("Failed to recreate 'bin' directory!")?;
         Ok(())
     }
 
     /// Clears the entire iris cache directory and recreates empty directories
     pub fn purge_all(&self) -> Result<()> {
         if self.cache.exists() {
-            fs::remove_dir_all(&self.cache).context("Cannot clear the 'cache' directory")?;
+            fs::remove_dir_all(&self.cache).context("Cannot clear the 'cache' directory!")?;
         }
 
         self.ensure_dirs()?;
@@ -88,7 +84,7 @@ impl IrisPaths {
     }
 
     /// Recursively calculates the size of requested directory in bytes
-    pub fn get_size(&self, path: &Path) -> u64 {
+    pub fn get_size(&self, path: &PathBuf) -> u64 {
         let metadata = match path.metadata() {
             Ok(m) => m,
             Err(_) => return 0,
@@ -111,7 +107,7 @@ impl IrisPaths {
     }
 
     /// Get Neovim root path with XDG_DATA_HOME
-    pub fn nvim_data_dir(&self) -> PathBuf {
+    pub fn nvim_data_path(&self) -> PathBuf {
         if cfg!(test) {
             self.cache.join("nvim_data")
         } else {
@@ -123,7 +119,7 @@ impl IrisPaths {
     }
 
     /// Get system path for Neovim config (~/.config/nvim)
-    pub fn nvim_config_dir(&self) -> PathBuf {
+    pub fn nvim_config_path(&self) -> PathBuf {
         if cfg!(test) {
             self.config.join("nvim_config")
         } else {
@@ -134,11 +130,11 @@ impl IrisPaths {
         }
     }
 
-    /// Resolves plugin manager relative path to absolute
-    pub fn resolve_plugin_path(&self, manager: &PluginManager) -> Option<PathBuf> {
+    /// Resolves nvim plugin manager relative path to absolute
+    pub fn nvim_plugin_path(&self, manager: &PluginManager) -> Option<PathBuf> {
         manager
             .plugin_subdirectory()
-            .map(|sub| self.nvim_data_dir().join(sub))
+            .map(|sub| self.nvim_data_path().join(sub))
     }
 
     /// Returns absolute path to JSON theme cache
@@ -154,7 +150,7 @@ impl IrisPaths {
     }
 
     /// Returns a sorted list of theme names available in cache
-    pub fn get_cached_themes(&self) -> Result<Vec<String>> {
+    pub fn cached_themes(&self) -> Result<Vec<String>> {
         let mut themes: Vec<String> = fs::read_dir(&self.themes)?
             .filter_map(|entry| {
                 let path = entry.ok()?.path();
@@ -209,12 +205,12 @@ impl IrisPaths {
             }
         });
 
-        let expected_lua_path: PathBuf = self.nvim_data_dir().join("site/plugin/iris_sync.lua");
-        check_step!("Neovim autoloader script...", expected_lua_path.exists(), {
+        let expected_lua_path: PathBuf = self.nvim_data_path().join("site/plugin/iris_sync.lua");
+        check_step!("`nvim` autoloader script...", expected_lua_path.exists(), {
             errors += 1;
             if !is_silent {
                 println!(
-                    "    {} Run {} to fix Neovim integration.",
+                    "    {} Run {} to fix `nvim` integration.",
                     "ℹ".blue(),
                     "iris setup".yellow().bold()
                 );
@@ -224,7 +220,7 @@ impl IrisPaths {
         let nvim_available: bool = Command::new("nvim").arg("--version").output().is_ok();
         check_step!("Neovim executable...", nvim_available, {
             if !is_silent {
-                println!("    {} Neovim is not in your $PATH.", "⚠".yellow());
+                println!("    {} `nvim` is not in your $PATH.", "⚠".yellow());
             }
         });
 
@@ -415,7 +411,7 @@ mod tests {
         fs::write(palettes_dir.join(".DS_Store"), "").unwrap();
         fs::create_dir(palettes_dir.join("subfolder.json")).unwrap();
 
-        let themes = paths.get_cached_themes().unwrap();
+        let themes = paths.cached_themes().unwrap();
         assert_eq!(themes.len(), 3);
 
         assert_eq!(themes[0], "gruvbox");
@@ -454,7 +450,7 @@ mod tests {
             "Error count should drop after creating state.toml"
         );
 
-        let lua_dir = paths.nvim_data_dir().join("site/plugin");
+        let lua_dir = paths.nvim_data_path().join("site/plugin");
         fs::create_dir_all(&lua_dir).expect("Failed to create mock nvim plugin dir");
         fs::write(lua_dir.join("iris_sync.lua"), "-- mock")
             .expect("Failed to write mock lua script");

@@ -1,7 +1,5 @@
-use crate::{
-    core::IrisPaths,
-    models::{Palette, PluginManager, State},
-};
+use super::IrisPaths;
+use crate::models::{Palette, PluginManager, State};
 use std::{fs, path::Path, process::Command};
 
 /// Infrastructure client to interact with Neovim and its filesystem environment
@@ -9,16 +7,16 @@ pub struct NeovimBridge;
 
 impl NeovimBridge {
     /// Automatically detect plugin manager based on your config
-    pub fn detect_manager(paths: &IrisPaths) -> PluginManager {
-        if paths.nvim_config_dir().join("lazy-lock.json").exists() {
+    pub fn detect(paths: &IrisPaths) -> PluginManager {
+        if paths.nvim_config_path().join("lazy-lock.json").exists() {
             return PluginManager::Lazy;
         }
 
-        if Self::has_plugins(&paths.nvim_data_dir().join("lazy")) {
+        if Self::has_plugins(&paths.nvim_data_path().join("lazy")) {
             return PluginManager::Lazy;
         }
 
-        if Self::has_plugins(&paths.nvim_data_dir().join("site/pack/packer/start")) {
+        if Self::has_plugins(&paths.nvim_data_path().join("site/pack/packer/start")) {
             return PluginManager::Packer;
         }
 
@@ -26,9 +24,9 @@ impl NeovimBridge {
     }
 
     /// Counts number of folders in plugin directory
-    pub fn count_plugins(paths: &IrisPaths, manager: &PluginManager) -> usize {
+    pub fn count(paths: &IrisPaths, manager: &PluginManager) -> usize {
         paths
-            .resolve_plugin_path(manager)
+            .nvim_plugin_path(manager)
             .and_then(|p| fs::read_dir(p).ok())
             .map(|entries| {
                 entries
@@ -40,7 +38,7 @@ impl NeovimBridge {
     }
 
     /// Get all nvim builtin themes
-    pub fn get_builtin_themes() -> Vec<String> {
+    pub fn builtin_themes() -> Vec<String> {
         let lua_script = r#"
             local rt = vim.fn.expand('$VIMRUNTIME'):gsub('\\', '/')
             local seen = {}
@@ -105,7 +103,7 @@ impl NeovimBridge {
     }
 
     /// Get all themes installed in nvim
-    pub fn get_all_themes() -> anyhow::Result<Vec<String>> {
+    pub fn installed_themes() -> anyhow::Result<Vec<String>> {
         let output = Command::new("nvim")
             .args([
                 "--headless",
@@ -153,7 +151,7 @@ impl NeovimBridge {
         let output = Command::new("nvim").args(&args).output()?;
         if !output.status.success() {
             let error_msg = String::from_utf8_lossy(&output.stderr);
-            anyhow::bail!("Neovim failed to export palette: {}", error_msg.trim());
+            anyhow::bail!("`nvim` failed to export palette: {}.", error_msg.trim());
         }
 
         Ok(String::from_utf8_lossy(&output.stdout).into_owned())
@@ -196,43 +194,43 @@ impl NeovimBridge {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::utils::tests::mock_context;
+    use crate::core::IrisContext;
 
     #[test]
     fn should_detect_lazy_by_lockfile() {
-        let (_temp, ctx) = mock_context();
-        let config_nvim = ctx.paths.nvim_config_dir();
+        let (_temp, ctx) = IrisContext::mock();
+        let config_nvim = ctx.paths.nvim_config_path();
 
         fs::create_dir_all(&config_nvim).unwrap();
         fs::write(config_nvim.join("lazy-lock.json"), "{}").unwrap();
 
-        let manager: PluginManager = NeovimBridge::detect_manager(&ctx.paths);
+        let manager: PluginManager = NeovimBridge::detect(&ctx.paths);
         assert_eq!(manager, PluginManager::Lazy);
     }
 
     #[test]
     fn should_count_plugins_correctly() {
-        let (_temp, ctx) = mock_context();
+        let (_temp, ctx) = IrisContext::mock();
 
-        let lazy_dir = ctx.paths.resolve_plugin_path(&PluginManager::Lazy).unwrap();
+        let lazy_dir = ctx.paths.nvim_plugin_path(&PluginManager::Lazy).unwrap();
         fs::create_dir_all(lazy_dir.join("p1")).unwrap();
         fs::create_dir_all(lazy_dir.join("p2")).unwrap();
         fs::create_dir_all(lazy_dir.join("p3")).unwrap();
 
-        let count = NeovimBridge::count_plugins(&ctx.paths, &PluginManager::Lazy);
+        let count = NeovimBridge::count(&ctx.paths, &PluginManager::Lazy);
         assert_eq!(count, 3);
     }
 
     #[test]
     fn should_return_at_least_basic_builtin_themes() {
-        let themes = NeovimBridge::get_builtin_themes();
+        let themes = NeovimBridge::builtin_themes();
         assert!(!themes.is_empty());
         assert!(themes.contains(&"habamax".to_string()));
     }
 
     #[test]
     fn should_test_build_args_for_lazy_manager() {
-        let (_temp, mut ctx) = mock_context();
+        let (_temp, mut ctx) = IrisContext::mock();
         ctx.state.nvim.manager = PluginManager::Lazy;
         let args = NeovimBridge::build_base_args(&ctx.state);
 
@@ -248,7 +246,7 @@ mod tests {
 
     #[test]
     fn should_test_build_args_without_rtp_for_default_manager() {
-        let (_temp, mut ctx) = mock_context();
+        let (_temp, mut ctx) = IrisContext::mock();
         ctx.state.nvim.manager = PluginManager::Default;
         let args = NeovimBridge::build_base_args(&ctx.state);
 

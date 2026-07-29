@@ -41,7 +41,7 @@ impl Templater {
         }
 
         tera.add_raw_templates(embedded)
-            .expect("Failed to load embedded templates");
+            .expect("Failed to load embedded templates!");
 
         if let Some(p) = path.filter(|p| p.exists()) {
             Self::load_external_recursive(&mut tera, &p, &p);
@@ -52,8 +52,7 @@ impl Templater {
 
     /// Renders the resulting templated based on context
     pub fn render(&self, template_name: &str, context: &TeraContext) -> Result<String> {
-        self.tera
-                .render(template_name, context)
+        self.tera.render(template_name, context)
                 .with_context(|| {
                     format!(
                         "Failed to render template: `{}`. Check if all variables are provided in the context.",
