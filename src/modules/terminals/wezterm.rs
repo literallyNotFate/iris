@@ -1,17 +1,10 @@
 use crate::{
-    core::{IrisPaths, Templater},
-    guards::FsRollbackGuard,
-    log::Activity,
-    models::{HealthStatus, Theme},
-    modules::{Generator, GeneratorType},
-    utils,
+    core::{InjectionPosition, IrisEngine},
+    infra::IrisPaths,
+    models::{HealthStatus, Issue},
+    modules::{Cleanable, Generator, GeneratorType, Strategy},
 };
-use anyhow::{Context, Result};
-use colored::*;
-use std::{
-    fs,
-    path::{Path, PathBuf},
-};
+use std::{fs, path::PathBuf};
 
 /// Config generator for wezterm terminal
 pub struct WezTermGenerator;
@@ -25,9 +18,13 @@ impl Generator for WezTermGenerator {
         GeneratorType::Terminal
     }
 
+    fn strategy(&self) -> Strategy {
+        Strategy::Symlink
+    }
+
     fn target_file_name(&self, theme: &str) -> String {
         if theme.is_empty() {
-            "iris_theme.lua".into()
+            "current_theme.lua".into()
         } else {
             format!("{}.lua", theme.to_lowercase())
         }
@@ -39,311 +36,109 @@ impl Generator for WezTermGenerator {
     }
 
     fn active_link_path(&self, paths: &IrisPaths) -> Option<PathBuf> {
-        Some(self.resolve_config_directory(paths).join("iris_theme.lua"))
+        Some(
+            self.resolve_config_directory(paths)
+                .join("current_theme.lua"),
+        )
     }
 
-    fn apply(
-        &self,
-        theme: &Theme,
-        paths: &IrisPaths,
-        templater: &Templater,
-        task: &mut Activity,
-    ) -> Result<()> {
-        task.info(&format!(
-            "Generating {} theme for {}",
-            theme.name.yellow(),
-            self.name().bold().cyan(),
-        ));
+    fn pre_apply(&self, engine: &IrisEngine) -> anyhow::Result<()> {
+        let config_path: PathBuf = self
+            .resolve_config_directory(engine.paths)
+            .join("wezterm.lua");
 
-        let cache_file: PathBuf = self.ensure_cache_file(theme, paths, templater)?;
-        let link_path: PathBuf = self.link_path(paths, &theme.name);
-        let backup_path: PathBuf = link_path.with_extension("bak");
+        if let Some(parent) = config_path.parent() {
+            fs::create_dir_all(parent)?;
+        }
 
-        task.info(&format!(
-            "Linking {} theme to {}...",
-            self.name().bold(),
-            utils::pretty_path(&link_path).magenta(),
-        ));
+        let content: String = fs::read_to_string(&config_path).unwrap_or_default();
+        if !config_path.exists() || content.trim().is_empty() || !content.contains("wezterm") {
+            let default_config = concat!(
+                "local has_iris, current_theme = pcall(require, \"current_theme\")\n",
+                "local wezterm = require(\"wezterm\")\n",
+                "local config = wezterm.config_builder()\n\n",
+                "if has_iris and current_theme.colors then\n",
+                "    config.colors = current_theme.colors\n",
+                "end\n\n",
+                "return config\n"
+            );
+            fs::write(&config_path, default_config)?;
+            return Ok(());
+        }
 
-        let rollback_guard = FsRollbackGuard::new(link_path.clone(), backup_path);
+        engine.inject_line(
+            &config_path,
+            "local has_iris, current_theme = pcall(require, \"current_theme\")",
+            InjectionPosition::Start,
+        )?;
+        let colors_block: &str = concat!(
+            "if has_iris and current_theme.colors then\n",
+            "    config.colors = current_theme.colors\n",
+            "end"
+        );
 
-        self.ensure_symlink(&cache_file, &link_path)?;
-        rollback_guard.commit();
+        let marker: &str = if content.contains("return config") {
+            "return config"
+        } else {
+            "return"
+        };
 
-        task.info(&format!(
-            "{} theme applied to {}",
-            theme.name.yellow(),
-            self.name().bold().cyan()
-        ));
-        Ok(())
-    }
-
-    fn build_render_context(&self, theme: &Theme) -> tera::Context {
-        let mut c = tera::Context::new();
-        c.insert("theme_name", &theme.name);
-        c.insert("bg", &theme.colors.bg);
-        c.insert("fg", &theme.colors.fg);
-        c.insert("cursor", &theme.colors.sel);
-        c.insert("ansi", &theme.colors.ansi);
-        c
+        engine.inject_line(
+            &config_path,
+            colors_block,
+            InjectionPosition::Before(marker.to_string()),
+        )
     }
 
     fn health_check(&self, paths: &IrisPaths, theme: &str) -> HealthStatus {
         if !self.is_installed() {
-            return HealthStatus::Warning("`wezterm` binary not found".into());
+            return HealthStatus::error(Issue::BinaryNotFound);
         }
 
         let wezterm_dir: PathBuf = self.resolve_config_directory(paths);
         let config_path: PathBuf = wezterm_dir.join("wezterm.lua");
         let link_path: PathBuf = self.link_path(paths, "");
 
-        let expected_cache: PathBuf = self.cache_path(paths, theme);
-        let abs_expected_cache: PathBuf = if expected_cache.exists() {
-            fs::canonicalize(&expected_cache).unwrap_or(expected_cache)
-        } else {
-            expected_cache
-        };
-
-        let config_status = HealthStatus::check_file(&config_path, "`wezterm` config file");
-        if config_status.is_error() {
-            return HealthStatus::error(
-                "`wezterm.lua` main configuration file missing",
-                Some(format!("Create {}", config_path.display())),
-            );
+        let config_status = HealthStatus::check_file(&config_path, Issue::ConfigMissing);
+        if !config_status.is_ok() {
+            return config_status;
         }
 
         let content: String = fs::read_to_string(&config_path).unwrap_or_default();
-        if !content.contains("iris_theme") || !content.contains("config.colors") {
-            return HealthStatus::Warning(format!(
-                "Iris theme hook or color assignment missing in {}",
-                config_path.display()
-            ));
+        if !content.contains("current_theme") || !content.contains("config.colors") {
+            return HealthStatus::warn(Issue::ImportMissing);
         }
 
-        let symlink_status = HealthStatus::check_symlink(&link_path, "iris_theme.lua link");
-        if symlink_status.is_error() {
-            return HealthStatus::error(
-                "iris_theme.lua missing or invalid",
-                Some("Run `iris sync` or `iris health --fix` to recreate the link"),
-            );
+        let link_status = HealthStatus::check_symlink(&link_path, Issue::SymlinkInvalid);
+        if !link_status.is_ok() {
+            return link_status;
         }
 
-        #[cfg(unix)]
+        let expected_cache: PathBuf = self.cache_path(paths, theme);
         if let Ok(target) = fs::read_link(&link_path) {
             let abs_target: PathBuf = fs::canonicalize(&target).unwrap_or(target);
-            if abs_target != abs_expected_cache {
-                return HealthStatus::Warning("Link points to a different cache location".into());
+            let abs_expected: PathBuf = fs::canonicalize(&expected_cache).unwrap_or(expected_cache);
+
+            if abs_target != abs_expected {
+                return HealthStatus::warn(Issue::CacheMismatch);
             }
         }
 
         HealthStatus::Ok
     }
 
-    fn fix(
-        &self,
-        status: &HealthStatus,
-        theme: &Theme,
-        paths: &IrisPaths,
-        templater: &Templater,
-        task: &mut Activity,
-    ) -> Result<()> {
-        if !status.is_error() && !status.is_warning() {
-            return task.log.action(
-                &format!("Re-applied `{}` configuration", self.name().bold()),
-                || self.apply(theme, paths, templater, &mut task.muted()),
-            );
-        }
-
-        let mut fixed = false;
-        let wezterm_dir: PathBuf = self.resolve_config_directory(paths);
-        let config_path: PathBuf = wezterm_dir.join("wezterm.lua");
-
-        if status.contains("main configuration file missing")
-            || status.contains("color assignment missing")
-        {
-            let config_backup: PathBuf = config_path.with_extension("bak");
-            let rollback_guard = FsRollbackGuard::new(config_path.clone(), config_backup);
-
-            let msg = if status.contains("main configuration file missing") {
-                "Created missing `wezterm` config file with iris hook"
-            } else {
-                "Injected theme import hook into `wezterm.lua`"
-            };
-
-            task.log.action(msg, || self.inject_import_line(paths))?;
-
-            rollback_guard.commit();
-            fixed = true;
-        }
-
-        if status.contains("missing or invalid") || status.contains("different cache") {
-            let link: PathBuf = self.link_path(paths, "");
-            let backup: PathBuf = link.with_extension("bak");
-            let cache: PathBuf = self.cache_path(paths, &theme.name.to_lowercase());
-
-            let rollback_guard = FsRollbackGuard::new(link.clone(), backup);
-
-            task.log
-                .action("Repaired `wezterm` theme files and symlinks", || {
-                    self.ensure_cache_file(theme, paths, templater)?;
-                    self.ensure_symlink(&cache, &link)
-                })?;
-
-            rollback_guard.commit();
-            fixed = true;
-        }
-
-        if !fixed {
-            task.log
-                .action("Regenerated complete `wezterm` configuration", || {
-                    self.apply(theme, paths, templater, &mut task.muted())
-                })?;
-        }
-
-        Ok(())
+    fn as_cleanable(&self) -> Option<&dyn Cleanable> {
+        Some(self)
     }
 }
 
-impl WezTermGenerator {
-    fn ensure_cache_file(
-        &self,
-        theme: &Theme,
-        paths: &IrisPaths,
-        templater: &Templater,
-    ) -> Result<PathBuf> {
-        let cache_file: PathBuf = self.cache_path(paths, &theme.name.to_lowercase());
-        let render_ctx = self.build_render_context(theme);
-        let content: String = templater.render(&self.template_path(), &render_ctx)?;
-
-        if let Some(parent) = cache_file.parent() {
-            fs::create_dir_all(parent).with_context(|| {
-                format!("Failed to create `wezterm` directory: {}", parent.display())
-            })?;
-        }
-
-        fs::write(&cache_file, content).with_context(|| {
-            format!(
-                "Failed to write `wezterm` cache file: {}",
-                cache_file.display()
-            )
-        })?;
-        Ok(cache_file)
+impl Cleanable for WezTermGenerator {
+    fn cleanup(&self, paths: &IrisPaths) -> anyhow::Result<()> {
+        crate::modules::cleanable::default_cleanup(self, paths)
     }
 
-    fn ensure_symlink(&self, target: &Path, link: &Path) -> Result<()> {
-        if let Some(parent) = link.parent() {
-            fs::create_dir_all(parent).with_context(|| {
-                format!(
-                    "Failed to create parent directory for `wezterm` link: {}",
-                    parent.display()
-                )
-            })?;
-        }
-
-        let ts = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_micros())
-            .unwrap_or(0);
-        let tmp_link = link.with_extension(format!("tmp-{}", ts));
-
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::symlink;
-            symlink(target, &tmp_link).with_context(|| {
-                format!(
-                    "Failed to create temporary `wezterm` symlink: {} -> {}",
-                    target.display(),
-                    tmp_link.display()
-                )
-            })?;
-        }
-
-        fs::rename(&tmp_link, link).with_context(|| {
-            let _ = fs::remove_file(&tmp_link);
-            format!(
-                "Failed to atomically replace `wezterm` symlink at {}",
-                link.display()
-            )
-        })?;
-
-        Ok(())
-    }
-
-    fn inject_import_line(&self, paths: &IrisPaths) -> Result<()> {
-        let config_path: PathBuf = self.resolve_config_directory(paths).join("wezterm.lua");
-        if !config_path.exists() {
-            if let Some(parent) = config_path.parent() {
-                fs::create_dir_all(parent).with_context(|| {
-                    format!(
-                        "Failed to create parent `wezterm` directory: {}",
-                        parent.display()
-                    )
-                })?;
-            }
-
-            let default_config = concat!(
-                "local has_iris, iris_theme = pcall(require, \"iris_theme\")\n",
-                "local wezterm = require(\"wezterm\")\n",
-                "local config = wezterm.config_builder()\n\n",
-                "if has_iris and iris_theme.colors then\n",
-                "    config.colors = iris_theme.colors\n",
-                "end\n\n",
-                "return config\n"
-            );
-
-            fs::write(&config_path, default_config).with_context(|| {
-                format!(
-                    "Failed to create `wezterm` config file: {}",
-                    config_path.display()
-                )
-            })?;
-            return Ok(());
-        }
-
-        let content = fs::read_to_string(&config_path).with_context(|| {
-            format!("Failed to read `wezterm` config: {}", config_path.display())
-        })?;
-
-        if content.contains("iris_theme") && content.contains("config.colors") {
-            return Ok(());
-        }
-
-        let mut lines: Vec<String> = content.lines().map(|s| s.to_string()).collect();
-        if !content.contains("iris_theme") {
-            lines.insert(
-                0,
-                "local has_iris, iris_theme = pcall(require, \"iris_theme\")".into(),
-            );
-        }
-
-        if !content.contains("config.colors") {
-            let mut insert_index = None;
-            for (i, line) in lines.iter().enumerate() {
-                if line.trim().starts_with("return ") {
-                    insert_index = Some(i);
-                    break;
-                }
-            }
-
-            let inject_colors_block = concat!(
-                "\n-- Iris Theme Manager Control Hook\n",
-                "if has_iris and iris_theme.colors then\n",
-                "    config.colors = iris_theme.colors\n",
-                "end\n"
-            );
-
-            if let Some(index) = insert_index {
-                lines.insert(index, inject_colors_block.into());
-            } else {
-                lines.push(inject_colors_block.into());
-            }
-        }
-
-        fs::write(&config_path, lines.join("\n")).with_context(|| {
-            format!("Failed to inject iris hook into: {}", config_path.display())
-        })?;
-
-        Ok(())
+    fn remove_theme(&self, paths: &IrisPaths, theme_name: &str) -> anyhow::Result<()> {
+        crate::modules::cleanable::default_remove(self, paths, theme_name)
     }
 }
 
@@ -351,14 +146,14 @@ impl WezTermGenerator {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::utils::tests::mock_context;
+    use crate::{core::IrisContext, models::Theme};
 
     /// Unit-tests for wezterm
     mod unit {
         use super::*;
 
         #[test]
-        fn should_return_wezterm_metadata() {
+        fn should_return_metadata_for_wezterm() {
             let generator = WezTermGenerator;
             assert_eq!(generator.name(), "wezterm");
             assert_eq!(generator.generator_type(), GeneratorType::Terminal);
@@ -366,10 +161,12 @@ mod tests {
         }
 
         #[test]
-        fn should_build_valid_render_context() {
+        fn should_build_valid_render_context_for_wezterm() {
             let generator = WezTermGenerator;
+            let (_, ctx) = IrisContext::mock();
             let theme: Theme = Theme::mock();
-            let ctx = generator.build_render_context(&theme);
+            let engine = ctx.engine(&theme);
+            let ctx = engine.build_context(&generator).unwrap();
 
             assert_eq!(ctx.get("bg").unwrap().as_str().unwrap(), theme.colors.bg);
             assert_eq!(ctx.get("fg").unwrap().as_str().unwrap(), theme.colors.fg);
@@ -378,30 +175,34 @@ mod tests {
 
         #[test]
         fn should_apply_theme_for_wezterm() {
-            let (_, ctx) = mock_context();
+            let (_, ctx) = IrisContext::with_templates(vec![(
+                "terminals/wezterm",
+                "return {
+              colors = {
+                background = \"{{ bg }}\"
+              }
+            }",
+            )]);
             let generator = WezTermGenerator;
             let theme: Theme = Theme::mock();
 
-            let mut task = ctx.log.step("Test", false).muted();
-            let result = generator.apply(&theme, &ctx.paths, &ctx.templater, &mut task);
+            let mut activity = ctx.log.step("Test", false).muted();
+            let result = ctx.engine(&theme).execute_apply(&generator, &mut activity);
             assert!(result.is_ok(), "Failed to apply: {:?}", result.err());
 
             let cache_file = ctx.paths.generators.join("wezterm").join("test-theme.lua");
             assert!(cache_file.exists());
 
             let content = fs::read_to_string(cache_file).unwrap();
-
             assert!(content.contains("background ="));
-            assert!(content.contains("foreground ="));
-            assert!(content.contains("ansi ="));
         }
 
         #[test]
         fn should_clear_generated_files_for_wezterm() {
-            let (_, ctx) = mock_context();
+            let (_, ctx) = IrisContext::mock();
             let generator = WezTermGenerator;
-
             let cache_dir = ctx.paths.generators.join(generator.name());
+
             fs::create_dir_all(&cache_dir).unwrap();
             let file = cache_dir.join(generator.target_file_name(""));
             fs::write(&file, "test").unwrap();
@@ -411,7 +212,7 @@ mod tests {
                 "Cache directory should exist before clearing"
             );
 
-            generator.clear(&ctx.paths).unwrap();
+            generator.cleanup(&ctx.paths).unwrap();
 
             assert!(
                 !cache_dir.exists(),
@@ -421,7 +222,7 @@ mod tests {
 
         #[test]
         fn should_remove_theme_for_wezterm() {
-            let (_, ctx) = mock_context();
+            let (_, ctx) = IrisContext::mock();
             let generator = WezTermGenerator;
 
             let cache_file = generator.cache_path(&ctx.paths, "");
@@ -460,21 +261,21 @@ mod tests {
         fn should_return_health_ok_for_wezterm() {
             skip_if_not_installed!(WezTermGenerator);
 
-            let (_, mut ctx) = mock_context();
+            let (_, mut ctx) = IrisContext::mock();
             let generator = WezTermGenerator;
             let theme: Theme = Theme::mock();
 
-            let mut task = ctx.log.step("Test", false).muted();
+            let mut activity = ctx.log.step("Test", false).muted();
             ctx.state.theme.current_theme = theme.name.clone();
-            generator
-                .apply(&theme, &ctx.paths, &ctx.templater, &mut task)
+            ctx.engine(&theme)
+                .execute_apply(&generator, &mut activity)
                 .unwrap();
 
             let config_path = generator
                 .resolve_config_directory(&ctx.paths)
                 .join("wezterm.lua");
 
-            let valid_config = "local has_iris, iris_theme = pcall(require, 'iris_theme')\nconfig.colors = iris_theme.colors";
+            let valid_config = "local has_iris, current_theme = pcall(require, 'current_theme')\nconfig.colors = current_theme.colors";
             fs::write(&config_path, valid_config).unwrap();
 
             let status = generator.health_check(&ctx.paths, &theme.name);
@@ -485,27 +286,27 @@ mod tests {
         fn should_return_health_error_missing_config_for_wezterm() {
             skip_if_not_installed!(WezTermGenerator);
 
-            let (_, ctx) = mock_context();
+            let (_, ctx) = IrisContext::mock();
             let generator = WezTermGenerator;
             let theme: Theme = Theme::mock();
 
             let status = generator.health_check(&ctx.paths, &theme.name);
             assert!(status.is_error(), "Expected Error, got: {status}");
-            assert!(status.contains("main configuration file missing"));
+            assert!(status.contains("Configuration file missing"));
         }
 
         #[test]
         fn should_return_health_warning_no_import_for_wezterm() {
             skip_if_not_installed!(WezTermGenerator);
 
-            let (_, mut ctx) = mock_context();
+            let (_, mut ctx) = IrisContext::mock();
             let generator = WezTermGenerator;
             let theme: Theme = Theme::mock();
 
-            let mut task = ctx.log.step("Test", false).muted();
+            let mut activity = ctx.log.step("Test", false).muted();
             ctx.state.theme.current_theme = theme.name.clone();
-            generator
-                .apply(&theme, &ctx.paths, &ctx.templater, &mut task)
+            ctx.engine(&theme)
+                .execute_apply(&generator, &mut activity)
                 .unwrap();
 
             let config_path = generator
@@ -515,18 +316,15 @@ mod tests {
 
             let status = generator.health_check(&ctx.paths, &theme.name);
 
-            assert!(
-                status.is_warning(),
-                "Expected Warning for missing import line, got: {status}"
-            );
-            assert!(status.contains("color assignment missing"));
+            assert!(status.is_warning(), "Expected Warning, got: {status}");
+            assert!(status.contains("Theme not imported"));
         }
 
         #[test]
         fn should_fix_inject_issue_for_wezterm() {
             skip_if_not_installed!(WezTermGenerator);
 
-            let (_, ctx) = mock_context();
+            let (_, ctx) = IrisContext::mock();
             let generator = WezTermGenerator;
             let theme: Theme = Theme::mock();
 
@@ -534,10 +332,9 @@ mod tests {
             fs::create_dir_all(&config_dir).unwrap();
             let config_path = config_dir.join("wezterm.lua");
 
-            let mut task = ctx.log.step("Test", false).muted();
-            generator
-                .apply(&theme, &ctx.paths, &ctx.templater, &mut task)
-                .unwrap();
+            let mut activity = ctx.log.step("Test", false).muted();
+            let engine = ctx.engine(&theme);
+            engine.execute_apply(&generator, &mut activity).unwrap();
 
             fs::write(
                 &config_path,
@@ -546,13 +343,11 @@ mod tests {
             .unwrap();
 
             let status = generator.health_check(&ctx.paths, &theme.name);
-            generator
-                .fix(&status, &theme, &ctx.paths, &ctx.templater, &mut task)
-                .expect("Fix failed");
+            generator.fix(&status, &engine, &mut activity).unwrap();
 
             let content = fs::read_to_string(&config_path).unwrap();
-            assert!(content.contains("iris_theme"));
-            assert!(content.contains("config.colors = iris_theme.colors"));
+            assert!(content.contains("current_theme"));
+            assert!(content.contains("config.colors = current_theme.colors"));
             assert!(generator.health_check(&ctx.paths, &theme.name).is_ok());
         }
 
@@ -560,22 +355,21 @@ mod tests {
         fn should_fix_broken_link_for_wezterm() {
             skip_if_not_installed!(WezTermGenerator);
 
-            let (_, mut ctx) = mock_context();
+            let (_, mut ctx) = IrisContext::mock();
             let generator = WezTermGenerator;
             let theme: Theme = Theme::mock();
             ctx.state.theme.current_theme = theme.name.clone();
 
-            let mut task = ctx.log.step("Test", false).muted();
+            let mut activity = ctx.log.step("Test", false).muted();
             let wezterm_dir = generator.resolve_config_directory(&ctx.paths);
             let config_path = wezterm_dir.join("wezterm.lua");
             fs::create_dir_all(&wezterm_dir).unwrap();
+            let engine = ctx.engine(&theme);
 
-            let valid_config = "local has_iris, iris_theme = pcall(require, 'iris_theme')\nconfig.colors = iris_theme.colors";
+            let valid_config = "local has_iris, current_theme = pcall(require, 'current_theme')\nconfig.colors = current_theme.colors";
             fs::write(&config_path, valid_config).unwrap();
 
-            generator
-                .apply(&theme, &ctx.paths, &ctx.templater, &mut task)
-                .unwrap();
+            engine.execute_apply(&generator, &mut activity).unwrap();
 
             let link_path_empty = generator.link_path(&ctx.paths, "");
             if link_path_empty.exists() {
@@ -589,11 +383,9 @@ mod tests {
 
             let status = generator.health_check(&ctx.paths, &theme.name);
             assert!(status.is_error());
-            assert!(status.contains("missing or invalid"));
+            assert!(status.contains("Invalid symlink"));
 
-            generator
-                .fix(&status, &theme, &ctx.paths, &ctx.templater, &mut task)
-                .unwrap();
+            generator.fix(&status, &engine, &mut activity).unwrap();
             assert!(generator.health_check(&ctx.paths, &theme.name).is_ok());
         }
     }

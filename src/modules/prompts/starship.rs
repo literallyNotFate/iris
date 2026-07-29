@@ -1,17 +1,10 @@
 use crate::{
-    core::{IrisPaths, Templater},
-    guards::FsRollbackGuard,
-    log::Activity,
-    models::{HealthStatus, Theme},
-    modules::{Generator, GeneratorType},
-    utils,
+    core::{InjectionPosition, IrisEngine},
+    infra::IrisPaths,
+    models::{HealthStatus, Issue},
+    modules::{Cleanable, Generator, GeneratorType, Strategy},
 };
-use anyhow::{Context, Result};
-use colored::Colorize;
-use std::{
-    env, fs,
-    path::{Path, PathBuf},
-};
+use std::{env, fs, path::PathBuf};
 
 /// Config generator for starship
 pub struct StarshipGenerator;
@@ -29,8 +22,10 @@ impl Generator for StarshipGenerator {
         "starship.toml".into()
     }
 
-    fn resolve_config_directory(&self, paths: &IrisPaths) -> PathBuf {
-        paths.config.clone()
+    fn strategy(&self) -> Strategy {
+        Strategy::InjectBlock {
+            file: "starship.toml".to_string(),
+        }
     }
 
     fn cache_path(&self, paths: &IrisPaths, theme: &str) -> PathBuf {
@@ -57,255 +52,105 @@ impl Generator for StarshipGenerator {
         env::var("STARSHIP_CONFIG").ok().map(PathBuf::from)
     }
 
-    fn apply(
-        &self,
-        theme: &Theme,
-        paths: &IrisPaths,
-        templater: &Templater,
-        task: &mut Activity,
-    ) -> Result<()> {
-        task.info(&format!(
-            "Generating {} theme for {}...",
-            theme.name.yellow(),
-            self.name().bold().cyan()
-        ));
-
-        let cache_file: PathBuf = self.cache_path(paths, &theme.name.to_lowercase());
-        let link_path: PathBuf = self.link_path(paths, &theme.name.to_lowercase());
-        let backup_path: PathBuf = link_path.with_extension("toml.bak");
-
-        let render_ctx = self.build_render_context(theme);
-        let palette_block: String = templater
-            .render(&self.template_path(), &render_ctx)
-            .context("Failed to render starship palette block")?;
-
-        if let Some(parent) = cache_file.parent() {
+    fn pre_apply(&self, engine: &IrisEngine) -> anyhow::Result<()> {
+        let config_path: PathBuf = self.link_path(engine.paths, "");
+        if let Some(parent) = config_path.parent() {
             fs::create_dir_all(parent)?;
         }
-        fs::write(&cache_file, &palette_block).with_context(|| {
-            format!("Failed to write palette cache to {}", cache_file.display())
-        })?;
 
-        let rollback_guard = FsRollbackGuard::new(link_path.clone(), backup_path);
+        engine.remove_key(&config_path, "palette")?;
+        engine.inject_line(
+            &config_path,
+            &format!("palette = \"{}\"", engine.theme.name.to_lowercase()),
+            InjectionPosition::Start,
+        )?;
 
-        self.update_config_file(&link_path, &link_path, theme, &palette_block)?;
-        rollback_guard.commit();
-
-        task.info(&format!(
-            "{} theme applied to {}",
-            theme.name.yellow(),
-            self.name().bold().cyan()
-        ));
         Ok(())
-    }
-
-    fn build_render_context(&self, theme: &Theme) -> tera::Context {
-        let mut c = tera::Context::new();
-        c.insert("theme_name", &theme.name.to_lowercase());
-        c.insert("bg", &theme.colors.bg);
-        c.insert("fg", &theme.colors.fg);
-        c.insert("sel", &theme.colors.sel);
-        c.insert("line_hl", &theme.colors.line_hl);
-        c.insert("gutter_fg", &theme.colors.gutter_fg);
-        c.insert("ansi", &theme.colors.ansi);
-        c
     }
 
     fn health_check(&self, paths: &IrisPaths, theme: &str) -> HealthStatus {
         if !self.is_installed() {
-            return HealthStatus::Warning("`starship` binary not found".into());
+            return HealthStatus::error(Issue::BinaryNotFound);
         }
 
         let config_path: PathBuf = self.link_path(paths, "");
-        let file_status = HealthStatus::check_file(&config_path, "starship.toml");
+        let config_status = HealthStatus::check_file(&config_path, Issue::ConfigMissing);
+        if !config_status.is_ok() {
+            return config_status;
+        }
 
-        if file_status.is_error() {
-            return HealthStatus::error(
-                "starship.toml not found",
-                Some(format!("Create config at {}", config_path.display())),
-            );
+        let content: String = fs::read_to_string(&config_path).unwrap_or_default();
+
+        let start_marker: String = format!("# [iris:begin:{}]", self.name());
+        let end_marker: String = format!("# [iris:end:{}]", self.name());
+        if !content.contains(&start_marker) || !content.contains(&end_marker) {
+            return HealthStatus::warn(Issue::MarkerMissing);
         }
 
         if !theme.is_empty() {
-            let content: String = fs::read_to_string(&config_path).unwrap_or_default();
-            let expected_key: String = format!("palette = \"{}\"", theme);
+            let theme_lower: String = theme.to_lowercase();
+
+            let expected_key: String = format!("palette = \"{}\"", theme_lower);
             if !content.contains(&expected_key) {
-                return HealthStatus::Warning(format!(
-                    "`starship` is not using the current palette '{theme}'"
-                ));
+                return HealthStatus::warn(Issue::ImportMissing);
             }
 
-            let expected_header: String = format!("[palettes.{}]", theme);
-            if !content.contains(&expected_header) {
-                return HealthStatus::error(
-                    format!("Palette block '{theme}' missing in config"),
-                    Some("Run `iris sync` or `iris health --fix` to inject the palette block"),
-                );
+            let palette_block: String = format!("[palettes.{}]", theme_lower);
+            if !content.contains(&palette_block) {
+                return HealthStatus::error(Issue::BlockMissing);
             }
         }
 
         HealthStatus::Ok
     }
 
-    fn fix(
-        &self,
-        status: &HealthStatus,
-        theme: &Theme,
-        paths: &IrisPaths,
-        templater: &Templater,
-        task: &mut Activity,
-    ) -> Result<()> {
-        if status.is_error() || status.is_warning() {
-            return task.log.action(
-                &format!("Re-applied `{}` configuration", self.name().bold()),
-                || self.apply(theme, paths, templater, &mut task.muted()),
-            );
-        }
-
-        Ok(())
-    }
-
-    fn clear(&self, paths: &IrisPaths) -> Result<()> {
-        let name: &str = self.name();
-        let config_path: PathBuf = self.link_path(paths, "");
-
-        if config_path.exists() {
-            let backup_path: PathBuf = config_path.with_extension("toml.bak");
-            let rollback_guard = FsRollbackGuard::new(config_path.clone(), backup_path);
-
-            self.remove_palette_block(&config_path)
-                .context("Failed to clean up starship.toml during clear")?;
-            rollback_guard.commit();
-        }
-
-        let gen_cache_dir: PathBuf = paths.generators.join(name);
-        if gen_cache_dir.exists() {
-            fs::remove_dir_all(&gen_cache_dir).with_context(|| {
-                format!(
-                    "Failed to remove generator directory for {}: {}",
-                    name,
-                    utils::pretty_path(&gen_cache_dir)
-                )
-            })?;
-        }
-
-        Ok(())
-    }
-
-    fn remove_theme(&self, paths: &IrisPaths, theme_name: &str) -> Result<()> {
-        let theme_name_lower: String = theme_name.to_lowercase();
-        let config_path: PathBuf = self.link_path(paths, "");
-
-        if config_path.exists() {
-            let content = fs::read_to_string(&config_path)?;
-            let active_palette_line = format!("palette = \"{}\"", theme_name_lower);
-
-            if content.contains(&active_palette_line) {
-                self.remove_palette_block(&config_path)
-                    .context("Failed to remove active palette from starship.toml")?;
-            }
-        }
-
-        let theme_cache_file: PathBuf = self.cache_path(paths, &theme_name_lower);
-        if theme_cache_file.exists() {
-            fs::remove_file(&theme_cache_file).with_context(|| {
-                format!(
-                    "Failed to remove theme cache: {}",
-                    theme_cache_file.display()
-                )
-            })?;
-        }
-        Ok(())
+    fn as_cleanable(&self) -> Option<&dyn Cleanable> {
+        Some(self)
     }
 }
 
 impl StarshipGenerator {
-    fn clean_config_content(&self, content: &str) -> Vec<String> {
-        let mut clean_lines: Vec<String> = Vec::new();
-        let mut skip_block = false;
-
-        for line in content.lines() {
-            let trimmed: &str = line.trim();
-            if trimmed.replace(" ", "").starts_with("palette=") {
-                continue;
-            }
-
-            if trimmed.starts_with("[palettes.") {
-                skip_block = true;
-                continue;
-            }
-
-            if skip_block && trimmed.starts_with('[') && !trimmed.starts_with("[palettes.") {
-                skip_block = false;
-            }
-
-            if !skip_block {
-                clean_lines.push(line.to_string());
-            }
-        }
-
-        clean_lines
-    }
-
-    fn update_config_file(
-        &self,
-        target_path: &Path,
-        write_path: &Path,
-        theme: &Theme,
-        palette_block: &str,
-    ) -> Result<()> {
-        let content = if target_path.exists() {
-            fs::read_to_string(target_path).with_context(|| {
-                format!(
-                    "Failed to read `starship` config: {}",
-                    target_path.display()
-                )
-            })?
-        } else {
-            String::new()
-        };
-
-        let clean_lines = self.clean_config_content(&content);
-        let mut final_content = String::new();
-        final_content.push_str(&format!("palette = \"{}\"\n\n", theme.name.to_lowercase()));
-
-        let body = clean_lines.join("\n").trim().to_string();
-        if !body.is_empty() {
-            final_content.push_str(&body);
-            final_content.push_str("\n\n");
-        }
-
-        final_content.push_str(palette_block);
-        if let Some(parent) = write_path.parent() {
-            fs::create_dir_all(parent)?;
-        }
-
-        fs::write(write_path, final_content.trim()).with_context(|| {
-            format!(
-                "Failed to write `starship` config: {}",
-                write_path.display()
-            )
-        })?;
-
-        Ok(())
-    }
-
-    pub fn remove_palette_block(&self, target_path: &Path) -> Result<()> {
+    pub fn remove_palette_block(&self, target_path: &PathBuf) -> anyhow::Result<()> {
         if !target_path.exists() {
             return Ok(());
         }
 
         let content: String = fs::read_to_string(target_path)?;
-        let clean_lines: Vec<String> = self.clean_config_content(&content);
+        let cleaned: String = crate::utils::remove_key(&content, "palette");
+        let cleaned: String = crate::utils::replace_block(&cleaned, self.name(), "");
 
-        fs::write(target_path, clean_lines.join("\n").trim()).with_context(|| {
-            format!(
-                "Failed to write cleaned `starship` config: {}",
-                target_path.display()
-            )
-        })?;
+        fs::write(target_path, cleaned.trim())?;
+        Ok(())
+    }
+}
+
+impl Cleanable for StarshipGenerator {
+    fn cleanup(&self, paths: &IrisPaths) -> anyhow::Result<()> {
+        crate::modules::cleanable::default_cleanup(self, paths)
+    }
+
+    fn remove_theme(&self, paths: &IrisPaths, theme_name: &str) -> anyhow::Result<()> {
+        let config_path: PathBuf = self.link_path(paths, "");
+        let theme_lower: String = theme_name.to_lowercase();
+
+        if config_path.exists() {
+            let content: String = fs::read_to_string(&config_path)?;
+            let target_line = format!("palette = \"{}\"", theme_lower);
+            if content.contains(&target_line) {
+                self.remove_palette_block(&config_path)?;
+            }
+        }
+
+        let cache_file: PathBuf = self.cache_path(paths, &theme_lower);
+        if cache_file.exists() {
+            fs::remove_file(cache_file)?;
+        }
 
         Ok(())
+    }
+
+    fn cleanup_config(&self, config_path: &PathBuf) -> anyhow::Result<()> {
+        self.remove_palette_block(config_path)
     }
 }
 
@@ -313,7 +158,7 @@ impl StarshipGenerator {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::utils::tests::mock_context;
+    use crate::{core::IrisContext, models::Theme};
     use tempdir::TempDir;
 
     /// Unit-tests for starship
@@ -321,7 +166,7 @@ mod tests {
         use super::*;
 
         #[test]
-        fn should_return_starship_metadata() {
+        fn should_return_metadata_for_starship() {
             let generator = StarshipGenerator;
             assert_eq!(generator.name(), "starship");
             assert_eq!(generator.generator_type(), GeneratorType::Prompt);
@@ -329,46 +174,36 @@ mod tests {
         }
 
         #[test]
-        fn should_build_valid_render_context() {
+        fn should_build_valid_render_context_for_starship() {
             let generator = StarshipGenerator;
+            let (_, ctx) = IrisContext::mock();
             let theme: Theme = Theme::mock();
-            let ctx = generator.build_render_context(&theme);
+            let ctx = ctx.engine(&theme).build_context(&generator).unwrap();
 
-            assert_eq!(
-                ctx.get("bg").expect("bg missing").as_str().unwrap(),
-                theme.colors.bg
-            );
-            assert_eq!(
-                ctx.get("fg").expect("fg missing").as_str().unwrap(),
-                theme.colors.fg
-            );
-
-            let ansi = ctx
-                .get("ansi")
-                .expect("ansi array missing")
-                .as_array()
-                .expect("ansi should be an array");
-            assert!(ansi.len() >= 16);
-            assert!(ctx.contains_key("gutter_fg"));
-            assert!(ctx.contains_key("sel"));
-            assert!(ctx.contains_key("line_hl"));
-            assert!(ctx.contains_key("theme_name"));
+            assert_eq!(ctx.get("bg").unwrap().as_str().unwrap(), theme.colors.bg);
+            assert_eq!(ctx.get("fg").unwrap().as_str().unwrap(), theme.colors.fg);
+            assert!(ctx.get("ansi").unwrap().is_array());
         }
 
         #[test]
-        fn should_clean_and_inject_correctly() {
-            let (_iris_dir, ctx) = mock_context();
+        fn should_clean_and_inject_correctly_for_starship() {
+            let (_iris_dir, ctx) = IrisContext::with_templates(vec![(
+                "prompts/starship",
+                "[palettes.{{ theme_name }}]\nbase      = \"{{ bg }}\"",
+            )]);
             let config_path = ctx.paths.config.join("starship.toml");
             let home_dir = ctx.paths.config.parent().unwrap();
 
             let initial_content = r##"
-    palette = "old_theme"
-    [directory]
-    style = "blue"
+palette = "old_theme"
+[directory]
+style = "blue"
 
-    [palettes.old_theme]
-    base = "#000000"
-    "##;
+# [iris:begin:starship]
+[palettes.old_theme]
+base = "#000000"
+# [iris:end:starship]
+"##;
             fs::write(&config_path, initial_content).unwrap();
 
             temp_env::with_vars(
@@ -379,29 +214,36 @@ mod tests {
                 || {
                     let generator = StarshipGenerator;
                     let theme: Theme = Theme::mock();
+                    let theme_lower = theme.name.to_lowercase();
 
-                    let mut task = ctx.log.step("Test", false).muted();
-                    generator
-                        .apply(&theme, &ctx.paths, &ctx.templater, &mut task)
+                    let mut activity = ctx.log.step("Test", false).muted();
+                    ctx.engine(&theme)
+                        .execute_apply(&generator, &mut activity)
                         .unwrap();
 
                     let result = fs::read_to_string(&config_path).unwrap();
                     let palette_occurrences: Vec<_> = result.matches("palette =").collect();
 
                     assert_eq!(palette_occurrences.len(), 1);
-                    assert!(result.contains(&format!("palette = \"{}\"", theme.name)));
+                    assert!(result.contains(&format!("palette = \"{}\"", theme_lower)));
                     assert!(!result.contains("[palettes.old_theme]"));
-                    assert!(result.contains(&format!("[palettes.{}]", theme.name)));
+                    assert!(result.contains(&format!("[palettes.{}]", theme_lower)));
                     assert!(result.contains("[directory]"));
+                    assert!(result.contains("# [iris:begin:starship]"));
+                    assert!(result.contains("# [iris:end:starship]"));
                 },
             );
         }
 
         #[test]
         fn should_apply_theme_for_starship() {
-            let (_iris_dir, ctx) = mock_context();
+            let (_iris_dir, ctx) = IrisContext::with_templates(vec![(
+                "prompts/starship",
+                "[palettes.{{ theme_name }}]\nbase      = \"{{ bg }}\"",
+            )]);
             let config_path = ctx.paths.config.join("starship.toml");
             let home_dir = ctx.paths.config.parent().unwrap();
+            fs::write(&config_path, "").unwrap();
 
             temp_env::with_vars(
                 [
@@ -409,20 +251,18 @@ mod tests {
                     ("HOME", Some(home_dir)),
                 ],
                 || {
-                    fs::write(&config_path, "[directory]\nstyle = \"blue\"\n").unwrap();
-
                     let generator = StarshipGenerator;
                     let theme: Theme = Theme::mock();
+                    let theme_name_lower = theme.name.to_lowercase();
 
-                    let mut task = ctx.log.step("Test", false).muted();
-                    let result = generator.apply(&theme, &ctx.paths, &ctx.templater, &mut task);
+                    let mut activity = ctx.log.step("Test", false).muted();
+                    let result = ctx.engine(&theme).execute_apply(&generator, &mut activity);
                     assert!(result.is_ok());
 
                     let final_content = fs::read_to_string(&config_path).unwrap();
-
-                    assert!(final_content.contains(&format!("palette = \"{}\"", theme.name)));
-                    assert!(final_content.contains(&format!("[palettes.{}]", theme.name)));
-                    assert!(final_content.contains("[directory]"));
+                    assert!(final_content.contains(&format!("[palettes.{}]", theme_name_lower)));
+                    assert!(final_content.contains("# [iris:begin:starship]"));
+                    assert!(final_content.contains("# [iris:end:starship]"));
                 },
             );
         }
@@ -440,14 +280,14 @@ mod tests {
                 || {
                     fs::write(&config_path, "").unwrap();
 
-                    let (_iris_dir, ctx) = mock_context();
+                    let (_iris_dir, ctx) = IrisContext::mock();
                     let generator = StarshipGenerator;
                     let cache_dir = ctx.paths.generators.join(generator.name());
 
                     fs::create_dir_all(&cache_dir).unwrap();
                     fs::write(cache_dir.join("some_theme.toml"), "data").unwrap();
 
-                    generator.clear(&ctx.paths).unwrap();
+                    generator.cleanup(&ctx.paths).unwrap();
                     assert!(!cache_dir.exists());
                 },
             );
@@ -459,19 +299,24 @@ mod tests {
             let config_path = base_tmp.path().join("starship.toml");
             let theme_name = "test_theme";
 
+            fs::create_dir_all(base_tmp.path()).unwrap();
+            fs::write(
+                &config_path,
+                format!(
+                    "palette = \"{}\"\n# [iris:begin:starship]\n[palettes.{}]\n# [iris:end:starship]",
+                    theme_name, theme_name
+                ),
+            )
+            .unwrap();
+
             temp_env::with_vars(
                 [
                     ("STARSHIP_CONFIG", Some(config_path.as_path())),
                     ("HOME", Some(base_tmp.path())),
                 ],
                 || {
-                    fs::write(
-                        &config_path,
-                        format!("palette = \"{}\"\n[palettes.{}]\n", theme_name, theme_name),
-                    )
-                    .unwrap();
-
-                    let (_iris_dir, ctx) = mock_context();
+                    let (_iris_dir, mut ctx) = IrisContext::mock();
+                    ctx.paths.config = config_path.clone();
                     let generator = StarshipGenerator;
 
                     let cache_file = generator.cache_path(&ctx.paths, theme_name);
@@ -497,24 +342,27 @@ mod tests {
         fn should_return_health_ok_for_starship() {
             skip_if_not_installed!(StarshipGenerator);
 
-            let (_iris_dir, mut ctx) = mock_context();
-            let config_path = ctx.paths.config.join("starship.toml");
-            let home_dir = ctx.paths.config.parent().unwrap();
+            let config_dir: TempDir = TempDir::new("starship_test").unwrap();
+            let config_path = config_dir.path().join("starship.toml");
             fs::write(&config_path, "").unwrap();
 
             temp_env::with_vars(
                 [
                     ("STARSHIP_CONFIG", Some(config_path.as_path())),
-                    ("HOME", Some(home_dir)),
+                    ("HOME", Some(config_dir.path())),
                 ],
                 || {
+                    let (_iris_dir, mut ctx) = IrisContext::with_templates(vec![(
+                        "prompts/starship",
+                        "[palettes.{{ theme_name }}]\nbase      = \"{{ bg }}\"",
+                    )]);
                     let generator = StarshipGenerator;
                     let theme: Theme = Theme::mock();
-
                     ctx.state.theme.current_theme = theme.name.clone();
-                    let mut task = ctx.log.step("Test", false).muted();
-                    generator
-                        .apply(&theme, &ctx.paths, &ctx.templater, &mut task)
+                    let mut activity = ctx.log.step("Test", false).muted();
+
+                    ctx.engine(&theme)
+                        .execute_apply(&generator, &mut activity)
                         .unwrap();
 
                     let status = generator.health_check(&ctx.paths, &theme.name);
@@ -527,23 +375,23 @@ mod tests {
         fn should_return_health_warning_wrong_palette_for_starship() {
             skip_if_not_installed!(StarshipGenerator);
 
-            let (_iris_dir, mut ctx) = mock_context();
-            let config_path = ctx.paths.config.join("starship.toml");
-            let home_dir = ctx.paths.config.parent().unwrap();
+            let config_dir: TempDir = TempDir::new("starship_test").unwrap();
+            let config_path = config_dir.path().join("starship.toml");
 
             temp_env::with_vars(
                 [
                     ("STARSHIP_CONFIG", Some(config_path.as_path())),
-                    ("HOME", Some(home_dir)),
+                    ("HOME", Some(config_dir.path())),
                 ],
                 || {
+                    let (_iris_dir, mut ctx) = IrisContext::mock();
                     let generator = StarshipGenerator;
                     let theme: Theme = Theme::mock();
 
-                    let mut task = ctx.log.step("Test", false).muted();
+                    let mut activity = ctx.log.step("Test", false).muted();
                     ctx.state.theme.current_theme = theme.name.clone();
-                    generator
-                        .apply(&theme, &ctx.paths, &ctx.templater, &mut task)
+                    ctx.engine(&theme)
+                        .execute_apply(&generator, &mut activity)
                         .unwrap();
 
                     let content = fs::read_to_string(&config_path).unwrap();
@@ -556,16 +404,16 @@ mod tests {
                     let status = generator.health_check(&ctx.paths, &theme.name);
 
                     assert!(status.is_warning(), "Expected Warning, got: {status}");
-                    assert!(status.contains("not using the current palette"));
+                    assert!(status.contains("Theme not imported"));
                 },
             );
         }
 
         #[test]
-        fn should_return_health_error_if_config_missing() {
+        fn should_return_health_error_if_config_missing_for_starship() {
             skip_if_not_installed!(StarshipGenerator);
 
-            let (_iris_dir, ctx) = mock_context();
+            let (_iris_dir, ctx) = IrisContext::mock();
             let config_path = ctx.paths.config.join("starship_missing.toml");
             let home_dir = ctx.paths.config.parent().unwrap();
 
@@ -578,7 +426,7 @@ mod tests {
                     let generator = StarshipGenerator;
                     let status = generator.health_check(&ctx.paths, "any");
                     assert!(status.is_error(), "Expected Error, got: {status}");
-                    assert!(status.contains("not found"));
+                    assert!(status.contains("Configuration file missing"));
                 },
             );
         }
@@ -587,7 +435,10 @@ mod tests {
         fn should_fix_wrong_palette_name_for_starship() {
             skip_if_not_installed!(StarshipGenerator);
 
-            let (_iris_dir, ctx) = mock_context();
+            let (_iris_dir, ctx) = IrisContext::with_templates(vec![(
+                "prompts/starship",
+                "[palettes.{{ theme_name }}]\nbase      = \"{{ bg }}\"",
+            )]);
             let config_path = ctx.paths.config.join("starship.toml");
             let home_dir = ctx.paths.config.parent().unwrap();
 
@@ -599,7 +450,7 @@ mod tests {
                 || {
                     fs::write(
                         &config_path,
-                        "palette = \"wrong-theme\"\n[palettes.melange]\nbg = \"#000000\"",
+                        "palette = \"wrong-theme\"\n# [iris:begin:starship]\n[palettes.melange]\nbg = \"#000000\"\n# [iris:end:starship]",
                     )
                     .unwrap();
 
@@ -607,14 +458,12 @@ mod tests {
                     let theme: Theme = Theme::mock();
 
                     let status = generator.health_check(&ctx.paths, &theme.name);
-
                     assert!(status.is_warning(), "Expected Warning, got: {status}");
-                    assert!(status.contains("not using the current palette"));
+                    assert!(status.contains("Theme not imported"));
 
-                    let mut task = ctx.log.step("Fix", false);
-                    generator
-                        .fix(&status, &theme, &ctx.paths, &ctx.templater, &mut task)
-                        .unwrap();
+                    let mut activity = ctx.log.step("Fix", false);
+                    let engine = ctx.engine(&theme);
+                    generator.fix(&status, &engine, &mut activity).unwrap();
 
                     let content = fs::read_to_string(&config_path).unwrap();
                     assert!(content.contains(&format!("palette = \"{}\"", theme.name)));
@@ -636,7 +485,10 @@ mod tests {
                     ("HOME", Some(base_tmp.path())),
                 ],
                 || {
-                    let (_iris_dir, ctx) = mock_context();
+                    let (_iris_dir, ctx) = IrisContext::with_templates(vec![(
+                        "prompts/starship",
+                        "[palettes.{{ theme_name }}]\nbase      = \"{{ bg }}\"",
+                    )]);
                     let generator = StarshipGenerator;
                     let theme: Theme = Theme::mock();
 
@@ -651,17 +503,17 @@ mod tests {
 
                     let status = generator.health_check(&ctx.paths, &theme.name);
 
-                    assert!(status.is_error(), "Expected Error, got: {status}");
-                    assert!(status.contains("missing"));
+                    assert!(status.is_warning(), "Expected Warning, got: {status}");
 
-                    let mut task = ctx.log.step("Fix", false);
-                    generator
-                        .fix(&status, &theme, &ctx.paths, &ctx.templater, &mut task)
-                        .unwrap();
+                    let mut activity = ctx.log.step("Fix", false);
+                    let engine = ctx.engine(&theme);
+                    generator.fix(&status, &engine, &mut activity).unwrap();
 
                     let content = fs::read_to_string(&config_path).unwrap();
-                    assert!(content.contains(&format!("[palettes.{}]", theme.name)));
+                    assert!(content.contains(&format!("[palettes.{}]", theme.name.to_lowercase())));
                     assert!(content.contains(&theme.colors.bg));
+                    assert!(content.contains("# [iris:begin:starship]"));
+                    assert!(content.contains("# [iris:end:starship]"));
                     assert!(generator.health_check(&ctx.paths, &theme.name).is_ok());
                 },
             );
