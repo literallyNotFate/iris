@@ -1,5 +1,6 @@
 use crate::{
-    core::{IrisPaths, Templater},
+    core::IrisEngine,
+    infra::{IrisPaths, Templater},
     log::{Logger, LoggingVerbosity},
     models::{State, Theme},
     modules::{Generator, GeneratorType},
@@ -8,14 +9,14 @@ use anyhow::{Context, Result};
 use colored::Colorize;
 use std::{collections::BTreeSet, sync::Arc};
 
-/// The list of all generators
+/// Manage all generators
 #[derive(Default, Clone)]
 pub struct GeneratorRegistry {
     pub generators: Vec<Arc<dyn Generator>>,
 }
 
 impl GeneratorRegistry {
-    /// Creates registy and appends all generators/modules
+    /// Creates registry and appends all generators/modules
     pub fn new() -> Self {
         use crate::modules::{multiplexer, prompts, system, terminals, tools};
         let mut generators: Vec<Arc<dyn Generator>> = Vec::new();
@@ -48,7 +49,7 @@ impl GeneratorRegistry {
             .collect()
     }
 
-    /// List of all unique type that are enabled in registry
+    /// List of all unique types that are enabled in registry
     pub fn types(&self) -> BTreeSet<GeneratorType> {
         self.generators.iter().map(|g| g.generator_type()).collect()
     }
@@ -131,11 +132,14 @@ impl GeneratorRegistry {
             return Ok(());
         }
 
+        let engine: IrisEngine = IrisEngine::new(paths, templater, theme);
         let total: usize = to_apply.len();
+
         if log.verbosity == LoggingVerbosity::Silent {
             for generator in &to_apply {
-                let mut silent_task = log.as_task();
-                generator.apply(theme, paths, templater, &mut silent_task)?;
+                let mut silent_activity = log.activity();
+
+                engine.execute_apply(*generator, &mut silent_activity)?;
             }
             return Ok(());
         }
@@ -150,8 +154,8 @@ impl GeneratorRegistry {
             let is_last = i == total - 1;
 
             if log.verbosity == LoggingVerbosity::Minimal {
-                let mut silent_sub_task = root.muted();
-                generator.apply(theme, paths, templater, &mut silent_sub_task)?;
+                let mut silent_sub_activity = root.muted();
+                engine.execute_apply(*generator, &mut silent_sub_activity)?;
             } else {
                 let generator_color = generator.generator_type().color();
                 let generator_icon = generator
@@ -160,14 +164,14 @@ impl GeneratorRegistry {
                     .color(generator_color)
                     .bold();
 
-                let mut task = root.log.step_with_icon(
+                let mut activity = root.log.step_with_icon(
                     generator_icon,
                     &format!("{}", generator.name().color(generator_color).bold()),
                     is_last,
                 );
 
-                generator
-                    .apply(theme, paths, templater, &mut task)
+                engine
+                    .execute_apply(*generator, &mut activity)
                     .with_context(|| {
                         format!(
                             "Failed to apply theme to `{}`",
@@ -175,7 +179,7 @@ impl GeneratorRegistry {
                         )
                     })?;
 
-                task.done_with(&format!("{} updated!", generator.name().cyan()));
+                activity.done_with(&format!("{} updated!", generator.name().cyan()));
             }
         }
 
@@ -192,25 +196,28 @@ impl GeneratorRegistry {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::utils::tests::MockGenerator;
+    use crate::modules::{Strategy, generator::GeneratorMock};
 
     /// Helper function to setup generator registry with mocks
     fn setup_registry() -> GeneratorRegistry {
         let mut reg = GeneratorRegistry::default();
-        reg.generators.push(Arc::new(MockGenerator {
+        reg.generators.push(Arc::new(GeneratorMock {
             name: "alacritty",
             g_type: GeneratorType::Terminal,
             installed: true,
+            strategy: Strategy::Symlink,
         }));
-        reg.generators.push(Arc::new(MockGenerator {
+        reg.generators.push(Arc::new(GeneratorMock {
             name: "zsh",
             g_type: GeneratorType::Prompt,
             installed: false,
+            strategy: Strategy::Pipeline { steps: vec![] },
         }));
-        reg.generators.push(Arc::new(MockGenerator {
+        reg.generators.push(Arc::new(GeneratorMock {
             name: "kitty",
             g_type: GeneratorType::Terminal,
             installed: true,
+            strategy: Strategy::Symlink,
         }));
 
         reg.generators.sort_by(|a, b| {

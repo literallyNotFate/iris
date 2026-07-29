@@ -53,12 +53,12 @@ impl IrisSetup {
         }
 
         task.info("Detecting Neovim plugin manager...");
-        let manager: PluginManager = NeovimBridge::detect_manager(&ctx.paths);
+        let manager: PluginManager = NeovimBridge::detect(&ctx.paths);
 
-        if manager != PluginManager::Default {
-            let count: usize = NeovimBridge::count_plugins(&ctx.paths, &manager);
             task.info(&format!(
                 "Found {} with {} plugins installed.",
+        if !manager.is_default() {
+            let count: usize = NeovimBridge::count(&ctx.paths, &manager);
                 manager,
                 count.to_string().yellow().bold()
             ));

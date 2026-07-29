@@ -1,4 +1,4 @@
-use crate::modules::{GeneratorType, StateFilter};
+use crate::modules::{GeneratorFilter, GeneratorType};
 use clap::Subcommand;
 
 #[derive(Subcommand)]
@@ -29,6 +29,6 @@ pub enum GenAction {
 
         /// Filter generators by their operational state
         #[arg(short = 's', long = "status", value_name = "STATE")]
-        status: Option<StateFilter>,
+        status: Option<GeneratorFilter>,
     },
 }

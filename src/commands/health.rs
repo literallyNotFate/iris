@@ -78,7 +78,7 @@ pub fn exec(fix: bool, ctx: &mut IrisContext) -> anyhow::Result<()> {
                     }
 
                     let mut task = ctx.log.as_task();
-                    generator.fix(status, theme, &ctx.paths, &ctx.templater, &mut task)?;
+                    generator.fix(status, &engine, &mut activity)?;
                 }
 
                 if ctx.log.is_detailed() {

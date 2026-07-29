@@ -86,8 +86,8 @@ fn ensure_generator_health(
             is_last,
         );
 
-        let _ = g.fix(&status, theme, &ctx.paths, &ctx.templater, &mut fix_step)?;
-        fix_step.done_with(&format!("Repaired `{}` successfully", g.name().cyan()));
+        let _ = g.fix(&status, engine, &mut fix_step)?;
+        fix_step.done_with(&format!("Repaired `{}` successfully!", g.name().cyan()));
     }
 
     Ok(())

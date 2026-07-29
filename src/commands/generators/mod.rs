@@ -3,7 +3,7 @@ pub(crate) mod ui;
 use crate::{
     cli::GenAction,
     core::IrisContext,
-    modules::{GeneratorType, StateFilter},
+    modules::{GeneratorFilter, GeneratorType},
     utils,
 };
 use colored::Colorize;
@@ -207,7 +207,7 @@ pub fn handle_auto(ctx: &mut IrisContext) -> anyhow::Result<()> {
 /// Render generators list
 fn render_list(
     gen_type: Option<GeneratorType>,
-    status_filter: Option<StateFilter>,
+    filter: Option<GeneratorFilter>,
     ctx: &IrisContext,
 ) -> anyhow::Result<()> {
     println!();
@@ -221,7 +221,7 @@ fn render_list(
             let is_installed = g.is_installed();
 
             let type_match = gen_type.map_or(true, |t| g.generator_type() == t);
-            let status_match = status_filter.map_or(true, |f| f.matches(is_enabled, is_installed));
+            let status_match = filter.map_or(true, |f| f.matches(is_enabled, is_installed));
 
             type_match && status_match
         })
@@ -234,7 +234,7 @@ fn render_list(
         .count();
 
     if ctx.log.is_detailed() {
-        ui::render_list_header(gen_type.is_some() || status_filter.is_some());
+        ui::render_list_header(gen_type.is_some() || filter.is_some());
     }
 
     for g in filtered {
@@ -249,7 +249,7 @@ fn render_list(
     }
 
     if ctx.log.is_detailed() {
-        ui::render_list_footer(total, enabled_count, status_filter.is_none());
+        ui::render_list_footer(total, enabled_count, filter.is_none());
     } else if total > 0 {
         println!("\nTotal: {} (Enabled: {})\n", total, enabled_count);
     }
