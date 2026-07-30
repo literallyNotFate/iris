@@ -2,14 +2,14 @@ use crate::{
     core::IrisEngine,
     infra::IrisPaths,
     models::{HealthStatus, Issue},
-    modules::{Cleanable, Generator, GeneratorType, Strategy},
+    modules::{Generator, GeneratorType, Strategy, traits::*},
 };
 use std::{fs, path::PathBuf};
 
 /// Config generator for bottom
 pub struct BottomGenerator;
 
-impl Generator for BottomGenerator {
+impl Identifiable for BottomGenerator {
     fn name(&self) -> &str {
         "bottom"
     }
@@ -18,14 +18,14 @@ impl Generator for BottomGenerator {
         GeneratorType::System
     }
 
+    fn is_installed(&self) -> bool {
+        which::which("btm").is_ok()
+    }
+}
+
+impl PathResolvable for BottomGenerator {
     fn target_file_name(&self, _theme: &str) -> String {
         "bottom.toml".into()
-    }
-
-    fn strategy(&self) -> Strategy {
-        Strategy::InjectBlock {
-            file: "bottom.toml".to_string(),
-        }
     }
 
     fn cache_path(&self, paths: &IrisPaths, theme: &str) -> PathBuf {
@@ -43,6 +43,14 @@ impl Generator for BottomGenerator {
     fn active_link_path(&self, paths: &IrisPaths) -> Option<PathBuf> {
         Some(self.resolve_config_directory(paths).join("bottom.toml"))
     }
+}
+
+impl Generator for BottomGenerator {
+    fn strategy(&self) -> Strategy {
+        Strategy::InjectBlock {
+            file: "bottom.toml".to_string(),
+        }
+    }
 
     fn pre_apply(&self, engine: &IrisEngine) -> anyhow::Result<()> {
         let config_path: PathBuf = self.link_path(engine.paths, "");
@@ -59,11 +67,23 @@ impl Generator for BottomGenerator {
 
         Ok(())
     }
+}
 
-    fn is_installed(&self) -> bool {
-        which::which("btm").is_ok()
+impl BottomGenerator {
+    pub fn remove_styles_block(&self, target_path: &PathBuf) -> anyhow::Result<()> {
+        if !target_path.exists() {
+            return Ok(());
+        }
+
+        let content: String = fs::read_to_string(target_path)?;
+        let cleaned: String = crate::utils::replace_block(&content, self.name(), "");
+
+        fs::write(target_path, cleaned.trim())?;
+        Ok(())
     }
+}
 
+impl Diagnosable for BottomGenerator {
     fn health_check(&self, paths: &IrisPaths, theme: &str) -> HealthStatus {
         if !self.is_installed() {
             return HealthStatus::error(Issue::BinaryNotFound);
@@ -97,29 +117,11 @@ impl Generator for BottomGenerator {
 
         HealthStatus::Ok
     }
-
-    fn as_cleanable(&self) -> Option<&dyn Cleanable> {
-        Some(self)
-    }
-}
-
-impl BottomGenerator {
-    pub fn remove_styles_block(&self, target_path: &PathBuf) -> anyhow::Result<()> {
-        if !target_path.exists() {
-            return Ok(());
-        }
-
-        let content: String = fs::read_to_string(target_path)?;
-        let cleaned: String = crate::utils::replace_block(&content, self.name(), "");
-
-        fs::write(target_path, cleaned.trim())?;
-        Ok(())
-    }
 }
 
 impl Cleanable for BottomGenerator {
     fn cleanup(&self, paths: &IrisPaths) -> anyhow::Result<()> {
-        crate::modules::cleanable::default_cleanup(self, paths)
+        default_cleanup(self, paths)
     }
 
     fn remove_theme(&self, paths: &IrisPaths, theme_name: &str) -> anyhow::Result<()> {
@@ -391,7 +393,9 @@ bg_colour = "#000000"
 
             let mut activity = ctx.log.step("Test", false).muted();
             let engine = ctx.engine(&theme);
-            generator.fix(&status, &engine, &mut activity).unwrap();
+            engine
+                .execute_fix(&generator, &status, &mut activity)
+                .unwrap();
 
             let content = fs::read_to_string(&config_path).unwrap();
 
@@ -425,7 +429,9 @@ bg_colour = "#000000"
 
             let mut activity = ctx.log.step("Fix", false);
             let engine = ctx.engine(&theme);
-            generator.fix(&status, &engine, &mut activity).unwrap();
+            engine
+                .execute_fix(&generator, &status, &mut activity)
+                .unwrap();
 
             let content = fs::read_to_string(&config_path).unwrap();
             assert!(content.contains("[flags]"));

@@ -2,14 +2,14 @@ use crate::{
     core::{InjectionPosition, IrisEngine},
     infra::IrisPaths,
     models::{HealthStatus, Issue},
-    modules::{Cleanable, Generator, GeneratorType, Strategy},
+    modules::{Generator, GeneratorType, Strategy, traits::*},
 };
 use std::{fs, path::PathBuf};
 
 /// Config generator for ghostty terminal
 pub struct GhosttyGenerator;
 
-impl Generator for GhosttyGenerator {
+impl Identifiable for GhosttyGenerator {
     fn name(&self) -> &str {
         "ghostty"
     }
@@ -17,11 +17,9 @@ impl Generator for GhosttyGenerator {
     fn generator_type(&self) -> GeneratorType {
         GeneratorType::Terminal
     }
+}
 
-    fn strategy(&self) -> Strategy {
-        Strategy::Symlink
-    }
-
+impl PathResolvable for GhosttyGenerator {
     fn target_file_name(&self, theme: &str) -> String {
         if theme.is_empty() {
             "current_theme.conf".into()
@@ -41,6 +39,12 @@ impl Generator for GhosttyGenerator {
                 .join("current_theme.conf"),
         )
     }
+}
+
+impl Generator for GhosttyGenerator {
+    fn strategy(&self) -> Strategy {
+        Strategy::Symlink
+    }
 
     fn pre_apply(&self, engine: &IrisEngine) -> anyhow::Result<()> {
         let config_path: PathBuf = self.resolve_config_directory(engine.paths).join("config");
@@ -54,7 +58,9 @@ impl Generator for GhosttyGenerator {
             InjectionPosition::Start,
         )
     }
+}
 
+impl Diagnosable for GhosttyGenerator {
     fn health_check(&self, paths: &IrisPaths, theme: &str) -> HealthStatus {
         if !self.is_installed() {
             return HealthStatus::error(Issue::BinaryNotFound);
@@ -92,19 +98,15 @@ impl Generator for GhosttyGenerator {
 
         HealthStatus::Ok
     }
-
-    fn as_cleanable(&self) -> Option<&dyn Cleanable> {
-        Some(self)
-    }
 }
 
 impl Cleanable for GhosttyGenerator {
     fn cleanup(&self, paths: &IrisPaths) -> anyhow::Result<()> {
-        crate::modules::cleanable::default_cleanup(self, paths)
+        default_cleanup(self, paths)
     }
 
     fn remove_theme(&self, paths: &IrisPaths, theme_name: &str) -> anyhow::Result<()> {
-        crate::modules::cleanable::default_remove(self, paths, theme_name)
+        default_remove(self, paths, theme_name)
     }
 }
 
@@ -304,7 +306,9 @@ mod tests {
             fs::write(&config_path, "font-size = 12").unwrap();
 
             let status = generator.health_check(&ctx.paths, &theme.name);
-            generator.fix(&status, &engine, &mut activity).unwrap();
+            engine
+                .execute_fix(&generator, &status, &mut activity)
+                .unwrap();
 
             let content = fs::read_to_string(&config_path).unwrap();
             assert!(content.contains("current_theme.conf"));
@@ -345,7 +349,9 @@ mod tests {
             assert!(status.is_error());
             assert!(status.contains("invalid symlink"));
 
-            generator.fix(&status, &engine, &mut activity).unwrap();
+            engine
+                .execute_fix(&generator, &status, &mut activity)
+                .unwrap();
             assert!(generator.health_check(&ctx.paths, &theme.name).is_ok());
         }
     }

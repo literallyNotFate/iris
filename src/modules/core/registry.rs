@@ -2,7 +2,7 @@ use crate::{
     core::IrisEngine,
     infra::{IrisPaths, Templater},
     log::{Logger, LoggingVerbosity},
-    models::{State, Theme},
+    models::{HealthStatus, State, Theme},
     modules::{Generator, GeneratorType},
 };
 use anyhow::{Context, Result};
@@ -62,6 +62,12 @@ impl GeneratorRegistry {
             .map(|b| b.as_ref())
     }
 
+    /// Get generator by name or return an error if it doesn't exist
+    pub fn get_required(&self, name: &str) -> Result<&dyn Generator> {
+        self.get(name)
+            .ok_or_else(|| anyhow::anyhow!("Generator `{}` not found in registry!", name))
+    }
+
     /// Get generators by type
     pub fn by_type(&self, g_type: GeneratorType) -> Vec<&dyn Generator> {
         self.generators
@@ -76,6 +82,15 @@ impl GeneratorRegistry {
         self.generators
             .iter()
             .filter(|g| g.is_installed())
+            .map(|b| b.as_ref())
+            .collect()
+    }
+
+    /// Get all generators that are both enabled by user and installed on the system
+    pub fn enabled_and_installed(&self, state: &State) -> Vec<&dyn Generator> {
+        self.generators
+            .iter()
+            .filter(|g| state.is_enabled(g.name()) && g.is_installed())
             .map(|b| b.as_ref())
             .collect()
     }
@@ -107,6 +122,35 @@ impl GeneratorRegistry {
             .map(|n| n.name().cyan().to_string())
             .collect::<Vec<_>>()
             .join(", ")
+    }
+
+    /// Runs health checks on all enabled generators and returns tuple of (healthy, errors)
+    pub fn check_all<'a>(
+        &'a self,
+        state: &State,
+        paths: &IrisPaths,
+        theme: &str,
+    ) -> (
+        Vec<(&'a dyn Generator, HealthStatus)>,
+        Vec<(&'a dyn Generator, HealthStatus)>,
+    ) {
+        let mut healthy = Vec::new();
+        let mut errors = Vec::new();
+
+        for generator in self.generators.iter().map(|b| b.as_ref()) {
+            if !state.is_enabled(generator.name()) {
+                continue;
+            }
+
+            let status = generator.health_check(paths, theme);
+            if status.is_ok() {
+                healthy.push((generator, status));
+            } else {
+                errors.push((generator, status));
+            }
+        }
+
+        (healthy, errors)
     }
 }
 

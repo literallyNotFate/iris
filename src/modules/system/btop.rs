@@ -2,14 +2,14 @@ use crate::{
     core::{InjectionPosition, IrisEngine},
     infra::IrisPaths,
     models::{HealthStatus, Issue},
-    modules::{Cleanable, Generator, GeneratorType, Strategy},
+    modules::{Generator, GeneratorType, Strategy, traits::*},
 };
 use std::{fs, path::PathBuf};
 
 /// Config generator for btop utility
 pub struct BtopGenerator;
 
-impl Generator for BtopGenerator {
+impl Identifiable for BtopGenerator {
     fn name(&self) -> &str {
         "btop"
     }
@@ -17,19 +17,23 @@ impl Generator for BtopGenerator {
     fn generator_type(&self) -> GeneratorType {
         GeneratorType::System
     }
+}
 
+impl PathResolvable for BtopGenerator {
     fn target_file_name(&self, theme: &str) -> String {
         format!("{}.theme", theme.to_lowercase())
-    }
-
-    fn strategy(&self) -> Strategy {
-        Strategy::Symlink
     }
 
     fn link_path(&self, paths: &IrisPaths, theme: &str) -> PathBuf {
         self.resolve_config_directory(paths)
             .join("themes")
             .join(self.target_file_name(theme))
+    }
+}
+
+impl Generator for BtopGenerator {
+    fn strategy(&self) -> Strategy {
+        Strategy::Symlink
     }
 
     fn pre_apply(&self, engine: &IrisEngine) -> anyhow::Result<()> {
@@ -47,7 +51,9 @@ impl Generator for BtopGenerator {
             InjectionPosition::Start,
         )
     }
+}
 
+impl Diagnosable for BtopGenerator {
     fn health_check(&self, paths: &IrisPaths, theme: &str) -> HealthStatus {
         if !self.is_installed() {
             return HealthStatus::error(Issue::BinaryNotFound);
@@ -87,19 +93,15 @@ impl Generator for BtopGenerator {
 
         HealthStatus::Ok
     }
-
-    fn as_cleanable(&self) -> Option<&dyn Cleanable> {
-        Some(self)
-    }
 }
 
 impl Cleanable for BtopGenerator {
     fn cleanup(&self, paths: &IrisPaths) -> anyhow::Result<()> {
-        crate::modules::cleanable::default_cleanup(self, paths)
+        default_cleanup(self, paths)
     }
 
     fn remove_theme(&self, paths: &IrisPaths, theme_name: &str) -> anyhow::Result<()> {
-        crate::modules::cleanable::default_remove(self, paths, theme_name)
+        default_remove(self, paths, theme_name)
     }
 }
 
@@ -320,7 +322,9 @@ mod tests {
 
             let mut activity = ctx.log.step("Test", false).muted();
             let engine = ctx.engine(&theme);
-            generator.fix(&status, &engine, &mut activity).unwrap();
+            engine
+                .execute_fix(&generator, &status, &mut activity)
+                .unwrap();
 
             let content = fs::read_to_string(&conf_path).unwrap();
             assert!(content.contains(&format!("color_theme = \"{}\"", theme.name)));
@@ -358,7 +362,9 @@ mod tests {
             let status = generator.health_check(&ctx.paths, &theme.name);
             assert!(status.is_error(), "Expected Error, got: {status}");
 
-            generator.fix(&status, &engine, &mut activity).unwrap();
+            engine
+                .execute_fix(&generator, &status, &mut activity)
+                .unwrap();
 
             assert!(link_path.exists(), "Fix should restore the symlink");
             assert!(generator.health_check(&ctx.paths, &theme.name).is_ok());

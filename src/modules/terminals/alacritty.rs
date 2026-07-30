@@ -2,14 +2,14 @@ use crate::{
     core::{InjectionPosition, IrisEngine},
     infra::IrisPaths,
     models::{HealthStatus, Issue},
-    modules::{Cleanable, Generator, GeneratorType, Strategy},
+    modules::{Generator, GeneratorType, Strategy, traits::*},
 };
 use std::{fs, path::PathBuf};
 
 /// Config generator for Alacritty terminal
 pub struct AlacrittyGenerator;
 
-impl Generator for AlacrittyGenerator {
+impl Identifiable for AlacrittyGenerator {
     fn name(&self) -> &str {
         "alacritty"
     }
@@ -17,11 +17,9 @@ impl Generator for AlacrittyGenerator {
     fn generator_type(&self) -> GeneratorType {
         GeneratorType::Terminal
     }
+}
 
-    fn strategy(&self) -> Strategy {
-        Strategy::Symlink
-    }
-
+impl PathResolvable for AlacrittyGenerator {
     fn target_file_name(&self, theme: &str) -> String {
         if theme.is_empty() {
             "current_theme.toml".into()
@@ -41,6 +39,12 @@ impl Generator for AlacrittyGenerator {
                 .join("current_theme.toml"),
         )
     }
+}
+
+impl Generator for AlacrittyGenerator {
+    fn strategy(&self) -> Strategy {
+        Strategy::Symlink
+    }
 
     fn pre_apply(&self, engine: &IrisEngine) -> anyhow::Result<()> {
         let config_path: PathBuf = self
@@ -56,7 +60,9 @@ impl Generator for AlacrittyGenerator {
             InjectionPosition::After("[general]".to_string()),
         )
     }
+}
 
+impl Diagnosable for AlacrittyGenerator {
     fn health_check(&self, paths: &IrisPaths, theme: &str) -> HealthStatus {
         if !self.is_installed() {
             return HealthStatus::error(Issue::BinaryNotFound);
@@ -94,19 +100,15 @@ impl Generator for AlacrittyGenerator {
 
         HealthStatus::Ok
     }
-
-    fn as_cleanable(&self) -> Option<&dyn Cleanable> {
-        Some(self)
-    }
 }
 
 impl Cleanable for AlacrittyGenerator {
     fn cleanup(&self, paths: &IrisPaths) -> anyhow::Result<()> {
-        crate::modules::cleanable::default_cleanup(self, paths)
+        default_cleanup(self, paths)
     }
 
     fn remove_theme(&self, paths: &IrisPaths, theme_name: &str) -> anyhow::Result<()> {
-        crate::modules::cleanable::default_remove(self, paths, theme_name)
+        default_remove(self, paths, theme_name)
     }
 }
 
@@ -341,13 +343,12 @@ mod tests {
             assert!(status.is_warning(), "Expected Warning, but got: {status}");
             assert!(status.contains("Theme not imported"));
 
-            generator.fix(&status, &engine, &mut activity).unwrap();
+            engine
+                .execute_fix(&generator, &status, &mut activity)
+                .unwrap();
 
             let content = fs::read_to_string(&config_path).unwrap();
-            assert!(
-                content.contains("current_theme.toml"),
-                "Import line missing after fix!"
-            );
+            assert!(content.contains("current_theme.toml"));
             assert!(generator.health_check(&ctx.paths, &theme.name).is_ok());
         }
 
@@ -381,13 +382,12 @@ mod tests {
             let status = generator.health_check(&ctx.paths, &theme.name);
             assert!(status.is_error(), "Should be Error, got: {status}");
 
-            generator.fix(&status, &engine, &mut activity).unwrap();
+            engine
+                .execute_fix(&generator, &status, &mut activity)
+                .unwrap();
 
             let final_status = generator.health_check(&ctx.paths, &theme.name);
-            assert!(
-                final_status.is_ok(),
-                "Health check failed after fix: {final_status}"
-            );
+            assert!(final_status.is_ok());
         }
     }
 }

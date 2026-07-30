@@ -1,31 +1,32 @@
-use crate::{infra::IrisPaths, modules::Generator};
+use crate::infra::IrisPaths;
 use anyhow::{Context, Result};
 use colored::Colorize;
 use std::{fs, path::PathBuf};
 
-pub trait Cleanable: Generator {
-    /// Clear generator cached files
+/// Trait handling cleanup operations, cache purging, and theme removal lifecycle.
+pub trait Cleanable: super::PathResolvable {
+    /// Cleans up all cached files, active symlinks, and generated assets for the generator.
     fn cleanup(&self, paths: &IrisPaths) -> anyhow::Result<()>;
 
-    /// Removes cached files for generator of a certain theme
+    /// Removes cached files and symlinks associated with a specific theme name.
     fn remove_theme(&self, paths: &IrisPaths, theme_name: &str) -> anyhow::Result<()>;
 
-    /// Cleanup hook that clears config file
+    /// Hook to clean up application-specific configuration files during a full cleanup.
     fn cleanup_config(&self, _config_path: &PathBuf) -> anyhow::Result<()> {
         Ok(())
     }
 
-    /// Cleanup hook that is being called before cache directory removal
+    /// Hook called right before the cache or config directory removal starts.
     fn pre_cleanup(&self, _paths: &IrisPaths) -> anyhow::Result<()> {
         Ok(())
     }
 
-    /// Cleanup hook that is called at the very end of cleanup
+    /// Hook called at the very end of the full cleanup process.
     fn post_cleanup(&self, _paths: &IrisPaths) -> anyhow::Result<()> {
         Ok(())
     }
 
-    /// Cleanup hook that is called at the end of theme removal
+    /// Hook called at the end of a specific theme removal process.
     fn post_remove(&self, _paths: &IrisPaths, _theme_name: &str) -> anyhow::Result<()> {
         Ok(())
     }

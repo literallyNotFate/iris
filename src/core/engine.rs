@@ -2,8 +2,8 @@ use crate::{
     guards::FsRollbackGuard,
     infra::{IrisPaths, Templater},
     log::Activity,
-    models::Theme,
-    modules::{Cleanable, Generator},
+    models::{HealthStatus, Theme},
+    modules::Generator,
 };
 use anyhow::{Context, Result};
 use std::path::{Path, PathBuf};
@@ -92,13 +92,32 @@ impl<'a, 't> IrisEngine<'a, 't> {
         Ok(())
     }
 
+    /// Automatically resolves and fixes detected environment or configuration issues
+    /// for any generator implementing `Diagnosable` + `Generator`
+    pub fn execute_fix<G: Generator + ?Sized>(
+        &self,
+        generator: &G,
+        status: &HealthStatus,
+        activity: &mut Activity,
+    ) -> anyhow::Result<()> {
+        match status {
+            HealthStatus::Ok => Ok(()),
+            HealthStatus::Issue(_severity, issue, _hint) => {
+                let msg: String = format!("Repaired `{}` issue: {}", generator.name(), issue);
+                activity.log.action(&msg, || {
+                    self.execute_apply(generator, &mut activity.muted())
+                })
+            }
+        }
+    }
+
     /// Executes cleanup/clear for a specific generator
-    pub fn execute_cleanup<G: Generator + ?Sized + Cleanable>(&self, generator: &G) -> Result<()> {
+    pub fn execute_cleanup<G: Generator + ?Sized>(&self, generator: &G) -> Result<()> {
         generator.cleanup(self.paths)
     }
 
     /// Removes a specific theme for a generator from cache and configs
-    pub fn execute_remove_theme<G: ?Sized + Cleanable>(&self, generator: &G) -> Result<()> {
+    pub fn execute_remove_theme<G: Generator + ?Sized>(&self, generator: &G) -> Result<()> {
         generator.remove_theme(self.paths, &self.theme.name)
     }
 

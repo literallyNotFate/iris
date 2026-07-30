@@ -1,14 +1,18 @@
 use crate::{
     infra::IrisPaths,
     models::{HealthStatus, Issue, Theme},
-    modules::{Cleanable, Generator, GeneratorType, Strategy, strategy::PipelineStep},
+    modules::{
+        Generator, GeneratorType, Strategy,
+        strategy::PipelineStep,
+        traits::{Cleanable, Diagnosable, Identifiable, PathResolvable},
+    },
 };
 use std::{fs, path::PathBuf};
 
 /// Config generator for fzf utility
 pub struct FzfGenerator;
 
-impl Generator for FzfGenerator {
+impl Identifiable for FzfGenerator {
     fn name(&self) -> &str {
         "fzf"
     }
@@ -16,7 +20,19 @@ impl Generator for FzfGenerator {
     fn generator_type(&self) -> GeneratorType {
         GeneratorType::Tool
     }
+}
 
+impl PathResolvable for FzfGenerator {
+    fn target_file_name(&self, theme: &str) -> String {
+        format!("{}.sh", theme.to_lowercase())
+    }
+
+    fn link_path(&self, paths: &IrisPaths, _theme: &str) -> PathBuf {
+        self.zshrc_path(paths)
+    }
+}
+
+impl Generator for FzfGenerator {
     fn strategy(&self) -> Strategy {
         Strategy::Pipeline { steps: vec![] }
     }
@@ -43,15 +59,39 @@ impl Generator for FzfGenerator {
             },
         ]
     }
+}
 
-    fn target_file_name(&self, theme: &str) -> String {
-        format!("{}.sh", theme.to_lowercase())
+impl FzfGenerator {
+    fn zshrc_path(&self, paths: &IrisPaths) -> PathBuf {
+        paths
+            .config
+            .parent()
+            .and_then(|p| p.parent())
+            .unwrap_or(&paths.config)
+            .join(".zshrc")
     }
 
-    fn link_path(&self, paths: &IrisPaths, _theme: &str) -> PathBuf {
-        self.zshrc_path(paths)
-    }
+    /// Universal helper for removing `fzf` marker from every config path (e.g., ~/.zshrc)
+    fn remove_fzf_marker(&self, target: &PathBuf) -> anyhow::Result<()> {
+        if !target.exists() {
+            return Ok(());
+        }
 
+        let content = fs::read_to_string(target)?;
+        let cleaned = crate::utils::remove_marker(&content, "fzf");
+
+        if content != cleaned {
+            let backup = target.with_extension("zshrc.bak");
+            let rollback_guard = crate::guards::FsRollbackGuard::new(target.clone(), backup);
+            fs::write(target, cleaned.trim())?;
+            rollback_guard.commit();
+        }
+
+        Ok(())
+    }
+}
+
+impl Diagnosable for FzfGenerator {
     fn health_check(&self, paths: &IrisPaths, theme: &str) -> HealthStatus {
         if !self.is_installed() {
             return HealthStatus::error(Issue::BinaryNotFound);
@@ -84,40 +124,6 @@ impl Generator for FzfGenerator {
         }
 
         HealthStatus::Ok
-    }
-
-    fn as_cleanable(&self) -> Option<&dyn Cleanable> {
-        Some(self)
-    }
-}
-
-impl FzfGenerator {
-    fn zshrc_path(&self, paths: &IrisPaths) -> PathBuf {
-        paths
-            .config
-            .parent()
-            .and_then(|p| p.parent())
-            .unwrap_or(&paths.config)
-            .join(".zshrc")
-    }
-
-    /// Universal helper for removing `fzf` marker from every config path (e.g., ~/.zshrc)
-    fn remove_fzf_marker(&self, target: &PathBuf) -> anyhow::Result<()> {
-        if !target.exists() {
-            return Ok(());
-        }
-
-        let content = fs::read_to_string(target)?;
-        let cleaned = crate::utils::remove_marker(&content, "fzf");
-
-        if content != cleaned {
-            let backup = target.with_extension("zshrc.bak");
-            let rollback_guard = crate::guards::FsRollbackGuard::new(target.clone(), backup);
-            fs::write(target, cleaned.trim())?;
-            rollback_guard.commit();
-        }
-
-        Ok(())
     }
 }
 
@@ -340,13 +346,12 @@ mod tests {
             let status = generator.health_check(&ctx.paths, &theme.name);
             assert!(status.is_warning(), "Expected warning, got: {status}");
 
-            generator.fix(&status, &engine, &mut activity).unwrap();
+            engine
+                .execute_fix(&generator, &status, &mut activity)
+                .unwrap();
 
             let updated_content = fs::read_to_string(&zshrc).unwrap();
-            assert!(
-                updated_content.contains("[iris:begin:fzf]"),
-                "zshrc should contain the [iris:begin:fzf] marker after fix"
-            );
+            assert!(updated_content.contains("[iris:begin:fzf]"));
 
             let final_status = generator.health_check(&ctx.paths, &theme.name);
             assert!(final_status.is_ok(), "Should be Ok, got: {final_status}");
@@ -376,7 +381,9 @@ mod tests {
             let status = HealthStatus::error(Issue::CacheMissing);
             let mut activity = ctx.log.step("Test", false).muted();
             let engine = ctx.engine(&theme);
-            generator.fix(&status, &engine, &mut activity).unwrap();
+            engine
+                .execute_fix(&generator, &status, &mut activity)
+                .unwrap();
 
             assert!(cache_file.exists(), "Cache file should be recreated");
         }

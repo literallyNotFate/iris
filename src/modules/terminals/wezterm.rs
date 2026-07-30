@@ -2,14 +2,17 @@ use crate::{
     core::{InjectionPosition, IrisEngine},
     infra::IrisPaths,
     models::{HealthStatus, Issue},
-    modules::{Cleanable, Generator, GeneratorType, Strategy},
+    modules::{
+        Generator, GeneratorType, Strategy,
+        traits::{Cleanable, Diagnosable, Identifiable, PathResolvable},
+    },
 };
 use std::{fs, path::PathBuf};
 
 /// Config generator for wezterm terminal
 pub struct WezTermGenerator;
 
-impl Generator for WezTermGenerator {
+impl Identifiable for WezTermGenerator {
     fn name(&self) -> &str {
         "wezterm"
     }
@@ -17,11 +20,9 @@ impl Generator for WezTermGenerator {
     fn generator_type(&self) -> GeneratorType {
         GeneratorType::Terminal
     }
+}
 
-    fn strategy(&self) -> Strategy {
-        Strategy::Symlink
-    }
-
+impl PathResolvable for WezTermGenerator {
     fn target_file_name(&self, theme: &str) -> String {
         if theme.is_empty() {
             "current_theme.lua".into()
@@ -40,6 +41,12 @@ impl Generator for WezTermGenerator {
             self.resolve_config_directory(paths)
                 .join("current_theme.lua"),
         )
+    }
+}
+
+impl Generator for WezTermGenerator {
+    fn strategy(&self) -> Strategy {
+        Strategy::Symlink
     }
 
     fn pre_apply(&self, engine: &IrisEngine) -> anyhow::Result<()> {
@@ -89,7 +96,9 @@ impl Generator for WezTermGenerator {
             InjectionPosition::Before(marker.to_string()),
         )
     }
+}
 
+impl Diagnosable for WezTermGenerator {
     fn health_check(&self, paths: &IrisPaths, theme: &str) -> HealthStatus {
         if !self.is_installed() {
             return HealthStatus::error(Issue::BinaryNotFound);
@@ -126,19 +135,15 @@ impl Generator for WezTermGenerator {
 
         HealthStatus::Ok
     }
-
-    fn as_cleanable(&self) -> Option<&dyn Cleanable> {
-        Some(self)
-    }
 }
 
 impl Cleanable for WezTermGenerator {
     fn cleanup(&self, paths: &IrisPaths) -> anyhow::Result<()> {
-        crate::modules::cleanable::default_cleanup(self, paths)
+        crate::modules::traits::default_cleanup(self, paths)
     }
 
     fn remove_theme(&self, paths: &IrisPaths, theme_name: &str) -> anyhow::Result<()> {
-        crate::modules::cleanable::default_remove(self, paths, theme_name)
+        crate::modules::traits::default_remove(self, paths, theme_name)
     }
 }
 
@@ -343,7 +348,9 @@ mod tests {
             .unwrap();
 
             let status = generator.health_check(&ctx.paths, &theme.name);
-            generator.fix(&status, &engine, &mut activity).unwrap();
+            engine
+                .execute_fix(&generator, &status, &mut activity)
+                .unwrap();
 
             let content = fs::read_to_string(&config_path).unwrap();
             assert!(content.contains("current_theme"));
@@ -385,7 +392,9 @@ mod tests {
             assert!(status.is_error());
             assert!(status.contains("Invalid symlink"));
 
-            generator.fix(&status, &engine, &mut activity).unwrap();
+            engine
+                .execute_fix(&generator, &status, &mut activity)
+                .unwrap();
             assert!(generator.health_check(&ctx.paths, &theme.name).is_ok());
         }
     }

@@ -2,14 +2,14 @@ use crate::{
     core::{InjectionPosition, IrisEngine},
     infra::IrisPaths,
     models::{HealthStatus, Issue},
-    modules::{Cleanable, Generator, GeneratorType, Strategy},
+    modules::{Generator, GeneratorType, Strategy, traits::*},
 };
 use std::{fs, path::PathBuf};
 
 /// Config generator for tmux
 pub struct TmuxGenerator;
 
-impl Generator for TmuxGenerator {
+impl Identifiable for TmuxGenerator {
     fn name(&self) -> &str {
         "tmux"
     }
@@ -17,11 +17,9 @@ impl Generator for TmuxGenerator {
     fn generator_type(&self) -> GeneratorType {
         GeneratorType::Multiplexer
     }
+}
 
-    fn strategy(&self) -> Strategy {
-        Strategy::Symlink
-    }
-
+impl PathResolvable for TmuxGenerator {
     fn target_file_name(&self, theme: &str) -> String {
         format!("{}.conf", theme)
     }
@@ -30,6 +28,12 @@ impl Generator for TmuxGenerator {
         self.resolve_config_directory(paths)
             .join("themes")
             .join(self.target_file_name(theme))
+    }
+}
+
+impl Generator for TmuxGenerator {
+    fn strategy(&self) -> Strategy {
+        Strategy::Symlink
     }
 
     fn pre_apply(&self, engine: &IrisEngine) -> anyhow::Result<()> {
@@ -47,7 +51,9 @@ impl Generator for TmuxGenerator {
         );
         engine.inject_line(&config_path, &import, InjectionPosition::Start)
     }
+}
 
+impl Diagnosable for TmuxGenerator {
     fn health_check(&self, paths: &IrisPaths, theme: &str) -> HealthStatus {
         if !self.is_installed() {
             return HealthStatus::error(Issue::BinaryNotFound);
@@ -89,19 +95,15 @@ impl Generator for TmuxGenerator {
 
         HealthStatus::Ok
     }
-
-    fn as_cleanable(&self) -> Option<&dyn Cleanable> {
-        Some(self)
-    }
 }
 
 impl Cleanable for TmuxGenerator {
     fn cleanup(&self, paths: &IrisPaths) -> anyhow::Result<()> {
-        crate::modules::cleanable::default_cleanup(self, paths)
+        default_cleanup(self, paths)
     }
 
     fn remove_theme(&self, paths: &IrisPaths, theme_name: &str) -> anyhow::Result<()> {
-        crate::modules::cleanable::default_remove(self, paths, theme_name)
+        default_remove(self, paths, theme_name)
     }
 }
 
@@ -351,8 +353,8 @@ mod tests {
 
             let mut activity = ctx.log.step("Test", false).muted();
             let status = generator.health_check(&ctx.paths, &theme.name);
-            generator
-                .fix(&status, &ctx.engine(&theme), &mut activity)
+            ctx.engine(&theme)
+                .execute_fix(&generator, &status, &mut activity)
                 .unwrap();
 
             let content = fs::read_to_string(&tmux_conf).unwrap();
@@ -398,7 +400,9 @@ mod tests {
                 "Expected Warning/Error for wrong theme, got: {status}"
             );
 
-            generator.fix(&status, &engine, &mut activity).unwrap();
+            engine
+                .execute_fix(&generator, &status, &mut activity)
+                .unwrap();
             assert!(generator.health_check(&ctx.paths, &theme.name).is_ok());
         }
 
@@ -435,7 +439,9 @@ mod tests {
             let status = generator.health_check(&ctx.paths, &theme.name);
             assert!(status.is_error(), "Expected Error , got: {status}");
 
-            generator.fix(&status, &engine, &mut activity).unwrap();
+            engine
+                .execute_fix(&generator, &status, &mut activity)
+                .unwrap();
             assert!(link_path.exists(), "Symlink should be recreated after fix");
             assert!(generator.health_check(&ctx.paths, &theme.name).is_ok());
         }

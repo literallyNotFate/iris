@@ -1,7 +1,7 @@
 use crate::{
     core::IrisContext,
     log::Logger,
-    models::{HealthStatus, Theme, health::IssueSeverity},
+    models::{HealthStatus, health::IssueSeverity},
     service::ThemeService,
 };
 use colored::*;
@@ -15,29 +15,12 @@ pub fn exec(fix: bool, ctx: &mut IrisContext) -> anyhow::Result<()> {
         println!("{}\n", "󰓦  Iris System Health".bright_red().bold());
     }
 
-    let mut issues_found = false;
-    let mut theme_obj: Option<Theme> = None;
-
-    let mut healthy = Vec::new();
-    let mut errors = Vec::new();
-
-    for generator in ctx.registry.all() {
-        if !ctx.state.is_enabled(generator.name()) {
-            continue;
-        }
-
-        let status: HealthStatus =
-            generator.health_check(&ctx.paths, &ctx.state.theme.current_theme);
-        if status.is_ok() {
-            healthy.push((generator, status));
-        } else {
-            issues_found = true;
-            errors.push((generator, status));
-        }
-    }
+    let theme: &String = &ctx.state.theme.current_theme;
+    let (healthy, errors) = ctx.registry.check_all(&ctx.state, &ctx.paths, theme);
+    let issues_found = !errors.is_empty();
 
     if fix {
-        if !errors.is_empty() {
+        if issues_found {
             if ctx.log.is_detailed() {
                 println!("  {}", "[!] Issues Detected:".yellow().bold());
                 for (i, (generator, status)) in errors.iter().enumerate() {
@@ -48,47 +31,36 @@ pub fn exec(fix: bool, ctx: &mut IrisContext) -> anyhow::Result<()> {
                 println!("  {}", "Applying fixes:".dimmed());
             }
 
-            if theme_obj.is_none() {
-                let quiet_logger: Logger = Logger::silent();
-                let service = ThemeService::new(&ctx.paths, &quiet_logger);
+            let quiet_logger: Logger = Logger::silent();
+            let service = ThemeService::new(&ctx.paths, &quiet_logger);
+            let theme = service.load_theme(theme, false, true, &ctx.state)?;
+            let engine = ctx.engine(&theme);
 
-                theme_obj = Some(service.load_theme(
-                    &ctx.state.theme.current_theme,
-                    false,
-                    true,
-                    &ctx.state,
-                )?);
-            }
-
-            if let Some(theme) = &theme_obj {
-                let engine = ctx.engine(theme);
-
-                for (i, (generator, status)) in errors.iter().enumerate() {
-                    if ctx.log.is_detailed() {
-                        if i > 0 {
-                            println!();
-                        }
-
-                        print!(
-                            "    {} Fixing {} ... ",
-                            "-> ".dimmed(),
-                            generator.name().bold()
-                        );
-                        let _ = io::stdout().flush();
+            for (i, (generator, status)) in errors.iter().enumerate() {
+                if ctx.log.is_detailed() {
+                    if i > 0 {
+                        println!();
                     }
 
-                    let mut activity = ctx.log.activity();
-                    generator.fix(status, &engine, &mut activity)?;
+                    print!(
+                        "   {} Fixing {} ... ",
+                        "-> ".dimmed(),
+                        generator.name().bold()
+                    );
+                    let _ = io::stdout().flush();
                 }
 
-                if ctx.log.is_detailed() {
-                    println!();
-                }
+                let mut activity = ctx.log.activity();
+                engine.execute_fix(*generator, &status, &mut activity)?;
+            }
+
+            if ctx.log.is_detailed() {
+                println!();
             }
         }
     } else {
         if ctx.log.is_detailed() {
-            if !errors.is_empty() {
+            if issues_found {
                 println!("  {}", "[!] Issues Detected:".yellow().bold());
                 for (i, (generator, status)) in errors.iter().enumerate() {
                     let is_last = i == errors.len() - 1;
@@ -124,37 +96,14 @@ pub fn exec(fix: bool, ctx: &mut IrisContext) -> anyhow::Result<()> {
 
     if ctx.log.is_detailed() {
         if issues_found && !fix {
-            if ctx.log.is_detailed() {
-                ctx.log.info(&format!(
-                    "Run `{}` to resolve issues automatically.",
-                    "iris health --fix".cyan().bold()
-                ));
-            } else {
-                println!(
-                    "   Run `{}` to resolve automatically.",
-                    "iris health --fix".cyan().italic()
-                );
-            }
+            ctx.log.info(&format!(
+                "Run `{}` to resolve issues automatically.",
+                "iris health --fix".cyan().bold()
+            ));
         } else if !issues_found {
-            if ctx.log.is_detailed() {
-                ctx.log.success("System is healthy!");
-            } else {
-                println!(
-                    "{}  {}",
-                    "✓".green().bold(),
-                    "System is healthy!".white().bold()
-                );
-            }
+            ctx.log.success("System is healthy!");
         } else {
-            if ctx.log.is_detailed() {
-                ctx.log.success("All issues have been resolved!");
-            } else {
-                println!(
-                    "{}  {}",
-                    "✓".green().bold(),
-                    "All issues have been resolved!".white().bold()
-                );
-            }
+            ctx.log.success("All issues have been resolved!");
         }
 
         println!();

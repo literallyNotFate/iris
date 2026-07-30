@@ -2,14 +2,14 @@ use crate::{
     core::IrisEngine,
     infra::IrisPaths,
     models::{HealthStatus, Issue},
-    modules::{Cleanable, Generator, GeneratorType, Strategy},
+    modules::{Generator, GeneratorType, Strategy, traits::*},
 };
 use std::{fs, path::PathBuf};
 
 /// Config generator for herdr
 pub struct HerdrGenerator;
 
-impl Generator for HerdrGenerator {
+impl Identifiable for HerdrGenerator {
     fn name(&self) -> &str {
         "herdr"
     }
@@ -17,13 +17,9 @@ impl Generator for HerdrGenerator {
     fn generator_type(&self) -> GeneratorType {
         GeneratorType::Multiplexer
     }
+}
 
-    fn strategy(&self) -> Strategy {
-        Strategy::InjectBlock {
-            file: "config.toml".to_string(),
-        }
-    }
-
+impl PathResolvable for HerdrGenerator {
     fn target_file_name(&self, _theme: &str) -> String {
         "config.toml".into()
     }
@@ -43,6 +39,14 @@ impl Generator for HerdrGenerator {
     fn active_link_path(&self, paths: &IrisPaths) -> Option<PathBuf> {
         Some(self.resolve_config_directory(paths).join("config.toml"))
     }
+}
+
+impl Generator for HerdrGenerator {
+    fn strategy(&self) -> Strategy {
+        Strategy::InjectBlock {
+            file: "config.toml".to_string(),
+        }
+    }
 
     fn pre_apply(&self, engine: &IrisEngine) -> anyhow::Result<()> {
         let config_path: PathBuf = self.link_path(engine.paths, "");
@@ -59,7 +63,9 @@ impl Generator for HerdrGenerator {
 
         Ok(())
     }
+}
 
+impl Diagnosable for HerdrGenerator {
     fn health_check(&self, paths: &IrisPaths, theme: &str) -> HealthStatus {
         if !self.is_installed() {
             return HealthStatus::error(Issue::BinaryNotFound);
@@ -93,29 +99,11 @@ impl Generator for HerdrGenerator {
 
         HealthStatus::Ok
     }
-
-    fn as_cleanable(&self) -> Option<&dyn Cleanable> {
-        Some(self)
-    }
-}
-
-impl HerdrGenerator {
-    pub fn remove_theme_block(&self, target_path: &PathBuf) -> anyhow::Result<()> {
-        if !target_path.exists() {
-            return Ok(());
-        }
-
-        let content: String = fs::read_to_string(target_path)?;
-        let cleaned: String = crate::utils::replace_block(&content, self.name(), "");
-
-        fs::write(target_path, cleaned.trim())?;
-        Ok(())
-    }
 }
 
 impl Cleanable for HerdrGenerator {
     fn cleanup(&self, paths: &IrisPaths) -> anyhow::Result<()> {
-        crate::modules::cleanable::default_cleanup(self, paths)
+        default_cleanup(self, paths)
     }
 
     fn remove_theme(&self, paths: &IrisPaths, theme_name: &str) -> anyhow::Result<()> {
@@ -141,6 +129,20 @@ impl Cleanable for HerdrGenerator {
 
     fn cleanup_config(&self, config_path: &PathBuf) -> anyhow::Result<()> {
         self.remove_theme_block(config_path)
+    }
+}
+
+impl HerdrGenerator {
+    pub fn remove_theme_block(&self, target_path: &PathBuf) -> anyhow::Result<()> {
+        if !target_path.exists() {
+            return Ok(());
+        }
+
+        let content: String = fs::read_to_string(target_path)?;
+        let cleaned: String = crate::utils::replace_block(&content, self.name(), "");
+
+        fs::write(target_path, cleaned.trim())?;
+        Ok(())
     }
 }
 
@@ -416,7 +418,9 @@ accent = "#000000"
 
             let mut activity = ctx.log.step("Test", false).muted();
             let engine = ctx.engine(&theme);
-            generator.fix(&status, &engine, &mut activity).unwrap();
+            engine
+                .execute_fix(&generator, &status, &mut activity)
+                .unwrap();
 
             let content = fs::read_to_string(&config_path).unwrap();
 
@@ -452,7 +456,9 @@ accent = "#000000"
 
             let mut activity = ctx.log.step("Fix", false);
             let engine = ctx.engine(&theme);
-            generator.fix(&status, &engine, &mut activity).unwrap();
+            engine
+                .execute_fix(&generator, &status, &mut activity)
+                .unwrap();
 
             let content = fs::read_to_string(&config_path).unwrap();
             assert!(content.contains("[kafka]"));

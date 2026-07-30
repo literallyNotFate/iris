@@ -1,14 +1,17 @@
 use crate::{
     infra::IrisPaths,
     models::{HealthStatus, Issue, Theme},
-    modules::{Cleanable, Generator, GeneratorType, Strategy},
+    modules::{
+        Generator, GeneratorType, Strategy,
+        traits::{Cleanable, Diagnosable, Identifiable, PathResolvable},
+    },
 };
 use std::{fs, path::PathBuf};
 
 /// Config generator for yazi
 pub struct YaziGenerator;
 
-impl Generator for YaziGenerator {
+impl Identifiable for YaziGenerator {
     fn name(&self) -> &str {
         "yazi"
     }
@@ -16,11 +19,9 @@ impl Generator for YaziGenerator {
     fn generator_type(&self) -> GeneratorType {
         GeneratorType::Tool
     }
+}
 
-    fn strategy(&self) -> Strategy {
-        Strategy::Symlink
-    }
-
+impl PathResolvable for YaziGenerator {
     fn target_file_name(&self, theme: &str) -> String {
         if theme.is_empty() {
             "theme.toml".into()
@@ -37,6 +38,12 @@ impl Generator for YaziGenerator {
     fn active_link_path(&self, paths: &IrisPaths) -> Option<PathBuf> {
         Some(self.resolve_config_directory(paths).join("theme.toml"))
     }
+}
+
+impl Generator for YaziGenerator {
+    fn strategy(&self) -> Strategy {
+        Strategy::Symlink
+    }
 
     fn enrich_context(&self, context: &mut tera::Context, theme: &Theme) -> anyhow::Result<()> {
         let line_hl = if theme.colors.line_hl == "#cccccc" {
@@ -48,7 +55,9 @@ impl Generator for YaziGenerator {
 
         Ok(())
     }
+}
 
+impl Diagnosable for YaziGenerator {
     fn health_check(&self, paths: &IrisPaths, theme: &str) -> HealthStatus {
         if !self.is_installed() {
             return HealthStatus::error(Issue::BinaryNotFound);
@@ -77,19 +86,15 @@ impl Generator for YaziGenerator {
 
         HealthStatus::Ok
     }
-
-    fn as_cleanable(&self) -> Option<&dyn Cleanable> {
-        Some(self)
-    }
 }
 
 impl Cleanable for YaziGenerator {
     fn cleanup(&self, paths: &IrisPaths) -> anyhow::Result<()> {
-        crate::modules::cleanable::default_cleanup(self, paths)
+        crate::modules::traits::default_cleanup(self, paths)
     }
 
     fn remove_theme(&self, paths: &IrisPaths, theme_name: &str) -> anyhow::Result<()> {
-        crate::modules::cleanable::default_remove(self, paths, theme_name)
+        crate::modules::traits::default_remove(self, paths, theme_name)
     }
 }
 
@@ -290,7 +295,9 @@ mod tests {
             assert!(status.is_error());
             assert!(status.contains("Invalid symlink"));
 
-            generator.fix(&status, &engine, &mut activity).unwrap();
+            engine
+                .execute_fix(&generator, &status, &mut activity)
+                .unwrap();
             assert!(link_path.exists(), "Fix should recreate the symlink");
 
             #[cfg(unix)]
@@ -325,7 +332,9 @@ mod tests {
             let status = generator.health_check(&ctx.paths, &theme.name);
             assert!(status.is_error() || status.is_warning());
 
-            generator.fix(&status, &engine, &mut activity).unwrap();
+            engine
+                .execute_fix(&generator, &status, &mut activity)
+                .unwrap();
 
             assert!(cache_file.exists());
             assert!(generator.health_check(&ctx.paths, &theme.name).is_ok());

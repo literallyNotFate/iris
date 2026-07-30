@@ -2,14 +2,14 @@ use crate::{
     core::{InjectionPosition, IrisEngine},
     infra::IrisPaths,
     models::{HealthStatus, Issue},
-    modules::{Cleanable, Generator, GeneratorType, Strategy},
+    modules::{Generator, GeneratorType, Strategy, traits::*},
 };
 use std::{fs, path::PathBuf};
 
 /// Config generator for kitty terminal
 pub struct KittyGenerator;
 
-impl Generator for KittyGenerator {
+impl Identifiable for KittyGenerator {
     fn name(&self) -> &str {
         "kitty"
     }
@@ -17,11 +17,9 @@ impl Generator for KittyGenerator {
     fn generator_type(&self) -> GeneratorType {
         GeneratorType::Terminal
     }
+}
 
-    fn strategy(&self) -> Strategy {
-        Strategy::Symlink
-    }
-
+impl PathResolvable for KittyGenerator {
     fn target_file_name(&self, theme: &str) -> String {
         if theme.is_empty() {
             "current_theme.conf".into()
@@ -41,6 +39,12 @@ impl Generator for KittyGenerator {
                 .join("current_theme.conf"),
         )
     }
+}
+
+impl Generator for KittyGenerator {
+    fn strategy(&self) -> Strategy {
+        Strategy::Symlink
+    }
 
     fn pre_apply(&self, engine: &IrisEngine) -> anyhow::Result<()> {
         let config_path: PathBuf = self
@@ -56,7 +60,9 @@ impl Generator for KittyGenerator {
             InjectionPosition::Start,
         )
     }
+}
 
+impl Diagnosable for KittyGenerator {
     fn health_check(&self, paths: &IrisPaths, theme: &str) -> HealthStatus {
         if !self.is_installed() {
             return HealthStatus::error(Issue::BinaryNotFound);
@@ -94,19 +100,15 @@ impl Generator for KittyGenerator {
 
         HealthStatus::Ok
     }
-
-    fn as_cleanable(&self) -> Option<&dyn Cleanable> {
-        Some(self)
-    }
 }
 
 impl Cleanable for KittyGenerator {
     fn cleanup(&self, paths: &IrisPaths) -> anyhow::Result<()> {
-        crate::modules::cleanable::default_cleanup(self, paths)
+        default_cleanup(self, paths)
     }
 
     fn remove_theme(&self, paths: &IrisPaths, theme_name: &str) -> anyhow::Result<()> {
-        crate::modules::cleanable::default_remove(self, paths, theme_name)
+        default_remove(self, paths, theme_name)
     }
 }
 
@@ -171,10 +173,7 @@ mod tests {
             let file = cache_dir.join(generator.target_file_name(""));
             fs::write(&file, "test").unwrap();
 
-            assert!(
-                cache_dir.exists(),
-                "Cache directory should exist before clearing"
-            );
+            assert!(cache_dir.exists());
 
             generator.cleanup(&ctx.paths).unwrap();
 
@@ -303,7 +302,9 @@ mod tests {
             fs::write(&config_path, "font_size 12").unwrap();
 
             let status = generator.health_check(&ctx.paths, &theme.name);
-            generator.fix(&status, &engine, &mut activity).unwrap();
+            engine
+                .execute_fix(&generator, &status, &mut activity)
+                .unwrap();
 
             let content = fs::read_to_string(&config_path).unwrap();
             assert!(content.contains("current_theme.conf"));
@@ -339,7 +340,9 @@ mod tests {
             assert!(status.is_error());
             assert!(status.contains("Invalid symlink"));
 
-            generator.fix(&status, &engine, &mut activity).unwrap();
+            engine
+                .execute_fix(&generator, &status, &mut activity)
+                .unwrap();
             assert!(generator.health_check(&ctx.paths, &theme.name).is_ok());
         }
     }

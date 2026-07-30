@@ -2,14 +2,14 @@ use crate::{
     core::{InjectionPosition, IrisEngine},
     infra::IrisPaths,
     models::{HealthStatus, Issue},
-    modules::{Cleanable, Generator, GeneratorType, Strategy},
+    modules::{Generator, GeneratorType, Strategy, traits::*},
 };
 use std::{env, fs, path::PathBuf};
 
 /// Config generator for starship
 pub struct StarshipGenerator;
 
-impl Generator for StarshipGenerator {
+impl Identifiable for StarshipGenerator {
     fn name(&self) -> &str {
         "starship"
     }
@@ -17,15 +17,11 @@ impl Generator for StarshipGenerator {
     fn generator_type(&self) -> GeneratorType {
         GeneratorType::Prompt
     }
+}
 
+impl PathResolvable for StarshipGenerator {
     fn target_file_name(&self, _theme: &str) -> String {
         "starship.toml".into()
-    }
-
-    fn strategy(&self) -> Strategy {
-        Strategy::InjectBlock {
-            file: "starship.toml".to_string(),
-        }
     }
 
     fn cache_path(&self, paths: &IrisPaths, theme: &str) -> PathBuf {
@@ -51,6 +47,14 @@ impl Generator for StarshipGenerator {
     fn env_config_directory(&self) -> Option<PathBuf> {
         env::var("STARSHIP_CONFIG").ok().map(PathBuf::from)
     }
+}
+
+impl Generator for StarshipGenerator {
+    fn strategy(&self) -> Strategy {
+        Strategy::InjectBlock {
+            file: "starship.toml".to_string(),
+        }
+    }
 
     fn pre_apply(&self, engine: &IrisEngine) -> anyhow::Result<()> {
         let config_path: PathBuf = self.link_path(engine.paths, "");
@@ -67,7 +71,24 @@ impl Generator for StarshipGenerator {
 
         Ok(())
     }
+}
 
+impl StarshipGenerator {
+    pub fn remove_palette_block(&self, target_path: &PathBuf) -> anyhow::Result<()> {
+        if !target_path.exists() {
+            return Ok(());
+        }
+
+        let content: String = fs::read_to_string(target_path)?;
+        let cleaned: String = crate::utils::remove_key(&content, "palette");
+        let cleaned: String = crate::utils::replace_block(&cleaned, self.name(), "");
+
+        fs::write(target_path, cleaned.trim())?;
+        Ok(())
+    }
+}
+
+impl Diagnosable for StarshipGenerator {
     fn health_check(&self, paths: &IrisPaths, theme: &str) -> HealthStatus {
         if !self.is_installed() {
             return HealthStatus::error(Issue::BinaryNotFound);
@@ -103,30 +124,11 @@ impl Generator for StarshipGenerator {
 
         HealthStatus::Ok
     }
-
-    fn as_cleanable(&self) -> Option<&dyn Cleanable> {
-        Some(self)
-    }
-}
-
-impl StarshipGenerator {
-    pub fn remove_palette_block(&self, target_path: &PathBuf) -> anyhow::Result<()> {
-        if !target_path.exists() {
-            return Ok(());
-        }
-
-        let content: String = fs::read_to_string(target_path)?;
-        let cleaned: String = crate::utils::remove_key(&content, "palette");
-        let cleaned: String = crate::utils::replace_block(&cleaned, self.name(), "");
-
-        fs::write(target_path, cleaned.trim())?;
-        Ok(())
-    }
 }
 
 impl Cleanable for StarshipGenerator {
     fn cleanup(&self, paths: &IrisPaths) -> anyhow::Result<()> {
-        crate::modules::cleanable::default_cleanup(self, paths)
+        default_cleanup(self, paths)
     }
 
     fn remove_theme(&self, paths: &IrisPaths, theme_name: &str) -> anyhow::Result<()> {
@@ -463,7 +465,9 @@ base = "#000000"
 
                     let mut activity = ctx.log.step("Fix", false);
                     let engine = ctx.engine(&theme);
-                    generator.fix(&status, &engine, &mut activity).unwrap();
+                    engine
+                        .execute_fix(&generator, &status, &mut activity)
+                        .unwrap();
 
                     let content = fs::read_to_string(&config_path).unwrap();
                     assert!(content.contains(&format!("palette = \"{}\"", theme.name)));
@@ -507,7 +511,9 @@ base = "#000000"
 
                     let mut activity = ctx.log.step("Fix", false);
                     let engine = ctx.engine(&theme);
-                    generator.fix(&status, &engine, &mut activity).unwrap();
+                    engine
+                        .execute_fix(&generator, &status, &mut activity)
+                        .unwrap();
 
                     let content = fs::read_to_string(&config_path).unwrap();
                     assert!(content.contains(&format!("[palettes.{}]", theme.name.to_lowercase())));

@@ -2,14 +2,18 @@ use super::rules::RULES;
 use crate::{
     infra::IrisPaths,
     models::{HealthStatus, Issue, Theme},
-    modules::{Cleanable, Generator, GeneratorType, Strategy, strategy::PipelineStep},
+    modules::{
+        Generator, GeneratorType, Strategy,
+        strategy::PipelineStep,
+        traits::{Cleanable, Diagnosable, Identifiable, PathResolvable},
+    },
 };
 use std::{env, fs, path::PathBuf, process::Command};
 
 /// Config generator for bat
 pub struct BatGenerator;
 
-impl Generator for BatGenerator {
+impl Identifiable for BatGenerator {
     fn name(&self) -> &str {
         "bat"
     }
@@ -17,7 +21,15 @@ impl Generator for BatGenerator {
     fn generator_type(&self) -> GeneratorType {
         GeneratorType::Tool
     }
+}
 
+impl PathResolvable for BatGenerator {
+    fn target_file_name(&self, theme: &str) -> String {
+        format!("{}.tmTheme", theme)
+    }
+}
+
+impl Generator for BatGenerator {
     fn strategy(&self) -> Strategy {
         Strategy::Pipeline { steps: vec![] }
     }
@@ -71,10 +83,6 @@ impl Generator for BatGenerator {
         ]
     }
 
-    fn target_file_name(&self, theme: &str) -> String {
-        format!("{}.tmTheme", theme)
-    }
-
     fn enrich_context(&self, context: &mut tera::Context, theme: &Theme) -> anyhow::Result<()> {
         let processed_rules: Vec<serde_json::Value> = RULES
             .iter()
@@ -97,41 +105,6 @@ impl Generator for BatGenerator {
 
         context.insert("rules", &processed_rules);
         Ok(())
-    }
-
-    fn health_check(&self, paths: &IrisPaths, theme: &str) -> HealthStatus {
-        if !self.is_installed() {
-            return HealthStatus::error(Issue::BinaryNotFound);
-        }
-
-        if !theme.is_empty() {
-            let link: PathBuf = self.theme_path(paths, theme);
-            let theme_status = HealthStatus::check_file(&link, Issue::CacheMissing);
-            if !theme_status.is_ok() {
-                return theme_status;
-            }
-        }
-
-        let zshrc: PathBuf = self.zshrc_path(paths);
-        if zshrc.exists() {
-            let zshrc_content = fs::read_to_string(&zshrc).unwrap_or_default();
-            if !zshrc_content.contains("BAT_CONFIG_PATH") {
-                return HealthStatus::warn(Issue::ConfigMissing);
-            }
-        }
-
-        let expected_env: PathBuf = paths.bin.join("bat.conf");
-        let current_env: String = env::var("BAT_CONFIG_PATH").unwrap_or_default();
-
-        if current_env != expected_env.to_string_lossy() {
-            return HealthStatus::warn(Issue::EnvMismatch);
-        }
-
-        HealthStatus::Ok
-    }
-
-    fn as_cleanable(&self) -> Option<&dyn Cleanable> {
-        Some(self)
     }
 }
 
@@ -163,13 +136,46 @@ impl BatGenerator {
     }
 }
 
+impl Diagnosable for BatGenerator {
+    fn health_check(&self, paths: &IrisPaths, theme: &str) -> HealthStatus {
+        if !self.is_installed() {
+            return HealthStatus::error(Issue::BinaryNotFound);
+        }
+
+        if !theme.is_empty() {
+            let link: PathBuf = self.theme_path(paths, theme);
+            let theme_status = HealthStatus::check_file(&link, Issue::CacheMissing);
+            if !theme_status.is_ok() {
+                return theme_status;
+            }
+        }
+
+        let zshrc: PathBuf = self.zshrc_path(paths);
+        if zshrc.exists() {
+            let zshrc_content = fs::read_to_string(&zshrc).unwrap_or_default();
+            if !zshrc_content.contains("BAT_CONFIG_PATH") {
+                return HealthStatus::warn(Issue::ConfigMissing);
+            }
+        }
+
+        let expected_env: PathBuf = paths.bin.join("bat.conf");
+        let current_env: String = env::var("BAT_CONFIG_PATH").unwrap_or_default();
+
+        if current_env != expected_env.to_string_lossy() {
+            return HealthStatus::warn(Issue::EnvMismatch);
+        }
+
+        HealthStatus::Ok
+    }
+}
+
 impl Cleanable for BatGenerator {
     fn cleanup(&self, paths: &IrisPaths) -> anyhow::Result<()> {
-        crate::modules::cleanable::default_cleanup(self, paths)
+        crate::modules::traits::default_cleanup(self, paths)
     }
 
     fn remove_theme(&self, paths: &IrisPaths, theme_name: &str) -> anyhow::Result<()> {
-        crate::modules::cleanable::default_remove(self, paths, theme_name)
+        crate::modules::traits::default_remove(self, paths, theme_name)
     }
 
     fn post_cleanup(&self, paths: &IrisPaths) -> anyhow::Result<()> {
@@ -410,12 +416,11 @@ mod tests {
                         }
 
                         let status = generator.health_check(&ctx.paths, &theme.name);
-                        assert!(
-                            status.is_error(),
-                            "Expected error for missing link, got: {status}"
-                        );
+                        assert!(status.is_error(), "Expected Error, got: {status}");
 
-                        generator.fix(&status, &engine, &mut activity).unwrap();
+                        engine
+                            .execute_fix(&generator, &status, &mut activity)
+                            .unwrap();
                         assert!(generator.health_check(&ctx.paths, &theme.name).is_ok());
                     });
                 },

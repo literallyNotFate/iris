@@ -3,7 +3,7 @@ pub(crate) mod ui;
 use crate::{
     cli::GenAction,
     core::IrisContext,
-    modules::{GeneratorFilter, GeneratorType},
+    modules::{Generator, GeneratorFilter, GeneratorType},
     utils,
 };
 use colored::Colorize;
@@ -28,22 +28,15 @@ pub fn exec(action: GenAction, ctx: &mut IrisContext) -> anyhow::Result<()> {
 /// Select generators using dialoguer
 fn handle_select(ctx: &mut IrisContext) -> anyhow::Result<()> {
     let all_generators = ctx.registry.all();
-    let mut selectable_generators = Vec::new();
-    let mut missing_generators = Vec::new();
-
-    for g in &all_generators {
-        if g.is_installed() {
-            selectable_generators.push(g);
-        } else {
-            missing_generators.push(g);
-        }
-    }
+    let (selectable, missing) = all_generators
+        .iter()
+        .partition::<Vec<&dyn Generator>, _>(|g| g.is_installed());
 
     let mut items = Vec::new();
     let mut defaults = Vec::new();
 
-    for g in &selectable_generators {
-        let name = g.name();
+    for g in &selectable {
+        let name: &str = g.name();
         let g_type = g.generator_type();
 
         let display = format!(
@@ -78,10 +71,10 @@ fn handle_select(ctx: &mut IrisContext) -> anyhow::Result<()> {
 
     let mut selected_names: BTreeSet<String> = chosen
         .iter()
-        .map(|&i| selectable_generators[i].name().to_string())
+        .map(|&i| selectable[i].name().to_string())
         .collect();
 
-    for g in &missing_generators {
+    for g in &missing {
         if ctx.state.is_enabled(g.name()) {
             selected_names.insert(g.name().to_string());
         }
@@ -100,9 +93,9 @@ fn handle_select(ctx: &mut IrisContext) -> anyhow::Result<()> {
 
     ctx.log.action(success_msg, || ctx.save())?;
 
-    if !missing_generators.is_empty() {
+    if !missing.is_empty() {
         println!("{}", "Unavailable modules (not installed):".dimmed());
-        for g in missing_generators {
+        for g in missing {
             println!(
                 "  {}  {:<14} {}",
                 "󰂭".dimmed(),
@@ -121,8 +114,9 @@ fn handle_status_change(name: String, enable: bool, ctx: &mut IrisContext) -> an
     let _ = ctx.resolve_generator(&name)?;
     println!();
 
+    let generator: &dyn Generator = ctx.registry.get_required(&name)?;
     let success = if enable {
-        if !ctx.registry.get(&name).unwrap().is_installed() {
+        if !generator.is_installed() {
             ctx.log.warn(&format!(
                 "Generator `{}` is recognized, but app is not found!",
                 name.green()
@@ -167,19 +161,15 @@ fn handle_status_change(name: String, enable: bool, ctx: &mut IrisContext) -> an
 /// Autodiscovering generators
 pub fn handle_auto(ctx: &mut IrisContext) -> anyhow::Result<()> {
     ui::render_header("Autodiscovering generators...", "󰩊");
+    ctx.log.info("Scanning system for generators...");
 
-    let mut added: i32 = 0;
-    let all_generators = ctx.registry.all();
+    let unenabled = ctx.registry.discover_unenabled(&ctx.state);
+    let mut added = 0;
 
-    ctx.log
-        .info("Scanning system for supported applications...");
-
-    for g in &all_generators {
-        if g.is_installed() && !ctx.state.is_enabled(g.name()) {
-            ctx.state.enable_generator(g.name());
-            println!("    Detected {}, enabling...", g.name().green().bold());
-            added += 1;
-        }
+    for g in unenabled {
+        ctx.state.enable_generator(g.name());
+        println!("    Detected {}, enabling...", g.name().green().bold());
+        added += 1;
     }
 
     if added > 0 {
