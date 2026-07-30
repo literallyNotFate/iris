@@ -1,4 +1,4 @@
-use crate::service::ThemeService;
+use crate::{infra::RESOURCES_DIR, service::ThemeService};
 use anyhow::{Context, Result};
 use colored::Colorize;
 pub use serde::{Deserialize, Serialize};
@@ -231,10 +231,11 @@ impl PluginManager {
     /// Generates Lua-command for runtimepath extension
     pub fn get_rtp_command(&self) -> Option<String> {
         let folder: &str = self.plugin_subdirectory()?;
-        Some(format!(
-            "lua local p = vim.fn.stdpath('data') .. '/{}' for _, dir in ipairs(vim.fn.expand(p .. '/*', false, true)) do vim.opt.rtp:append(dir) end",
-            folder
-        ))
+        let template = RESOURCES_DIR
+            .get_file("lua/rtp_append.lua")?
+            .contents_utf8()?;
+
+        Some(format!("lua {}", template.replace("{}", folder)))
     }
 }
 

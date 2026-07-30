@@ -1,10 +1,8 @@
+use crate::infra::TEMPLATES_DIR;
 use anyhow::{Context, Result};
 use colored::Colorize;
-use include_dir::{Dir, include_dir};
 use std::{ffi, fs, path::PathBuf};
 use tera::{Context as TeraContext, Tera};
-
-static TEMPLATES_DIR: Dir = include_dir!("$CARGO_MANIFEST_DIR/templates");
 
 /// Tera templater made for tool themes
 #[derive(Clone)]
