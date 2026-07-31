@@ -2,12 +2,16 @@ use crate::{cli::CacheAction, core::IrisContext, utils};
 use anyhow::{Context, Result};
 use colored::Colorize;
 use dialoguer::Confirm;
-use std::{fs, path::PathBuf};
+use std::{collections::BTreeSet, fs, path::PathBuf};
 
 /// Handle application cache command and its subcommands
 pub fn exec(action: CacheAction, ctx: &IrisContext) -> Result<()> {
     match action {
-        CacheAction::Clear { all, generator } => handle_clear(all, generator, ctx)?,
+        CacheAction::Clear {
+            all,
+            generator,
+            auto,
+        } => handle_clear(all, generator, auto, ctx)?,
         CacheAction::Remove { theme } => handle_remove(&theme, ctx)?,
         CacheAction::List => render_list(ctx)?,
         CacheAction::Info => render_info(ctx)?,
@@ -16,8 +20,8 @@ pub fn exec(action: CacheAction, ctx: &IrisContext) -> Result<()> {
     Ok(())
 }
 
-/// Cache clear (all, for generator or config)
-fn handle_clear(all: bool, gen_name: Option<String>, ctx: &IrisContext) -> Result<()> {
+/// Cache clear (all, auto, for generator or config)
+fn handle_clear(all: bool, gen_name: Option<String>, auto: bool, ctx: &IrisContext) -> Result<()> {
     println!();
 
     let generator = if let Some(ref name) = gen_name {
@@ -27,16 +31,19 @@ fn handle_clear(all: bool, gen_name: Option<String>, ctx: &IrisContext) -> Resul
         None
     };
 
-    let prompt_message = match (&generator, all) {
-        (Some(g), _) => format!(
+    let prompt_message = match (&generator, all, auto) {
+        (Some(g), _, _) => format!(
             "Do you want to clear the cache for the `{}` generator?",
             g.name().cyan().bold()
         ),
-        (None, true) => format!(
+        (None, true, _) => format!(
             "{}: This will wipe all Iris caches and configurations. Are you sure?",
             "DANGER".bold()
         ),
-        (None, false) => "Do you want to clean generated configurations?".to_string(),
+        (None, false, true) => {
+            "Do you want to clean orphaned cache directories for removed generators?".to_string()
+        }
+        (None, false, false) => "Do you want to clean generated configurations?".to_string(),
     };
 
     if all {
@@ -44,6 +51,9 @@ fn handle_clear(all: bool, gen_name: Option<String>, ctx: &IrisContext) -> Resul
             "{}: Nuclear option. Purging everything.",
             "DANGER".bold()
         ));
+    } else if auto {
+        ctx.log
+            .info("Scanning and cleaning orphaned cache directories...");
     } else if let Some(ref g) = generator {
         ctx.log.info(&format!(
             "Cleaning cache for generator: {}",
@@ -67,6 +77,26 @@ fn handle_clear(all: bool, gen_name: Option<String>, ctx: &IrisContext) -> Resul
         ctx.log.action("Purged all Iris caches\n", || {
             ctx.paths.purge_all()?;
             utils::external::clear_bat_cache();
+            Ok(())
+        })
+    } else if auto {
+        ctx.log.action("Cleaned orphaned cache directories\n", || {
+            let generators_cache_dir = &ctx.paths.generators;
+            if generators_cache_dir.exists() {
+                let valid_names: BTreeSet<String> = ctx.registry.names().into_iter().collect();
+
+                for entry in fs::read_dir(generators_cache_dir)? {
+                    let entry = entry?;
+                    let path: PathBuf = entry.path();
+                    if path.is_dir() {
+                        if let Some(dir_name) = path.file_name().and_then(|n| n.to_str()) {
+                            if !valid_names.contains(dir_name) {
+                                fs::remove_dir_all(&path)?;
+                            }
+                        }
+                    }
+                }
+            }
             Ok(())
         })
     } else if let Some(g) = generator {

@@ -12,6 +12,10 @@ pub enum CacheAction {
         /// Nuclear option: clear everything
         #[arg(short, long)]
         all: bool,
+
+        /// Automatically clean cache from orphaned generators not present in the registry
+        #[arg(long)]
+        auto: bool,
     },
 
     /// Remove a specific theme palette from the cache
