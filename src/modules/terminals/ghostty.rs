@@ -110,6 +110,20 @@ impl Cleanable for GhosttyGenerator {
     }
 }
 
+impl Diffable for GhosttyGenerator {
+    fn config_path(&self, paths: &IrisPaths) -> PathBuf {
+        self.resolve_config_directory(paths).join("config")
+    }
+
+    fn diff_style(&self) -> DiffStyle {
+        DiffStyle::InjectKey {
+            key_prefix: "config-file".to_string(),
+            build_ideal_line: |_| "config-file = current_theme.conf".to_string(),
+            at_top: true,
+        }
+    }
+}
+
 /// Tests for ghostty generator
 #[cfg(test)]
 mod tests {

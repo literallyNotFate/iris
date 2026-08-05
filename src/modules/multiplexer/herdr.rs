@@ -146,6 +146,12 @@ impl HerdrGenerator {
     }
 }
 
+impl Diffable for HerdrGenerator {
+    fn config_path(&self, paths: &IrisPaths) -> PathBuf {
+        self.link_path(paths, "")
+    }
+}
+
 /// Tests for herdr generator
 #[cfg(test)]
 mod tests {

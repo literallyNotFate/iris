@@ -112,6 +112,20 @@ impl Cleanable for KittyGenerator {
     }
 }
 
+impl Diffable for KittyGenerator {
+    fn config_path(&self, paths: &IrisPaths) -> PathBuf {
+        self.resolve_config_directory(paths).join("kitty.conf")
+    }
+
+    fn diff_style(&self) -> DiffStyle {
+        DiffStyle::InjectKey {
+            key_prefix: "include".to_string(),
+            build_ideal_line: |_| "include current_theme.conf".to_string(),
+            at_top: true,
+        }
+    }
+}
+
 /// Tests for kitty generator
 #[cfg(test)]
 mod tests {

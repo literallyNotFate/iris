@@ -112,6 +112,56 @@ impl Cleanable for AlacrittyGenerator {
     }
 }
 
+impl Diffable for AlacrittyGenerator {
+    fn config_path(&self, paths: &IrisPaths) -> PathBuf {
+        self.resolve_config_directory(paths).join("alacritty.toml")
+    }
+
+    fn diff_style(&self) -> DiffStyle {
+        DiffStyle::Custom(Box::new(|current_content, _, config_path, _| {
+            let expected = "~/.config/alacritty/current_theme.toml";
+            let mut doc = current_content
+                .parse::<toml_edit::DocumentMut>()
+                .map_err(|_| anyhow::anyhow!("Failed to parse alacritty.toml as TOML"))?;
+
+            if !doc.contains_key("general") {
+                doc["general"] = toml_edit::table();
+            }
+            let general = doc["general"].as_table_mut().unwrap();
+
+            let already_correct = general
+                .get("import")
+                .and_then(|v| v.as_array())
+                .and_then(|arr| arr.get(0))
+                .and_then(|val| val.as_str())
+                .map_or(false, |s| s == expected);
+
+            if already_correct {
+                return Ok(None);
+            }
+
+            let mut import_array = toml_edit::Array::new();
+            import_array.push(expected);
+            general.insert("import", toml_edit::value(import_array));
+
+            for (key, item) in doc.iter_mut() {
+                if key != "general" {
+                    if let Some(table) = item.as_table_mut() {
+                        table.remove("import");
+                    }
+                }
+            }
+
+            let target_content = doc.to_string();
+            if current_content.trim() == target_content.trim() {
+                return Ok(None);
+            }
+
+            diffable::render_diff(config_path, current_content, &target_content)
+        }))
+    }
+}
+
 /// Tests for alacritty generator
 #[cfg(test)]
 mod tests {

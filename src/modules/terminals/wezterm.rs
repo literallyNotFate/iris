@@ -2,10 +2,7 @@ use crate::{
     core::{InjectionPosition, IrisEngine},
     infra::IrisPaths,
     models::{HealthStatus, Issue},
-    modules::{
-        Generator, GeneratorType, Strategy,
-        traits::{Cleanable, Diagnosable, Identifiable, PathResolvable},
-    },
+    modules::{Generator, GeneratorType, Strategy, traits::*},
 };
 use std::{fs, path::PathBuf};
 
@@ -61,9 +58,9 @@ impl Generator for WezTermGenerator {
         let content: String = fs::read_to_string(&config_path).unwrap_or_default();
         if !config_path.exists() || content.trim().is_empty() || !content.contains("wezterm") {
             let default_config = concat!(
-                "local has_iris, current_theme = pcall(require, \"current_theme\")\n",
                 "local wezterm = require(\"wezterm\")\n",
                 "local config = wezterm.config_builder()\n\n",
+                "local has_iris, current_theme = pcall(require, \"current_theme\")\n",
                 "if has_iris and current_theme.colors then\n",
                 "    config.colors = current_theme.colors\n",
                 "end\n\n",
@@ -73,11 +70,17 @@ impl Generator for WezTermGenerator {
             return Ok(());
         }
 
-        engine.inject_line(
-            &config_path,
-            "local has_iris, current_theme = pcall(require, \"current_theme\")",
-            InjectionPosition::Start,
-        )?;
+        let require_line = "local has_iris, current_theme = pcall(require, \"current_theme\")";
+        if content.contains("config_builder()") {
+            engine.inject_line(
+                &config_path,
+                require_line,
+                InjectionPosition::After("local config = wezterm.config_builder()".to_string()),
+            )?;
+        } else {
+            engine.inject_line(&config_path, require_line, InjectionPosition::Start)?;
+        }
+
         let colors_block: &str = concat!(
             "if has_iris and current_theme.colors then\n",
             "    config.colors = current_theme.colors\n",
@@ -144,6 +147,64 @@ impl Cleanable for WezTermGenerator {
 
     fn remove_theme(&self, paths: &IrisPaths, theme_name: &str) -> anyhow::Result<()> {
         crate::modules::traits::default_remove(self, paths, theme_name)
+    }
+}
+
+impl Diffable for WezTermGenerator {
+    fn config_path(&self, paths: &IrisPaths) -> PathBuf {
+        self.resolve_config_directory(paths).join("wezterm.lua")
+    }
+
+    fn diff_style(&self) -> DiffStyle {
+        DiffStyle::Custom(Box::new(|current_content, _, config_path, _| {
+            let has_require = current_content.contains("current_theme");
+            let has_colors = current_content.contains("config.colors");
+
+            if has_require && has_colors {
+                return Ok(None);
+            }
+
+            let require_line = "local has_iris, current_theme = pcall(require, \"current_theme\")";
+            let colors_block = "if has_iris and current_theme.colors then\n    config.colors = current_theme.colors\nend";
+
+            let mut target_content = current_content.to_string();
+
+            if !has_require {
+                if target_content.contains("config_builder()") {
+                    target_content = target_content.replace(
+                        "local config = wezterm.config_builder()",
+                        &format!(
+                            "local config = wezterm.config_builder()\n\n{}",
+                            require_line
+                        ),
+                    );
+                } else if let Some(pos) = target_content.find("config =") {
+                    let line_start = target_content[..pos].rfind('\n').map_or(0, |i| i + 1);
+                    target_content.insert_str(line_start, &format!("{}\n\n", require_line));
+                } else {
+                    target_content = format!("{}\n\n{}", require_line, target_content);
+                }
+            }
+
+            if !has_colors {
+                if target_content.contains("return config") {
+                    target_content = target_content.replace(
+                        "return config",
+                        &format!("{}\n\nreturn config", colors_block),
+                    );
+                } else if let Some(pos) = target_content.find("\nreturn") {
+                    target_content.insert_str(pos + 1, &format!("{}\n\n", colors_block));
+                } else {
+                    target_content = format!("{}\n\n{}\n", target_content.trim_end(), colors_block);
+                }
+            }
+
+            if current_content.trim() == target_content.trim() {
+                return Ok(None);
+            }
+
+            diffable::render_diff(config_path, current_content, &target_content)
+        }))
     }
 }
 

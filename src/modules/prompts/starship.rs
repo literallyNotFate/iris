@@ -156,6 +156,62 @@ impl Cleanable for StarshipGenerator {
     }
 }
 
+impl Diffable for StarshipGenerator {
+    fn config_path(&self, paths: &IrisPaths) -> PathBuf {
+        self.link_path(paths, "")
+    }
+
+    fn diff_style(&self) -> DiffStyle {
+        let generator_name: String = self.name().to_string();
+
+        DiffStyle::Custom(Box::new(
+            move |current_content, theme, config_path, paths| {
+                if theme.is_empty() {
+                    return Ok(None);
+                }
+
+                let theme_lower: String = theme.to_lowercase();
+                let expected_key: String = format!("palette = \"{}\"", theme_lower);
+
+                let cache_file = paths
+                    .generators
+                    .join(&generator_name)
+                    .join(format!("{}_block.toml", theme_lower));
+                let ideal_inner: String = fs::read_to_string(&cache_file).unwrap_or_default();
+
+                let start_marker = format!("# [iris:begin:{}]", generator_name);
+                let end_marker = format!("# [iris:end:{}]", generator_name);
+                let ideal_block =
+                    format!("{}\n{}\n{}", start_marker, ideal_inner.trim(), end_marker);
+
+                let has_key = current_content.contains(&expected_key);
+                let is_block_ok =
+                    crate::utils::block_matches(current_content, &generator_name, &ideal_block);
+
+                if has_key && is_block_ok {
+                    return Ok(None);
+                }
+
+                let mut doc = current_content
+                    .parse::<toml_edit::DocumentMut>()
+                    .unwrap_or_else(|_| toml_edit::DocumentMut::new());
+
+                doc["palette"] = toml_edit::value(&theme_lower);
+                let target_content: String = doc.to_string();
+
+                let final_target =
+                    crate::utils::replace_block(&target_content, &generator_name, &ideal_inner);
+
+                if current_content.trim() == final_target.trim() {
+                    return Ok(None);
+                }
+
+                diffable::render_diff(config_path, current_content, &final_target)
+            },
+        ))
+    }
+}
+
 /// Tests for starship generator
 #[cfg(test)]
 mod tests {

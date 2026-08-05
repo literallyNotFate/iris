@@ -1,11 +1,7 @@
 use crate::{
     infra::IrisPaths,
     models::{HealthStatus, Issue, Theme},
-    modules::{
-        Generator, GeneratorType, Strategy,
-        strategy::PipelineStep,
-        traits::{Cleanable, Diagnosable, Identifiable, PathResolvable},
-    },
+    modules::{Generator, GeneratorType, Strategy, strategy::PipelineStep, traits::*},
 };
 use std::{fs, path::PathBuf};
 
@@ -149,6 +145,22 @@ impl Cleanable for FzfGenerator {
         }
 
         Ok(())
+    }
+}
+
+impl Diffable for FzfGenerator {
+    fn config_path(&self, paths: &IrisPaths) -> PathBuf {
+        self.zshrc_path(paths)
+    }
+
+    fn ideal_content(&self, paths: &IrisPaths, theme: &str) -> anyhow::Result<String> {
+        if theme.is_empty() {
+            return Ok(String::new());
+        }
+
+        let cache_file: PathBuf = self.cache_path(paths, theme);
+        let ppath: String = crate::utils::pretty_path(&cache_file);
+        Ok(format!("[ -f {} ] && source {}", ppath, ppath))
     }
 }
 

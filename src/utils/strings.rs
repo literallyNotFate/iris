@@ -91,6 +91,33 @@ pub fn remove_marker(content: &str, marker: &str) -> String {
         .join("\n")
 }
 
+/// Helper to check if a block with specific markers matches the ideal block content
+pub fn block_matches(content: &str, marker: &str, ideal_block: &str) -> bool {
+    let start_marker = format!("# [iris:begin:{}]", marker);
+    let end_marker = format!("# [iris:end:{}]", marker);
+
+    if let (Some(s), Some(e)) = (content.find(&start_marker), content.find(&end_marker)) {
+        if s < e {
+            let current_block = &content[s..e + end_marker.len()];
+
+            let current_normalized: String = current_block
+                .lines()
+                .map(|l| l.trim())
+                .collect::<Vec<_>>()
+                .join("\n");
+
+            let ideal_normalized: String = ideal_block
+                .lines()
+                .map(|l| l.trim())
+                .collect::<Vec<_>>()
+                .join("\n");
+
+            return current_normalized == ideal_normalized;
+        }
+    }
+    false
+}
+
 /// Unit-tests for string utility functions
 #[cfg(test)]
 mod tests {
@@ -163,5 +190,54 @@ mod tests {
         let result = remove_marker(content, "[iris:begin:fzf]");
         let expected = "line 1\nline 2";
         assert_eq!(result, expected);
+    }
+
+    #[test]
+    fn should_handle_block_matches_success() {
+        let content =
+            "some code\n# [iris:begin:test]\nline 1\nline 2\n# [iris:end:test]\nmore code";
+        let ideal = "# [iris:begin:test]\nline 1\nline 2\n# [iris:end:test]";
+
+        assert!(block_matches(content, "test", ideal));
+    }
+
+    #[test]
+    fn should_handle_block_matches_with_whitespace_differences() {
+        let content = "   # [iris:begin:theme]   \n   content_here   \n   # [iris:end:theme]   ";
+        let ideal = "# [iris:begin:theme]\ncontent_here\n# [iris:end:theme]";
+
+        assert!(block_matches(content, "theme", ideal));
+    }
+
+    #[test]
+    fn should_handle_block_matches_content_mismatch() {
+        let content = "# [iris:begin:test]\nline 1\n# [iris:end:test]";
+        let ideal = "# [iris:begin:test]\nline 2\n# [iris:end:test]";
+
+        assert!(!block_matches(content, "test", ideal));
+    }
+
+    #[test]
+    fn should_handle_block_matches_missing_markers() {
+        let content = "just some random text without markers";
+        let ideal = "# [iris:begin:test]\nline 1\n# [iris:end:test]";
+
+        assert!(!block_matches(content, "test", ideal));
+    }
+
+    #[test]
+    fn should_handle_block_matches_wrong_marker_order() {
+        let content = "# [iris:end:test]\nline 1\n# [iris:begin:test]";
+        let ideal = "# [iris:begin:test]\nline 1\n# [iris:end:test]";
+
+        assert!(!block_matches(content, "test", ideal));
+    }
+
+    #[test]
+    fn should_handle_block_matches_partial_markers() {
+        let content = "# [iris:begin:test]\nline 1";
+        let ideal = "# [iris:begin:test]\nline 1\n# [iris:end:test]";
+
+        assert!(!block_matches(content, "test", ideal));
     }
 }

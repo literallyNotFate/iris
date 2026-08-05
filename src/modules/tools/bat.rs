@@ -2,11 +2,7 @@ use super::rules::RULES;
 use crate::{
     infra::IrisPaths,
     models::{HealthStatus, Issue, Theme},
-    modules::{
-        Generator, GeneratorType, Strategy,
-        strategy::PipelineStep,
-        traits::{Cleanable, Diagnosable, Identifiable, PathResolvable},
-    },
+    modules::{Generator, GeneratorType, Strategy, strategy::PipelineStep, traits::*},
 };
 use std::{env, fs, path::PathBuf, process::Command};
 
@@ -189,6 +185,71 @@ impl Cleanable for BatGenerator {
     fn post_remove(&self, _paths: &IrisPaths, _theme_name: &str) -> anyhow::Result<()> {
         self.rebuild_bat_cache()?;
         Ok(())
+    }
+}
+
+impl Diffable for BatGenerator {
+    fn config_path(&self, paths: &IrisPaths) -> PathBuf {
+        paths.bin.join("bat.conf")
+    }
+
+    fn diff_style(&self) -> DiffStyle {
+        let gen_name = self.name().to_string();
+
+        DiffStyle::Custom(Box::new(move |_, theme, config_path, paths| {
+            if theme.is_empty() {
+                return Ok(None);
+            }
+
+            let theme_lower: String = theme.to_lowercase();
+            let bat_conf_path: PathBuf = paths.bin.join("bat.conf");
+            let zshrc_path: PathBuf = paths
+                .config
+                .parent()
+                .and_then(|p| p.parent())
+                .unwrap_or(&paths.config)
+                .join(".zshrc");
+
+            let bat_inner: String = format!(
+                "--theme=\"{}\"\n--style=\"numbers,changes\"\n--color=\"always\"",
+                theme_lower
+            );
+            let bat_current: String = fs::read_to_string(&bat_conf_path).unwrap_or_default();
+            let bat_block: String = format!(
+                "# [iris:begin:batconf]\n{}\n# [iris:end:batconf]",
+                bat_inner
+            );
+            let bat_ok = crate::utils::block_matches(&bat_current, "batconf", &bat_block);
+
+            let zshrc_inner = format!(
+                "export BAT_CONFIG_PATH=\"{}\"",
+                crate::utils::pretty_path(&bat_conf_path)
+            );
+            let zshrc_current = fs::read_to_string(&zshrc_path).unwrap_or_default();
+            let zshrc_block = format!(
+                "# [iris:begin:{}]\n{}\n# [iris:end:{}]",
+                gen_name, zshrc_inner, gen_name
+            );
+            let zshrc_ok = zshrc_current.is_empty()
+                || crate::utils::block_matches(&zshrc_current, &gen_name, &zshrc_block);
+
+            if bat_ok && zshrc_ok {
+                return Ok(None);
+            }
+
+            let final_bat = crate::utils::replace_block(&bat_current, "batconf", &bat_inner);
+            if bat_current.trim() != final_bat.trim() {
+                return diffable::render_diff(config_path, &bat_current, &final_bat);
+            }
+
+            if !zshrc_current.is_empty() && !zshrc_ok {
+                let final_zshrc =
+                    crate::utils::replace_block(&zshrc_current, &gen_name, &zshrc_inner);
+                return diffable::render_diff(&zshrc_path, &zshrc_current, &final_zshrc);
+            }
+
+            Ok(None)
+        }))
     }
 }
 

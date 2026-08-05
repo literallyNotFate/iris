@@ -148,6 +148,22 @@ impl Cleanable for BottomGenerator {
     }
 }
 
+impl Diffable for BottomGenerator {
+    fn config_path(&self, paths: &IrisPaths) -> PathBuf {
+        self.link_path(paths, "")
+    }
+
+    fn ideal_content(&self, paths: &IrisPaths, theme: &str) -> anyhow::Result<String> {
+        let cache_file: PathBuf = self.cache_path(paths, theme);
+        if cache_file.exists() {
+            let content = fs::read_to_string(cache_file)?;
+            Ok(content)
+        } else {
+            Ok(String::new())
+        }
+    }
+}
+
 /// Tests for bottom generator
 #[cfg(test)]
 mod tests {

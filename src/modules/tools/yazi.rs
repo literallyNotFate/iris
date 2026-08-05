@@ -1,10 +1,7 @@
 use crate::{
     infra::IrisPaths,
     models::{HealthStatus, Issue, Theme},
-    modules::{
-        Generator, GeneratorType, Strategy,
-        traits::{Cleanable, Diagnosable, Identifiable, PathResolvable},
-    },
+    modules::{Generator, GeneratorType, Strategy, traits::*},
 };
 use std::{fs, path::PathBuf};
 
@@ -95,6 +92,16 @@ impl Cleanable for YaziGenerator {
 
     fn remove_theme(&self, paths: &IrisPaths, theme_name: &str) -> anyhow::Result<()> {
         crate::modules::traits::default_remove(self, paths, theme_name)
+    }
+}
+
+impl Diffable for YaziGenerator {
+    fn config_path(&self, paths: &IrisPaths) -> PathBuf {
+        self.resolve_config_directory(paths).join("yazi.toml")
+    }
+
+    fn diff(&self, _: &IrisPaths, _: &str) -> anyhow::Result<Option<String>> {
+        Ok(None)
     }
 }
 

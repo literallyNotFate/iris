@@ -105,6 +105,23 @@ impl Cleanable for BtopGenerator {
     }
 }
 
+impl Diffable for BtopGenerator {
+    fn config_path(&self, paths: &IrisPaths) -> PathBuf {
+        self.resolve_config_directory(paths).join("btop.conf")
+    }
+
+    fn diff_style(&self) -> DiffStyle {
+        DiffStyle::InjectKey {
+            key_prefix: "color_theme".to_string(),
+            build_ideal_line: |theme| {
+                let theme_name = if theme.is_empty() { "default" } else { theme };
+                format!("color_theme = \"{}\"", theme_name.to_lowercase())
+            },
+            at_top: true,
+        }
+    }
+}
+
 /// Tests for btop generator
 #[cfg(test)]
 mod tests {

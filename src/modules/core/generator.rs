@@ -9,7 +9,7 @@ use crate::{
 /// Main trait for all generators.
 /// Acts as a purely declarative manifest describing application paths, configuration files,
 /// and metadata, while delegating all execution and lifecycle mechanics to IrisEngine.
-pub trait Generator: PathResolvable + Cleanable + Diagnosable {
+pub trait Generator: PathResolvable + Cleanable + Diagnosable + Diffable {
     /// Returns the active strategy for applying themes
     fn strategy(&self) -> Strategy;
 
@@ -140,3 +140,6 @@ impl Generator for GeneratorMock {
         self.strategy.clone()
     }
 }
+
+#[cfg(test)]
+impl Diffable for GeneratorMock {}

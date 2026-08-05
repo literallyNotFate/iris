@@ -8,6 +8,7 @@ clap = { version = "4.0", features = ["derive"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 toml = "0.8"
+toml_edit = "0.25"
 dirs = "5.0"
 colored = "2.1"
 anyhow = "1.0"
@@ -17,6 +18,7 @@ tera = "1.20.1"
 include_dir = "0.7.4"
 notify-debouncer-mini = "0.7.0"
 ctrlc = "3.5.2"
+similar = "3.1.1"
 
 [dev-dependencies]
 tempdir = "0.3"

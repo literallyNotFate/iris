@@ -107,6 +107,25 @@ impl Cleanable for TmuxGenerator {
     }
 }
 
+impl Diffable for TmuxGenerator {
+    fn config_path(&self, paths: &IrisPaths) -> PathBuf {
+        self.resolve_config_directory(paths).join("tmux.conf")
+    }
+
+    fn diff_style(&self) -> DiffStyle {
+        DiffStyle::InjectTop {
+            build_ideal_line: |theme| {
+                let theme_name = if theme.is_empty() { "default" } else { theme };
+                format!(
+                    "source-file \"~/.config/tmux/themes/{}.conf\"",
+                    theme_name.to_lowercase()
+                )
+            },
+            line_filter: |line| line.contains("source-file") && line.contains("themes/"),
+        }
+    }
+}
+
 /// Tests for tmux generator
 #[cfg(test)]
 mod tests {

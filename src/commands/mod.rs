@@ -9,6 +9,7 @@ pub mod apply;
 pub mod cache;
 pub mod config;
 pub mod current;
+pub mod diff;
 pub mod generators;
 pub mod health;
 pub mod preview;
@@ -40,6 +41,7 @@ pub fn handle(command: Commands, ctx: &mut IrisContext) -> anyhow::Result<()> {
         Commands::Watch { interval } => watch::exec(interval, ctx)?,
         Commands::Health { fix } => health::exec(fix, ctx)?,
         Commands::Gen { action } => generators::exec(action, ctx)?,
+        Commands::Diff { generator } => diff::exec(generator, ctx)?,
         Commands::Cache { action } => cache::exec(action, ctx)?,
         Commands::Config { action } => config::exec(action, ctx)?,
         Commands::Toggle => toggle::exec(ctx)?,

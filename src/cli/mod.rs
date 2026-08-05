@@ -86,6 +86,14 @@ pub enum Commands {
         action: GenAction,
     },
 
+    /// Compare generated cache with actual active configuration files
+    #[command(arg_required_else_help = true)]
+    Diff {
+        /// Optional specific generator name
+        #[arg(value_name = "GENERATOR")]
+        generator: String,
+    },
+
     /// Manage application cache
     Cache {
         #[command(subcommand)]
