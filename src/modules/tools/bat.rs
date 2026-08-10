@@ -10,7 +10,7 @@ use std::{env, fs, path::PathBuf, process::Command};
 pub struct BatGenerator;
 
 impl Identifiable for BatGenerator {
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "bat"
     }
 
@@ -139,18 +139,18 @@ impl Diagnosable for BatGenerator {
         }
 
         if !theme.is_empty() {
-            let link: PathBuf = self.theme_path(paths, theme);
-            let theme_status = HealthStatus::check_file(&link, Issue::CacheMissing);
-            if !theme_status.is_ok() {
-                return theme_status;
+            let link = self.theme_path(paths, theme);
+            if !link.exists() {
+                return HealthStatus::warn(Issue::CacheMissing);
             }
         }
 
         let zshrc: PathBuf = self.zshrc_path(paths);
         if zshrc.exists() {
-            let zshrc_content = fs::read_to_string(&zshrc).unwrap_or_default();
-            if !zshrc_content.contains("BAT_CONFIG_PATH") {
-                return HealthStatus::warn(Issue::ConfigMissing);
+            if let Ok(content) = fs::read_to_string(&zshrc) {
+                if !content.contains("BAT_CONFIG_PATH") {
+                    return HealthStatus::warn(Issue::ConfigMissing);
+                }
             }
         }
 

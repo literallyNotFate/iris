@@ -99,8 +99,8 @@ impl<'a> ThemeService<'a> {
         }
 
         if state.nvim.manager.is_default() {
-            let builtins: Vec<String> = NeovimBridge::builtin_themes();
-            if !builtins.contains(&theme_lower) {
+            let builtins: &[&str] = NeovimBridge::builtin_themes();
+            if !builtins.contains(&theme_lower.as_str()) {
                 if let Some(cached_theme) = self.try_load_cache(&cache_path, &activity) {
                     activity
                         .log
@@ -158,7 +158,7 @@ impl<'a> ThemeService<'a> {
         }
 
         if state.nvim.manager == PluginManager::Default {
-            return NeovimBridge::builtin_themes().contains(&theme_lower);
+            return NeovimBridge::builtin_themes().contains(&theme_lower.as_str());
         }
 
         NeovimBridge::check_theme_exists(&theme_lower, state)
@@ -167,12 +167,15 @@ impl<'a> ThemeService<'a> {
     /// Get all themes
     pub fn themes(&self) -> Vec<String> {
         match NeovimBridge::installed_themes() {
-            Ok(themes) if !themes.is_empty() => themes,
+            Ok(themes) if !themes.is_empty() => themes.to_vec(),
             _ => {
                 self.log.warn(
-                    "Could not fetch themes from active Neovim session. Falling back to builtins.",
+                    "Could not fetch themes from active `nvim` session. Falling back to builtins.",
                 );
                 NeovimBridge::builtin_themes()
+                    .iter()
+                    .map(|s| s.to_string())
+                    .collect()
             }
         }
     }

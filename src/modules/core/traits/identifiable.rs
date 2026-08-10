@@ -1,7 +1,7 @@
 /// Represents a basic entity that can be identified by name and type
 pub trait Identifiable: Send + Sync {
     /// Returns the unique name of the module/generator (e.g., "ghostty", "alacritty")
-    fn name(&self) -> &str;
+    fn name(&self) -> &'static str;
 
     /// Returns the category/type of the generator (e.g., Terminal, Tool)
     fn generator_type(&self) -> crate::modules::GeneratorType;

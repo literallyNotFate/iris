@@ -96,7 +96,7 @@ pub struct GeneratorMock {
 
 #[cfg(test)]
 impl Identifiable for GeneratorMock {
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         self.name
     }
 

@@ -1,9 +1,8 @@
 use super::IrisPaths;
-use crate::{
-    infra::RESOURCES_DIR,
-    models::{Palette, PluginManager, State},
-};
-use std::{fs, path::Path, process::Command};
+use crate::models::{Palette, PluginManager, State};
+use std::{fs, path::Path, process::Command, sync::OnceLock};
+
+static INSTALLED_THEMES_CACHE: OnceLock<Vec<String>> = OnceLock::new();
 
 /// Infrastructure client to interact with Neovim and its filesystem environment
 pub struct NeovimBridge;
@@ -40,54 +39,24 @@ impl NeovimBridge {
             .unwrap_or(0)
     }
 
-    /// Get all nvim builtin themes
-    pub fn builtin_themes() -> Vec<String> {
-        let script: &str = RESOURCES_DIR
-            .get_file("lua/get_builtin_themes.lua")
-            .expect("get_builtin_themes.lua must be included")
-            .contents_utf8()
-            .expect("File must be valid utf8");
-
-        let output = Command::new("nvim")
-            .args([
-                "--headless",
-                "-u",
-                "NONE",
-                "-c",
-                &format!("lua {}", script),
-                "-c",
-                "qa!",
-            ])
-            .output();
-
-        match output {
-            Ok(out) if out.status.success() => {
-                let stdout = String::from_utf8_lossy(&out.stdout);
-                stdout
-                    .split(',')
-                    .map(|s| s.trim().to_lowercase())
-                    .filter(|s| !s.is_empty())
-                    .collect()
-            }
-            _ => vec![
-                "habamax".into(),
-                "desert".into(),
-                "evening".into(),
-                "morning".into(),
-                "murphy".into(),
-                "pablo".into(),
-                "peachpuff".into(),
-                "ron".into(),
-                "shine".into(),
-                "slate".into(),
-                "torte".into(),
-                "zellner".into(),
-            ],
-        }
+    /// Get all nvim builtin themes (instant static lookup)
+    pub fn builtin_themes() -> &'static [&'static str] {
+        crate::infra::BUILTIN_NVIM_THEMES
     }
 
-    /// Get all themes installed in nvim
-    pub fn installed_themes() -> anyhow::Result<Vec<String>> {
+    /// Get all themes installed in nvim (cached per process session)
+    pub fn installed_themes() -> anyhow::Result<&'static [String]> {
+        if let Some(themes) = INSTALLED_THEMES_CACHE.get() {
+            return Ok(themes);
+        }
+
+        let themes: Vec<String> = Self::fetch_installed_themes()?;
+        let _ = INSTALLED_THEMES_CACHE.set(themes);
+        Ok(INSTALLED_THEMES_CACHE.get().unwrap())
+    }
+
+    /// Internal raw method that actually runs nvim process
+    fn fetch_installed_themes() -> anyhow::Result<Vec<String>> {
         let output = Command::new("nvim")
             .args([
                 "--headless",
@@ -96,6 +65,11 @@ impl NeovimBridge {
                 "+q!",
             ])
             .output()?;
+
+        if !output.status.success() {
+            let err = String::from_utf8_lossy(&output.stderr);
+            anyhow::bail!("Failed to get installed themes from `nvim`: {}", err.trim());
+        }
 
         let s = String::from_utf8_lossy(&output.stdout);
         let mut names: Vec<String> = s
@@ -160,14 +134,13 @@ impl NeovimBridge {
 
     /// Helper to build flags for Neovim
     fn build_base_args(state: &State) -> Vec<String> {
-        let mut args: Vec<String> = vec!["--headless".to_string()];
-        args.push("-u".into());
-        args.push("NONE".into());
+        let mut args: Vec<String> = Vec::with_capacity(6);
+        args.push("--headless".to_string());
+        args.extend_from_slice(&["-u".into(), "NONE".into()]);
 
         if state.nvim.manager != PluginManager::Default {
             if let Some(rtp_cmd) = state.get_rtp_command() {
-                args.push("-c".into());
-                args.push(rtp_cmd);
+                args.extend_from_slice(&["-c".into(), rtp_cmd]);
             }
         }
         args
@@ -209,7 +182,7 @@ mod tests {
     fn should_return_at_least_basic_builtin_themes() {
         let themes = NeovimBridge::builtin_themes();
         assert!(!themes.is_empty());
-        assert!(themes.contains(&"habamax".to_string()));
+        assert!(themes.contains(&"habamax"));
     }
 
     #[test]

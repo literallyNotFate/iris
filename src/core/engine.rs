@@ -178,7 +178,13 @@ impl<'a, 't> IrisEngine<'a, 't> {
 
     /// Helper to inject setting into config
     pub fn inject_line(&self, path: &Path, line: &str, pos: InjectionPosition) -> Result<()> {
-        let content = std::fs::read_to_string(path).unwrap_or_default();
+        let content: String = match std::fs::read_to_string(path) {
+            Ok(c) => c,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
+            Err(e) => {
+                return Err(e).with_context(|| format!("Failed to read file: {}", path.display()));
+            }
+        };
         if content.contains(line) {
             return Ok(());
         }
@@ -206,21 +212,42 @@ impl<'a, 't> IrisEngine<'a, 't> {
 
     /// Helper to inject entire block into config
     pub fn inject_block(&self, path: &Path, marker: &str, new_block: &str) -> Result<()> {
-        let content = std::fs::read_to_string(path).unwrap_or_default();
+        let content: String = match std::fs::read_to_string(path) {
+            Ok(c) => c,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
+            Err(e) => {
+                return Err(e).with_context(|| format!("Failed to read file: {}", path.display()));
+            }
+        };
+
         let new_content = crate::utils::replace_block(&content, marker, new_block);
         self.atomic_commit(path, new_content.trim().as_bytes())
     }
 
     /// Remove config key wrapper
     pub fn remove_key(&self, path: &Path, key: &str) -> Result<()> {
-        let content: String = std::fs::read_to_string(path).unwrap_or_default();
+        let content: String = match std::fs::read_to_string(path) {
+            Ok(c) => c,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
+            Err(e) => {
+                return Err(e).with_context(|| format!("Failed to read file: {}", path.display()));
+            }
+        };
+
         let new: String = crate::utils::remove_key(&content, key);
         self.atomic_commit(path, new.as_bytes())
     }
 
     /// Remove config marker wrapper
     pub fn remove_marker(&self, path: &Path, marker: &str) -> Result<()> {
-        let content: String = std::fs::read_to_string(path).unwrap_or_default();
+        let content: String = match std::fs::read_to_string(path) {
+            Ok(c) => c,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
+            Err(e) => {
+                return Err(e).with_context(|| format!("Failed to read file: {}", path.display()));
+            }
+        };
+
         let new: String = crate::utils::remove_marker(&content, marker);
         self.atomic_commit(path, new.as_bytes())
     }

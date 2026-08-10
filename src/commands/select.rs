@@ -6,9 +6,12 @@ use dialoguer::{Select, console::Term};
 pub fn exec(ctx: &mut crate::core::IrisContext) -> anyhow::Result<()> {
     println!("\n{}  Scanning `nvim` themes...", "󱑠".yellow());
 
-    let builtins: Vec<String> = NeovimBridge::builtin_themes();
+    let builtins: Vec<String> = NeovimBridge::builtin_themes()
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
     let mut cached: Vec<String> = ctx.paths.cached_themes().unwrap_or_default();
-    let all_names: Vec<String> = NeovimBridge::installed_themes()?;
+    let all_names: Vec<String> = NeovimBridge::installed_themes()?.to_vec();
 
     if all_names.is_empty() {
         println!(

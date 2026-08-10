@@ -9,7 +9,7 @@ use std::{fs, path::PathBuf};
 pub struct FzfGenerator;
 
 impl Identifiable for FzfGenerator {
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "fzf"
     }
 
@@ -94,12 +94,14 @@ impl Diagnosable for FzfGenerator {
         }
 
         let zshrc: PathBuf = self.zshrc_path(paths);
-        let zshrc_status = HealthStatus::check_file(&zshrc, Issue::ConfigMissing);
-        if !zshrc_status.is_ok() {
-            return zshrc_status;
+        if !zshrc.exists() {
+            return HealthStatus::warn(Issue::ConfigMissing);
         }
 
-        let content: String = fs::read_to_string(&zshrc).unwrap_or_default();
+        let content: String = match fs::read_to_string(&zshrc) {
+            Ok(c) => c,
+            Err(_) => return HealthStatus::warn(Issue::ConfigMissing),
+        };
         let start_marker: String = format!("# [iris:begin:{}]", self.name());
         let end_marker: String = format!("# [iris:end:{}]", self.name());
 
@@ -113,9 +115,8 @@ impl Diagnosable for FzfGenerator {
 
         if !theme.is_empty() {
             let cache_file: PathBuf = self.cache_path(paths, theme);
-            let cache_status = HealthStatus::check_file(&cache_file, Issue::CacheMissing);
-            if !cache_status.is_ok() {
-                return cache_status;
+            if !cache_file.exists() {
+                return HealthStatus::warn(Issue::CacheMissing);
             }
         }
 

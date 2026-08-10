@@ -117,7 +117,7 @@ impl IrisContext {
         }
 
         if self.state.nvim.manager == PluginManager::Default {
-            let is_builtin: bool = NeovimBridge::builtin_themes().iter().any(|t| t == name);
+            let is_builtin = NeovimBridge::builtin_themes().iter().any(|&t| t == name);
             return is_builtin || self.paths.is_theme_cached(name);
         }
 
@@ -158,53 +158,26 @@ impl IrisContext {
     /// Get all available themes (builtin ones and cache) for autocompletion
     pub fn get_available_themes(&self) -> Result<Vec<String>> {
         let mut themes: BTreeSet<String> = BTreeSet::new();
-
-        let builtin_themes = [
-            "retrobox",
-            "melange",
-            "habamax",
-            "sorbet",
-            "blue",
-            "darkblue",
-            "default",
-            "delek",
-            "desert",
-            "elflord",
-            "industry",
-            "koehler",
-            "lunaperche",
-            "morning",
-            "murphy",
-            "pmenu",
-            "ron",
-            "shine",
-            "slate",
-            "torte",
-            "zellner",
-        ];
-        for theme in builtin_themes {
+        for theme in crate::infra::BUILTIN_NVIM_THEMES {
             themes.insert(theme.to_string());
         }
 
-        let themes_path: PathBuf = self.paths.themes.clone();
-        if themes_path.exists() {
-            if let Ok(entries) = fs::read_dir(themes_path) {
-                for entry in entries.flatten() {
-                    let path: PathBuf = entry.path();
+        if self.paths.themes.exists() {
+            if let Ok(entries) = fs::read_dir(&self.paths.themes) {
+                for theme_name in entries.flatten().filter_map(|entry| {
+                    let path = entry.path();
                     if path.is_file() {
-                        if let Some(file_stem) = path.file_stem() {
-                            if let Some(theme_name) = file_stem.to_str() {
-                                themes.insert(theme_name.to_string());
-                            }
-                        }
+                        path.file_stem()?.to_str().map(|s| s.to_string())
+                    } else {
+                        None
                     }
+                }) {
+                    themes.insert(theme_name);
                 }
             }
         }
 
-        let mut result: Vec<String> = themes.into_iter().collect();
-        result.sort();
-        Ok(result)
+        Ok(themes.into_iter().collect())
     }
 }
 
@@ -242,15 +215,17 @@ impl IrisContext {
 
         let temp_dir: TempDir = TempDir::new("iris_test").unwrap();
         let root = temp_dir.path();
+        let config: PathBuf = root.join(".config/iris");
+        let cache: PathBuf = root.join(".cache/iris");
 
         let paths = IrisPaths {
-            config: root.join(".config/iris"),
-            cache: root.join(".cache/iris"),
-            generators: root.join(".cache/iris/gen"),
-            bin: root.join(".cache/iris/bin"),
-            state_file: root.join(".config/iris/state.toml"),
+            config: config.clone(),
+            cache: cache.clone(),
+            generators: cache.join("gen"),
+            bin: cache.join("bin"),
+            state_file: config.join("state.toml"),
             current_theme: root.join(".cache/nvim/iris_current_theme"),
-            themes: root.join(".cache/iris/themes"),
+            themes: cache.join("themes"),
         };
 
         for dir in [

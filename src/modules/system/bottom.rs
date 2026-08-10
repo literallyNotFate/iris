@@ -10,7 +10,7 @@ use std::{fs, path::PathBuf};
 pub struct BottomGenerator;
 
 impl Identifiable for BottomGenerator {
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "bottom"
     }
 

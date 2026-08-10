@@ -9,7 +9,7 @@ use std::{fs, path::PathBuf};
 pub struct YaziGenerator;
 
 impl Identifiable for YaziGenerator {
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "yazi"
     }
 
@@ -73,10 +73,16 @@ impl Diagnosable for YaziGenerator {
         }
 
         if let Ok(target) = fs::read_link(&link_path) {
-            let abs_target: PathBuf = fs::canonicalize(&target).unwrap_or(target);
-            let abs_expected: PathBuf = fs::canonicalize(&expected_cache).unwrap_or(expected_cache);
+            let resolved_target: PathBuf = if target.is_relative() {
+                link_path
+                    .parent()
+                    .map(|p| p.join(&target))
+                    .unwrap_or(target)
+            } else {
+                target
+            };
 
-            if abs_target != abs_expected {
+            if resolved_target != expected_cache {
                 return HealthStatus::warn(Issue::CacheMismatch);
             }
         }

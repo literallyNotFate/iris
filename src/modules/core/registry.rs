@@ -13,6 +13,7 @@ use std::{collections::BTreeSet, sync::Arc};
 #[derive(Default, Clone)]
 pub struct GeneratorRegistry {
     pub generators: Vec<Arc<dyn Generator>>,
+    index: HashMap<String, usize>,
 }
 
 impl GeneratorRegistry {
@@ -33,7 +34,13 @@ impl GeneratorRegistry {
                 .then(a.name().cmp(b.name()))
         });
 
-        Self { generators }
+        let index: HashMap<String, usize> = generators
+            .iter()
+            .enumerate()
+            .map(|(i, g)| (g.name().to_string(), i))
+            .collect();
+
+        Self { generators, index }
     }
 
     /// Access to all generators
@@ -56,10 +63,7 @@ impl GeneratorRegistry {
 
     /// Get generator by name
     pub fn get(&self, name: &str) -> Option<&dyn Generator> {
-        self.generators
-            .iter()
-            .find(|g| g.name() == name)
-            .map(|b| b.as_ref())
+        self.index.get(name).map(|&i| self.generators[i].as_ref())
     }
 
     /// Get generator by name or return an error if it doesn't exist
@@ -102,7 +106,7 @@ impl GeneratorRegistry {
 
     /// Checks whether this generator exists
     pub fn exists(&self, name: &str) -> bool {
-        self.generators.iter().any(|g| g.name() == name)
+        self.index.contains_key(name)
     }
 
     /// Discover unenabled generators if they are installed
@@ -172,7 +176,7 @@ impl GeneratorRegistry {
             .collect();
 
         if to_apply.is_empty() {
-            log.warn("No targets enabled or installed");
+            log.warn("No targets enabled or installed!");
             return Ok(());
         }
 

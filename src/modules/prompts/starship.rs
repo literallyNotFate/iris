@@ -10,7 +10,7 @@ use std::{env, fs, path::PathBuf};
 pub struct StarshipGenerator;
 
 impl Identifiable for StarshipGenerator {
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "starship"
     }
 

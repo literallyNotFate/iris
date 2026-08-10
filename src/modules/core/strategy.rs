@@ -81,6 +81,8 @@ impl Strategy {
                 ));
 
                 let steps: Vec<PipelineStep> = generator.pipeline_steps(engine.paths, engine.theme);
+                let mut deferred_commands = Vec::new();
+
                 for step in steps {
                     match step {
                         PipelineStep::GenerateFile {
@@ -109,32 +111,32 @@ impl Strategy {
                             args,
                             silent,
                         } => {
-                            log.info(&format!(
-                                "Running: {} {}",
-                                program.green(),
-                                args.join(" ").bright_green()
-                            ));
-
-                            let mut cmd = std::process::Command::new(&program);
-                            cmd.args(&args);
-
-                            if silent {
-                                cmd.stdout(std::process::Stdio::null());
-                                cmd.stderr(std::process::Stdio::null());
-                            }
-
-                            let status = cmd.status().with_context(|| {
-                                format!("Failed to execute command: `{}`", program)
-                            })?;
-
-                            if !status.success() {
-                                anyhow::bail!(
-                                    "Command `{}` failed with status: {}",
-                                    program,
-                                    status
-                                );
-                            }
+                            deferred_commands.push((program, args, silent));
                         }
+                    }
+                }
+
+                for (program, args, silent) in deferred_commands {
+                    log.info(&format!(
+                        "Running: {} {}",
+                        program.green(),
+                        args.join(" ").bright_green()
+                    ));
+
+                    let mut cmd = std::process::Command::new(&program);
+                    cmd.args(&args);
+
+                    if silent {
+                        cmd.stdout(std::process::Stdio::null());
+                        cmd.stderr(std::process::Stdio::null());
+                    }
+
+                    let status = cmd
+                        .status()
+                        .with_context(|| format!("Failed to execute command: `{}`", program))?;
+
+                    if !status.success() {
+                        anyhow::bail!("Command `{}` failed with status: {}", program, status);
                     }
                 }
             }
