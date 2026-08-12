@@ -1,5 +1,5 @@
 /// Handle application sync command
-pub fn exec(force: bool, ctx: &mut crate::core::IrisContext) -> anyhow::Result<()> {
+pub fn exec(force: bool, parallel: bool, ctx: &mut crate::core::IrisContext) -> anyhow::Result<()> {
     use colored::*;
     println!();
 
@@ -25,7 +25,7 @@ pub fn exec(force: bool, ctx: &mut crate::core::IrisContext) -> anyhow::Result<(
     }
 
     let theme_obj = service.load_theme(&nvim_theme, force, true, &ctx.state)?;
-    crate::commands::apply_theme(&theme_obj, ctx)?;
+    crate::commands::apply_theme(&theme_obj, parallel, ctx)?;
 
     main_activity.done_with("All apps are now in sync!");
     Ok(())

@@ -90,7 +90,12 @@ pub fn exec(ctx: &mut crate::core::IrisContext) -> anyhow::Result<()> {
         println!();
 
         let action = Select::with_theme(&crate::utils::colors::select_theme())
-            .items(&vec!["Apply this theme", "Back to list", "Exit"])
+            .items(&vec![
+                "Apply this theme",
+                "Apply this theme (Parallel)",
+                "Back to list",
+                "Exit",
+            ])
             .default(0)
             .interact_on_opt(&term)?;
 
@@ -100,9 +105,16 @@ pub fn exec(ctx: &mut crate::core::IrisContext) -> anyhow::Result<()> {
                 let final_theme = service.load_theme(selected_name, false, true, &ctx.state)?;
 
                 term.show_cursor()?;
-                return crate::commands::apply_theme(&final_theme, ctx);
+                return crate::commands::apply_theme(&final_theme, false, ctx);
             }
-            Some(1) => continue,
+            Some(1) => {
+                term.clear_screen()?;
+                let final_theme = service.load_theme(selected_name, false, true, &ctx.state)?;
+
+                term.show_cursor()?;
+                return crate::commands::apply_theme(&final_theme, true, ctx);
+            }
+            Some(2) => continue,
             _ => break,
         }
     }

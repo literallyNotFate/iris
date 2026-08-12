@@ -13,6 +13,10 @@ pub struct SwitchArgs {
     /// Use fallback theme if the requested one is unavailable
     #[arg(short = 'b', long)]
     pub fallback: bool,
+
+    /// Apply themes to all targets in parallel
+    #[arg(short, long)]
+    pub parallel: bool,
 }
 
 #[derive(Args)]

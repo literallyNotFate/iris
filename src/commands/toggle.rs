@@ -1,5 +1,5 @@
 /// Handle theme toggle command
-pub fn exec(ctx: &mut crate::core::IrisContext) -> anyhow::Result<()> {
+pub fn exec(parallel: bool, ctx: &mut crate::core::IrisContext) -> anyhow::Result<()> {
     use colored::Colorize;
 
     let (target_name, is_fallback) = match &ctx.state.theme.previous_theme {
@@ -29,5 +29,5 @@ pub fn exec(ctx: &mut crate::core::IrisContext) -> anyhow::Result<()> {
 
     let service = crate::service::ThemeService::new(&ctx.paths, &ctx.log);
     let theme_obj = service.load_theme(&target_name, false, true, &ctx.state)?;
-    crate::commands::apply_theme(&theme_obj, ctx)
+    crate::commands::apply_theme(&theme_obj, parallel, ctx)
 }

@@ -7,7 +7,14 @@ use crate::{
 };
 use anyhow::{Context, Result};
 use colored::Colorize;
-use std::{collections::BTreeSet, sync::Arc};
+use rayon::prelude::*;
+use std::{
+    collections::{BTreeSet, HashMap},
+    sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    },
+};
 
 /// Manage all generators
 #[derive(Default, Clone)]
@@ -236,6 +243,84 @@ impl GeneratorRegistry {
             total.to_string().blue()
         ));
 
+        Ok(())
+    }
+
+    /// Apply themes to available programs in parallel (clean log version)
+    pub fn apply_all_parallel(
+        &self,
+        theme: &Theme,
+        state: &State,
+        paths: &IrisPaths,
+        templater: &Templater,
+        log: &Logger,
+    ) -> Result<()> {
+        let to_apply: Vec<&dyn Generator> = self
+            .generators
+            .iter()
+            .filter(|g| state.is_enabled(g.name()) && g.is_installed())
+            .map(|b| b.as_ref())
+            .collect();
+
+        if to_apply.is_empty() {
+            log.warn("No targets enabled or installed!");
+            return Ok(());
+        }
+
+        let total: usize = to_apply.len();
+        if log.verbosity == LoggingVerbosity::Silent {
+            to_apply.par_iter().try_for_each(|generator| {
+                let engine = IrisEngine::new(paths, templater, theme);
+                let mut silent_activity = log.activity();
+                engine.execute_apply(*generator, &mut silent_activity)
+            })?;
+            return Ok(());
+        }
+
+        let completed = AtomicUsize::new(0);
+        println!(
+            "{} Updating {} targets in parallel ...\n",
+            "󰛓".blue().bold(),
+            total.to_string().blue().bold()
+        );
+
+        let engine = IrisEngine::new(paths, templater, theme);
+        let results: Result<Vec<()>, anyhow::Error> = to_apply
+            .par_iter()
+            .map(|generator| {
+                let mut silent_activity = crate::log::Activity::silent();
+                let res = engine
+                    .execute_apply(*generator, &mut silent_activity)
+                    .with_context(|| {
+                        format!(
+                            "Failed to apply theme to `{}`",
+                            generator.name().bold().green()
+                        )
+                    });
+
+                if res.is_ok() {
+                    let current = completed.fetch_add(1, Ordering::SeqCst) + 1;
+                    println!(
+                        "  {} [{}/{}] Target `{}` updated!",
+                        "✓".green().bold(),
+                        current.to_string().yellow(),
+                        total,
+                        generator.name().cyan()
+                    );
+                }
+
+                res
+            })
+            .collect();
+
+        results?;
+
+        println!(
+            "\n{}",
+            "✓ All targets were updated successfully in parallel!"
+                .green()
+                .bold(),
+        );
         Ok(())
     }
 }

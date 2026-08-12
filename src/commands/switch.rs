@@ -18,5 +18,5 @@ pub fn exec(args: SwitchArgs, ctx: &mut IrisContext) -> anyhow::Result<()> {
     let service: ThemeService = ThemeService::new(&ctx.paths, &ctx.log);
     let theme_obj: Theme = service.load_theme(&target_name, args.force, true, &ctx.state)?;
 
-    crate::commands::apply_theme(&theme_obj, ctx)
+    crate::commands::apply_theme(&theme_obj, args.parallel, ctx)
 }

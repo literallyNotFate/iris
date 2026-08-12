@@ -33,18 +33,18 @@ pub fn handle(command: Commands, ctx: &mut IrisContext) -> anyhow::Result<()> {
             IrisSetup::run(ctx)?;
         }
         Commands::Switch(args) => switch::exec(args, ctx)?,
-        Commands::Sync { force } => sync::exec(force, ctx)?,
+        Commands::Sync { force, parallel } => sync::exec(force, parallel, ctx)?,
         Commands::Apply(args) => apply::exec(args, ctx)?,
         Commands::Select => select::exec(ctx)?,
         Commands::Status => status::exec(ctx)?,
         Commands::Preview { theme } => preview::exec(theme, ctx)?,
-        Commands::Watch { interval } => watch::exec(interval, ctx)?,
+        Commands::Watch { interval, parallel } => watch::exec(interval, parallel, ctx)?,
         Commands::Health { fix } => health::exec(fix, ctx)?,
         Commands::Gen { action } => generators::exec(action, ctx)?,
         Commands::Diff { generator } => diff::exec(generator, ctx)?,
         Commands::Cache { action } => cache::exec(action, ctx)?,
         Commands::Config { action } => config::exec(action, ctx)?,
-        Commands::Toggle => toggle::exec(ctx)?,
+        Commands::Toggle { parallel } => toggle::exec(parallel, ctx)?,
         Commands::Current => current::exec(ctx)?,
         Commands::CompleteList => {
             if let Ok(themes) = ctx.get_available_themes() {
@@ -59,8 +59,12 @@ pub fn handle(command: Commands, ctx: &mut IrisContext) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Helper function to apply theme
-pub(crate) fn apply_theme(theme: &Theme, ctx: &mut IrisContext) -> anyhow::Result<()> {
+/// Helper function to apply theme with parallel support
+pub(crate) fn apply_theme(
+    theme: &Theme,
+    parallel: bool,
+    ctx: &mut IrisContext,
+) -> anyhow::Result<()> {
     use colored::*;
 
     let registry = &ctx.registry;
@@ -77,7 +81,12 @@ pub(crate) fn apply_theme(theme: &Theme, ctx: &mut IrisContext) -> anyhow::Resul
         );
     }
 
-    registry.apply_all(theme, state, paths, templater, &log)?;
+    if parallel {
+        registry.apply_all_parallel(theme, state, paths, templater, &log)?;
+    } else {
+        registry.apply_all(theme, state, paths, templater, &log)?;
+    }
+
     log.action("Updated local state", move || {
         ctx.update(&theme.name.clone())
     })?;

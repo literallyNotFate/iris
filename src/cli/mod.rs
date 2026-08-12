@@ -38,6 +38,10 @@ pub enum Commands {
         /// Force fetch palette from Neovim, ignoring cache
         #[arg(short, long)]
         force: bool,
+
+        /// Apply themes to all targets in parallel
+        #[arg(short, long)]
+        parallel: bool,
     },
 
     /// Apply theme to a specific generator only
@@ -48,7 +52,11 @@ pub enum Commands {
     Select,
 
     /// Toggle between the current and previous theme seamlessly
-    Toggle,
+    Toggle {
+        /// Apply themes in parallel when toggling
+        #[arg(short, long)]
+        parallel: bool,
+    },
 
     /// Display current status, active theme, and enabled applications
     Status,
@@ -68,6 +76,10 @@ pub enum Commands {
         /// Debounce interval in milliseconds to prevent flickering during rapid changes
         #[arg(short, long, default_value = "200", value_name = "MS")]
         interval: u64,
+
+        /// Apply themes in parallel when changes are detected
+        #[arg(short, long)]
+        parallel: bool,
     },
 
     /// Audit system health

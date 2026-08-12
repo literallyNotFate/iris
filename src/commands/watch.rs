@@ -11,7 +11,7 @@ use std::{
 };
 
 /// Handle application watch command
-pub fn exec(interval_ms: u64, ctx: &mut IrisContext) -> anyhow::Result<()> {
+pub fn exec(interval_ms: u64, parallel: bool, ctx: &mut IrisContext) -> anyhow::Result<()> {
     let (tx, rx) = channel();
     let mut debouncer = new_debouncer(Duration::from_millis(interval_ms), tx)?;
 
@@ -42,7 +42,7 @@ pub fn exec(interval_ms: u64, ctx: &mut IrisContext) -> anyhow::Result<()> {
         }
 
         match rx.recv_timeout(Duration::from_millis(200)) {
-            Ok(Ok(_)) => handle_change(&cache_path, ctx)?,
+            Ok(Ok(_)) => handle_change(&cache_path, parallel, ctx)?,
             Ok(Err(e)) => eprintln!(" {}  Watcher error: {:?}", "󰅙".red(), e),
             Err(RecvTimeoutError::Timeout) => continue,
             Err(RecvTimeoutError::Disconnected) => anyhow::bail!("Watcher disconnected"),
@@ -52,7 +52,7 @@ pub fn exec(interval_ms: u64, ctx: &mut IrisContext) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn handle_change(path: &PathBuf, ctx: &mut IrisContext) -> anyhow::Result<()> {
+fn handle_change(path: &PathBuf, parallel: bool, ctx: &mut IrisContext) -> anyhow::Result<()> {
     sleep(Duration::from_millis(10));
 
     let content: String = fs::read_to_string(path)?;
@@ -73,7 +73,7 @@ fn handle_change(path: &PathBuf, ctx: &mut IrisContext) -> anyhow::Result<()> {
     let service = crate::service::ThemeService::new(&ctx.paths, &ctx.log);
     let theme_obj = service.load_theme(&theme_name, false, true, &ctx.state)?;
 
-    crate::commands::apply_theme(&theme_obj, ctx)?;
+    crate::commands::apply_theme(&theme_obj, parallel, ctx)?;
     render_watch_ui(path);
 
     println!(
