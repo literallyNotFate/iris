@@ -1,6 +1,6 @@
 use crate::{
     core::IrisContext,
-    log::Logger,
+    log::{Activity, Logger},
     models::{HealthStatus, health::IssueSeverity},
     service::ThemeService,
 };
@@ -42,16 +42,31 @@ pub fn exec(fix: bool, ctx: &mut IrisContext) -> anyhow::Result<()> {
                         println!();
                     }
 
+                    let gname: String = format!("`{}`", generator.name());
+                    let status: String = format!("[{}]", status.message());
+
                     print!(
-                        "   {} Fixing {} ... ",
-                        "-> ".dimmed(),
-                        generator.name().bold()
+                        "    {} Fixing {:<15}  -  {:<25} ... ",
+                        "->".dimmed(),
+                        gname.cyan().bold(),
+                        status.dimmed()
                     );
                     let _ = io::stdout().flush();
                 }
 
-                let mut activity = ctx.log.activity();
-                engine.execute_fix(*generator, &status, &mut activity)?;
+                let mut activity: Activity = Activity::silent();
+                match engine.execute_fix(*generator, status, &mut activity) {
+                    Ok(()) => {
+                        if ctx.log.is_detailed() {
+                            print!("{}", "OK".green().bold());
+                        }
+                    }
+                    Err(e) => {
+                        if ctx.log.is_detailed() {
+                            print!("{} ({})", "FAILED".red().bold(), e);
+                        }
+                    }
+                }
             }
 
             if ctx.log.is_detailed() {
@@ -93,6 +108,8 @@ pub fn exec(fix: bool, ctx: &mut IrisContext) -> anyhow::Result<()> {
             );
         }
     }
+
+    println!();
 
     if ctx.log.is_detailed() {
         if issues_found && !fix {

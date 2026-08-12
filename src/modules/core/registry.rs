@@ -273,6 +273,14 @@ mod tests {
                 .cmp(&b.generator_type())
                 .then(a.name().cmp(b.name()))
         });
+
+        reg.index = reg
+            .generators
+            .iter()
+            .enumerate()
+            .map(|(i, g)| (g.name().to_string(), i))
+            .collect();
+
         reg
     }
 

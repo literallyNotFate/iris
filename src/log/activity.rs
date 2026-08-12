@@ -72,6 +72,24 @@ impl Activity {
         }
     }
 
+    /// Returns muted/silect activity for background tasks (e.g. in parallel threads)
+    pub fn silent() -> Self {
+        Self {
+            log: Logger {
+                gutter: String::new(),
+                verbosity: LoggingVerbosity::Silent,
+            },
+            message: String::new(),
+            start: Instant::now(),
+            is_last: true,
+            parent_logger: Logger {
+                gutter: String::new(),
+                verbosity: LoggingVerbosity::Silent,
+            },
+            finished: true,
+        }
+    }
+
     /// Finalizes the activity using the original message
     pub fn done(self) {
         let msg = self.message.clone();
@@ -138,6 +156,19 @@ impl Activity {
     /// Use this for intermediate successful milestones within activity
     pub fn success(&self, msg: &str) {
         self.log.success(msg);
+    }
+
+    /// Activity with verbosity
+    pub fn with_verbosity(mut self, verbosity: LoggingVerbosity) -> Self {
+        self.log.verbosity = verbosity;
+        self.parent_logger.verbosity = verbosity;
+        self
+    }
+
+    /// Activity with finished
+    pub fn with_finished(mut self, finished: bool) -> Self {
+        self.finished = finished;
+        self
     }
 }
 

@@ -67,7 +67,7 @@ impl Generator for BatGenerator {
                 file_path: zshrc_path,
                 marker: "bat".into(),
                 content: format!(
-                    "export BAT_CONFIG_PATH=\"{}\"",
+                    "export BAT_CONFIG_PATH={}",
                     crate::utils::pretty_path(&bat_conf_path)
                 ),
             },
@@ -222,7 +222,7 @@ impl Diffable for BatGenerator {
             let bat_ok = crate::utils::block_matches(&bat_current, "batconf", &bat_block);
 
             let zshrc_inner = format!(
-                "export BAT_CONFIG_PATH=\"{}\"",
+                "export BAT_CONFIG_PATH={}",
                 crate::utils::pretty_path(&bat_conf_path)
             );
             let zshrc_current = fs::read_to_string(&zshrc_path).unwrap_or_default();
