@@ -62,7 +62,7 @@ pub fn default_cleanup<T: Cleanable + ?Sized>(g: &T, paths: &IrisPaths) -> anyho
         })?;
     }
 
-    let app_config_dir: PathBuf = g.resolve_config_directory(paths);
+    let app_config_dir: PathBuf = g.config_path(paths);
     if app_config_dir.exists() && app_config_dir.is_dir() {
         if app_config_dir.file_name().map_or(false, |n| n == "themes") {
             let _ = fs::remove_dir_all(&app_config_dir)
@@ -123,7 +123,7 @@ pub fn default_remove<T: Cleanable + ?Sized>(
                     }
                 }
             } else {
-                if theme_file != g.resolve_config_directory(paths) {
+                if theme_file != g.config_path(paths) {
                     fs::remove_file(&theme_file).with_context(|| {
                         format!(
                             "Failed to remove theme file for {}: {}",

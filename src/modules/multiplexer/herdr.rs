@@ -20,7 +20,7 @@ impl Identifiable for HerdrGenerator {
 }
 
 impl PathResolvable for HerdrGenerator {
-    fn target_file_name(&self, _theme: &str) -> String {
+    fn base_file_name(&self) -> String {
         "config.toml".into()
     }
 
@@ -31,13 +31,8 @@ impl PathResolvable for HerdrGenerator {
             .join(format!("{}_block.toml", theme))
     }
 
-    fn link_path(&self, paths: &IrisPaths, _theme: &str) -> PathBuf {
-        self.resolve_config_directory(paths)
-            .join(self.target_file_name(""))
-    }
-
     fn active_link_path(&self, paths: &IrisPaths) -> Option<PathBuf> {
-        Some(self.resolve_config_directory(paths).join("config.toml"))
+        Some(self.config_path(paths))
     }
 }
 
@@ -147,10 +142,6 @@ impl HerdrGenerator {
 }
 
 impl Diffable for HerdrGenerator {
-    fn config_path(&self, paths: &IrisPaths) -> PathBuf {
-        self.link_path(paths, "")
-    }
-
     fn ideal_content(&self, paths: &IrisPaths, theme: &str) -> anyhow::Result<String> {
         let cache_file: PathBuf = self.cache_path(paths, theme);
         if cache_file.exists() {
@@ -177,7 +168,24 @@ mod tests {
             let generator = HerdrGenerator;
             assert_eq!(generator.name(), "herdr");
             assert_eq!(generator.generator_type(), GeneratorType::Multiplexer);
-            assert_eq!(generator.target_file_name("any"), "config.toml");
+            assert_eq!(generator.file_name("any"), "config.toml");
+        }
+
+        #[test]
+        fn should_handle_path_resolution_for_herdr() {
+            let (_temp_dir, ctx) = IrisContext::mock();
+            let generator = HerdrGenerator;
+            let theme = "tokyonight";
+
+            let expected_config_dir = ctx.paths.config.parent().unwrap().join("herdr");
+            assert_eq!(generator.config_dir(&ctx.paths), expected_config_dir);
+
+            let expected_config_path = expected_config_dir.join("config.toml");
+            assert_eq!(generator.config_path(&ctx.paths), expected_config_path);
+
+            let expected_cache_path = ctx.paths.generators.join("herdr/tokyonight_block.toml");
+            assert_eq!(generator.cache_path(&ctx.paths, theme), expected_cache_path);
+            assert_eq!(generator.template_path(), "multiplexer/herdr");
         }
 
         #[test]
@@ -327,10 +335,11 @@ accent = "#000000"
                 "[theme.custom]\naccent = \"#000000\"",
             )]);
             let generator = HerdrGenerator;
-            let herdr_config_dir = generator.resolve_config_directory(&ctx.paths);
-            fs::create_dir_all(&herdr_config_dir).unwrap();
-            let config_path = generator.link_path(&ctx.paths, "");
 
+            let config_path = generator.link_path(&ctx.paths, "");
+            if let Some(parent) = config_path.parent() {
+                fs::create_dir_all(parent).unwrap();
+            }
             fs::write(&config_path, "").unwrap();
 
             let theme: Theme = Theme::mock();

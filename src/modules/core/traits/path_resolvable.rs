@@ -1,54 +1,72 @@
 use crate::infra::IrisPaths;
 use std::path::PathBuf;
 
+/// Configuration source type
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ConfigSource {
+    /// Standard path to the config directory (`~/.config/[name]/...`)
+    Default,
+    /// Must be a file specified via an environment variable or in the config
+    File(PathBuf),
+    /// Directory specified via an environment variable
+    Dir(PathBuf),
+}
+
 /// Handles file system paths, target configurations, and installation checks
 pub trait PathResolvable: super::Identifiable {
-    /// Returns the name of the configuration file produced for a specific theme
-    fn target_file_name(&self, theme: &str) -> String;
+    /// Name of the application's main configuration file (e.g., "alacritty.toml", "tmux.conf")
+    fn base_file_name(&self) -> String;
+
+    /// Name of the generated theme file. By default, falls back to `base_file_name`.
+    fn file_name(&self, _theme: &str) -> String {
+        self.base_file_name()
+    }
+
+    /// Defines the configuration source for a specific generator
+    fn config_source(&self) -> ConfigSource {
+        ConfigSource::Default
+    }
+
+    /// Returns the base configuration directory for the application
+    fn config_dir(&self, paths: &IrisPaths) -> PathBuf {
+        match self.config_source() {
+            ConfigSource::File(path) => path.parent().map(|p| p.to_path_buf()).unwrap_or(path),
+            ConfigSource::Dir(path) => path,
+            ConfigSource::Default => {
+                let base = paths.config.parent().unwrap_or(&paths.config);
+                base.join(self.name())
+            }
+        }
+    }
+
+    /// Path to the actual main configuration file that the application reads (e.g., config.toml, alacritty.toml)
+    /// Default: `~/.config/[name]/[file_name]` (where file_name is evaluated with an empty theme)
+    fn config_path(&self, paths: &IrisPaths) -> PathBuf {
+        match self.config_source() {
+            ConfigSource::File(path) => path,
+            ConfigSource::Dir(path) => path.join(self.base_file_name()),
+            ConfigSource::Default => self.config_dir(paths).join(self.base_file_name()),
+        }
+    }
 
     /// Returns the full path to the cached template output file.
-    /// Default: `~/.cache/iris/gen/[name]/[target_file]`
+    /// Default: `~/.cache/iris/gen/[name]/[file_name]`
     fn cache_path(&self, paths: &IrisPaths, theme: &str) -> PathBuf {
         paths
             .generators
             .join(self.name())
-            .join(self.target_file_name(theme))
+            .join(self.file_name(theme))
     }
 
-    /// Returns the path where the application expects its active configuration or theme file.
-    /// Default: `~/.config/[name]/[target_file]`
+    /// Returns the path where the application expects its theme file or link.
+    /// Default: `~/.config/[name]/[file_name(theme)]`
     fn link_path(&self, paths: &IrisPaths, theme: &str) -> PathBuf {
-        self.resolve_config_directory(paths)
-            .join(self.target_file_name(theme))
+        self.config_dir(paths).join(self.file_name(theme))
     }
 
     /// Returns the path to a static active symlink, if used by the application.
     /// Default: `None` (meaning the application uses dynamic theme imports)
     fn active_link_path(&self, _paths: &IrisPaths) -> Option<PathBuf> {
-        None
-    }
-
-    /// Resolves the base configuration directory for the application
-    fn resolve_config_directory(&self, paths: &IrisPaths) -> PathBuf {
-        if let Some(p) = self.env_config_directory() {
-            return if p.is_file() {
-                p.parent().unwrap_or(&p).to_path_buf()
-            } else {
-                p
-            };
-        }
-
-        let config_base: PathBuf = paths
-            .config
-            .parent()
-            .map(|p| p.to_path_buf())
-            .unwrap_or_else(|| paths.config.clone());
-
-        config_base.join(self.name())
-    }
-
-    /// Optional environment override for the configuration directory (e.g., `STARSHIP_CONFIG`)
-    fn env_config_directory(&self) -> Option<PathBuf> {
         None
     }
 

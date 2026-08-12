@@ -20,14 +20,18 @@ impl Identifiable for TmuxGenerator {
 }
 
 impl PathResolvable for TmuxGenerator {
-    fn target_file_name(&self, theme: &str) -> String {
+    fn base_file_name(&self) -> String {
+        "tmux.conf".into()
+    }
+
+    fn file_name(&self, theme: &str) -> String {
         format!("{}.conf", theme.to_lowercase())
     }
 
     fn link_path(&self, paths: &IrisPaths, theme: &str) -> PathBuf {
-        self.resolve_config_directory(paths)
+        self.config_dir(paths)
             .join("themes")
-            .join(self.target_file_name(theme))
+            .join(self.file_name(theme))
     }
 }
 
@@ -37,10 +41,13 @@ impl Generator for TmuxGenerator {
     }
 
     fn pre_apply(&self, engine: &IrisEngine) -> anyhow::Result<()> {
-        let config_path: PathBuf = self
-            .resolve_config_directory(engine.paths)
-            .join("tmux.conf");
+        let config_path: PathBuf = self.config_path(engine.paths);
         if let Some(parent) = config_path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+
+        let link_path: PathBuf = self.link_path(engine.paths, &engine.theme.name);
+        if let Some(parent) = link_path.parent() {
             fs::create_dir_all(parent)?;
         }
 
@@ -59,7 +66,7 @@ impl Diagnosable for TmuxGenerator {
             return HealthStatus::error(Issue::BinaryNotFound);
         }
 
-        let conf_path: PathBuf = self.resolve_config_directory(paths).join("tmux.conf");
+        let conf_path: PathBuf = self.config_path(paths);
         let link_path: PathBuf = self.link_path(paths, theme);
 
         let config_status = HealthStatus::check_file(&conf_path, Issue::ConfigMissing);
@@ -114,10 +121,6 @@ impl Cleanable for TmuxGenerator {
 }
 
 impl Diffable for TmuxGenerator {
-    fn config_path(&self, paths: &IrisPaths) -> PathBuf {
-        self.resolve_config_directory(paths).join("tmux.conf")
-    }
-
     fn diff_style(&self) -> DiffStyle {
         DiffStyle::InjectTop {
             build_ideal_line: |theme| {
@@ -147,7 +150,28 @@ mod tests {
             let generator = TmuxGenerator;
             assert_eq!(generator.name(), "tmux");
             assert_eq!(generator.generator_type(), GeneratorType::Multiplexer);
-            assert_eq!(generator.target_file_name("dracula"), "dracula.conf");
+            assert_eq!(generator.file_name("dracula"), "dracula.conf");
+        }
+
+        #[test]
+        fn should_handle_path_resolution_for_tmux() {
+            let (_temp_dir, ctx) = IrisContext::mock();
+            let generator = TmuxGenerator;
+            let theme = "tokyonight";
+
+            let expected_config_dir = ctx.paths.config.parent().unwrap().join("tmux");
+            assert_eq!(generator.config_dir(&ctx.paths), expected_config_dir);
+
+            let expected_config_path = expected_config_dir.join("tmux.conf");
+            assert_eq!(generator.config_path(&ctx.paths), expected_config_path);
+
+            let expected_cache_path = ctx.paths.generators.join("tmux/tokyonight.conf");
+            assert_eq!(generator.cache_path(&ctx.paths, theme), expected_cache_path);
+
+            let expected_link_path = expected_config_dir.join("themes/tokyonight.conf");
+            assert_eq!(generator.link_path(&ctx.paths, theme), expected_link_path);
+
+            assert_eq!(generator.template_path(), "multiplexer/tmux");
         }
 
         #[test]
@@ -220,10 +244,14 @@ mod tests {
             let generator = TmuxGenerator;
 
             let cache_file = generator.cache_path(&ctx.paths, "test");
-            let link_file = generator.theme_path(&ctx.paths, "test");
+            let link_file = generator.link_path(&ctx.paths, "test");
 
-            fs::create_dir_all(cache_file.parent().unwrap()).unwrap();
-            fs::create_dir_all(link_file.parent().unwrap()).unwrap();
+            if let Some(parent) = cache_file.parent() {
+                fs::create_dir_all(parent).unwrap();
+            }
+            if let Some(parent) = link_file.parent() {
+                fs::create_dir_all(parent).unwrap();
+            }
 
             fs::write(&cache_file, "theme content").unwrap();
             fs::write(&link_file, "theme content").unwrap();
@@ -271,7 +299,10 @@ mod tests {
             fs::create_dir_all(&themes_dir).unwrap();
             fs::write(
                 &tmux_conf,
-                format!("source-file \"~/.config/tmux/themes/{}.conf\"", theme.name),
+                format!(
+                    "source-file \"~/.config/tmux/themes/{}.conf\"",
+                    theme.name.to_lowercase()
+                ),
             )
             .unwrap();
 
@@ -313,7 +344,10 @@ mod tests {
         fn should_return_health_warning_wrong_theme_sourced_for_tmux() {
             skip_if_not_installed!(TmuxGenerator);
 
-            let (tmp_dir, mut ctx) = IrisContext::mock();
+            let (tmp_dir, mut ctx) = IrisContext::with_templates(vec![(
+                "multiplexer/tmux",
+                "set -g status-style \"bg={{ bg }},fg={{ fg }}\"",
+            )]);
             let generator = TmuxGenerator;
             let theme: Theme = Theme::mock();
             let root = tmp_dir.path();
@@ -334,17 +368,25 @@ mod tests {
         fn should_return_health_error_link_missing_for_tmux() {
             skip_if_not_installed!(TmuxGenerator);
 
-            let (tmp_dir, mut ctx) = IrisContext::mock();
+            let (tmp_dir, mut ctx) = IrisContext::with_templates(vec![(
+                "multiplexer/tmux",
+                "set -g status-style \"bg={{ bg }},fg={{ fg }}\"",
+            )]);
             let generator = TmuxGenerator;
             let theme: Theme = Theme::mock();
             let root = tmp_dir.path();
 
             let tmux_dir = root.join(".config").join("tmux");
+            let themes_dir = tmux_dir.join("themes");
             let tmux_conf = tmux_dir.join("tmux.conf");
-            fs::create_dir_all(&tmux_dir).unwrap();
+
+            fs::create_dir_all(&themes_dir).unwrap();
             fs::write(
                 &tmux_conf,
-                format!("source-file \"~/.config/tmux/themes/{}.conf\"", theme.name),
+                format!(
+                    "source-file \"~/.config/tmux/themes/{}.conf\"",
+                    theme.name.to_lowercase()
+                ),
             )
             .unwrap();
 
@@ -355,7 +397,9 @@ mod tests {
                 .unwrap();
 
             let link = generator.link_path(&ctx.paths, &theme.name);
-            fs::remove_file(&link).unwrap();
+            if link.exists() {
+                fs::remove_file(&link).unwrap();
+            }
 
             let status = generator.health_check(&ctx.paths, &theme.name);
             assert!(status.is_error(), "Expected Error, got: {status}");
@@ -366,14 +410,25 @@ mod tests {
         fn should_fix_inject_at_start_for_tmux() {
             skip_if_not_installed!(TmuxGenerator);
 
-            let (_, ctx) = IrisContext::mock();
+            let (_, ctx) = IrisContext::with_templates(vec![(
+                "multiplexer/tmux",
+                "set -g status-style \"bg={{ bg }},fg={{ fg }}\"",
+            )]);
             let generator = TmuxGenerator;
             let theme: Theme = Theme::mock();
 
-            let tmux_conf = generator
-                .resolve_config_directory(&ctx.paths)
-                .join("tmux.conf");
-            fs::create_dir_all(tmux_conf.parent().unwrap()).unwrap();
+            let tmux_conf = generator.config_path(&ctx.paths);
+            if let Some(parent) = tmux_conf.parent() {
+                fs::create_dir_all(parent).unwrap();
+            }
+
+            let themes_dir = generator
+                .link_path(&ctx.paths, &theme.name)
+                .parent()
+                .unwrap()
+                .to_path_buf();
+            fs::create_dir_all(&themes_dir).unwrap();
+
             fs::write(&tmux_conf, "run '~/.tmux/plugins/tpm/tpm'").unwrap();
 
             let mut activity = ctx.log.step("Test", false).muted();
@@ -401,7 +456,10 @@ mod tests {
         fn should_fix_wrong_theme_issue_for_tmux() {
             skip_if_not_installed!(TmuxGenerator);
 
-            let (_, mut ctx) = IrisContext::mock();
+            let (_, mut ctx) = IrisContext::with_templates(vec![(
+                "multiplexer/tmux",
+                "set -g status-style \"bg={{ bg }},fg={{ fg }}\"",
+            )]);
             let generator = TmuxGenerator;
             let theme: Theme = Theme::mock();
             ctx.state.theme.current_theme = theme.name.clone();
@@ -410,9 +468,7 @@ mod tests {
             let engine = ctx.engine(&theme);
             engine.execute_apply(&generator, &mut activity).unwrap();
 
-            let tmux_conf = generator
-                .resolve_config_directory(&ctx.paths)
-                .join("tmux.conf");
+            let tmux_conf = generator.config_path(&ctx.paths);
             fs::write(
                 &tmux_conf,
                 "source-file \"~/.config/tmux/themes/wrong.conf\"",
@@ -435,7 +491,10 @@ mod tests {
         fn should_fix_broken_symlink_for_tmux() {
             skip_if_not_installed!(TmuxGenerator);
 
-            let (_, mut ctx) = IrisContext::mock();
+            let (_, mut ctx) = IrisContext::with_templates(vec![(
+                "multiplexer/tmux",
+                "set -g status-style \"bg={{ bg }},fg={{ fg }}\"",
+            )]);
             let generator = TmuxGenerator;
             let theme: Theme = Theme::mock();
             ctx.state.theme.current_theme = theme.name.clone();
@@ -444,9 +503,7 @@ mod tests {
             let engine = ctx.engine(&theme);
             engine.execute_apply(&generator, &mut activity).unwrap();
 
-            let tmux_conf = generator
-                .resolve_config_directory(&ctx.paths)
-                .join("tmux.conf");
+            let tmux_conf = generator.config_path(&ctx.paths);
             if let Some(parent) = tmux_conf.parent() {
                 fs::create_dir_all(parent).unwrap();
             }

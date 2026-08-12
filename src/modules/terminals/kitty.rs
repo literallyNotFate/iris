@@ -20,7 +20,11 @@ impl Identifiable for KittyGenerator {
 }
 
 impl PathResolvable for KittyGenerator {
-    fn target_file_name(&self, theme: &str) -> String {
+    fn base_file_name(&self) -> String {
+        "kitty.conf".into()
+    }
+
+    fn file_name(&self, theme: &str) -> String {
         if theme.is_empty() {
             "current_theme.conf".into()
         } else {
@@ -29,15 +33,11 @@ impl PathResolvable for KittyGenerator {
     }
 
     fn link_path(&self, paths: &IrisPaths, _theme: &str) -> PathBuf {
-        self.resolve_config_directory(paths)
-            .join(self.target_file_name(""))
+        self.config_dir(paths).join(self.file_name(""))
     }
 
     fn active_link_path(&self, paths: &IrisPaths) -> Option<PathBuf> {
-        Some(
-            self.resolve_config_directory(paths)
-                .join("current_theme.conf"),
-        )
+        Some(self.config_dir(paths).join(self.file_name("")))
     }
 }
 
@@ -47,16 +47,14 @@ impl Generator for KittyGenerator {
     }
 
     fn pre_apply(&self, engine: &IrisEngine) -> anyhow::Result<()> {
-        let config_path: PathBuf = self
-            .resolve_config_directory(engine.paths)
-            .join("kitty.conf");
+        let config_path: PathBuf = self.config_path(engine.paths);
         if let Some(parent) = config_path.parent() {
             fs::create_dir_all(parent)?;
         }
 
         engine.inject_line(
             &config_path,
-            &format!("include {}", self.target_file_name("")),
+            &format!("include {}", self.file_name("")),
             InjectionPosition::Start,
         )
     }
@@ -68,8 +66,7 @@ impl Diagnosable for KittyGenerator {
             return HealthStatus::error(Issue::BinaryNotFound);
         }
 
-        let kitty_dir: PathBuf = self.resolve_config_directory(paths);
-        let config_path: PathBuf = kitty_dir.join("kitty.conf");
+        let config_path: PathBuf = self.config_path(paths);
         let link_path: PathBuf = self.link_path(paths, "");
 
         let config_status = HealthStatus::check_file(&config_path, Issue::ConfigMissing);
@@ -78,7 +75,7 @@ impl Diagnosable for KittyGenerator {
         }
 
         let content: String = fs::read_to_string(&config_path).unwrap_or_default();
-        let import_line: String = format!("include {}", self.target_file_name(""));
+        let import_line: String = format!("include {}", self.file_name(""));
         if !content.contains(&import_line) {
             return HealthStatus::warn(Issue::ImportMissing);
         }
@@ -119,10 +116,6 @@ impl Cleanable for KittyGenerator {
 }
 
 impl Diffable for KittyGenerator {
-    fn config_path(&self, paths: &IrisPaths) -> PathBuf {
-        self.resolve_config_directory(paths).join("kitty.conf")
-    }
-
     fn diff_style(&self) -> DiffStyle {
         DiffStyle::InjectKey {
             key_prefix: "include".to_string(),
@@ -147,7 +140,32 @@ mod tests {
             let generator = KittyGenerator;
             assert_eq!(generator.name(), "kitty");
             assert_eq!(generator.generator_type(), GeneratorType::Terminal);
-            assert_eq!(generator.target_file_name(""), "current_theme.conf");
+            assert_eq!(generator.file_name(""), "current_theme.conf");
+        }
+
+        #[test]
+        fn should_handle_path_resolution_for_kitty() {
+            let (_temp_dir, ctx) = IrisContext::mock();
+            let generator = KittyGenerator;
+            let theme = "tokyonight";
+
+            let expected_config_dir = ctx.paths.config.parent().unwrap().join("kitty");
+            assert_eq!(generator.config_dir(&ctx.paths), expected_config_dir);
+
+            let expected_config_path = expected_config_dir.join("kitty.conf");
+            assert_eq!(generator.config_path(&ctx.paths), expected_config_path);
+
+            let expected_cache_path = ctx.paths.generators.join("kitty/tokyonight.conf");
+            assert_eq!(generator.cache_path(&ctx.paths, theme), expected_cache_path);
+
+            let expected_link_path = expected_config_dir.join("current_theme.conf");
+            assert_eq!(generator.link_path(&ctx.paths, theme), expected_link_path);
+
+            assert_eq!(
+                generator.active_link_path(&ctx.paths),
+                Some(expected_link_path)
+            );
+            assert_eq!(generator.template_path(), "terminals/kitty");
         }
 
         #[test]
@@ -169,7 +187,7 @@ mod tests {
             let generator = KittyGenerator;
             let theme: Theme = Theme::mock();
 
-            let kitty_dir = generator.resolve_config_directory(&ctx.paths);
+            let kitty_dir = generator.config_dir(&ctx.paths);
             fs::create_dir_all(&kitty_dir).unwrap();
 
             let mut activity = ctx.log.step("Test", false).muted();
@@ -190,7 +208,7 @@ mod tests {
 
             let cache_dir = ctx.paths.generators.join(generator.name());
             fs::create_dir_all(&cache_dir).unwrap();
-            let file = cache_dir.join(generator.target_file_name(""));
+            let file = cache_dir.join(generator.file_name(""));
             fs::write(&file, "test").unwrap();
 
             assert!(cache_dir.exists());
@@ -254,11 +272,9 @@ mod tests {
                 .execute_apply(&generator, &mut activity)
                 .unwrap();
 
-            let config_path = generator
-                .resolve_config_directory(&ctx.paths)
-                .join("kitty.conf");
+            let config_path = generator.config_path(&ctx.paths);
 
-            let content = format!("include {}", generator.target_file_name(""));
+            let content = format!("include {}", generator.file_name(""));
             fs::write(&config_path, content).unwrap();
 
             let status = generator.health_check(&ctx.paths, &theme.name);
@@ -292,9 +308,7 @@ mod tests {
                 .execute_apply(&generator, &mut activity)
                 .unwrap();
 
-            let config_path = generator
-                .resolve_config_directory(&ctx.paths)
-                .join("kitty.conf");
+            let config_path = generator.config_path(&ctx.paths);
             fs::create_dir_all(config_path.parent().unwrap()).unwrap();
             fs::write(&config_path, "font_size 18").unwrap();
 
@@ -312,7 +326,7 @@ mod tests {
             let generator = KittyGenerator;
             let theme: Theme = Theme::mock();
 
-            let config_dir = generator.resolve_config_directory(&ctx.paths);
+            let config_dir = generator.config_dir(&ctx.paths);
             fs::create_dir_all(&config_dir).unwrap();
             let config_path = config_dir.join("kitty.conf");
 
@@ -341,11 +355,11 @@ mod tests {
             ctx.state.theme.current_theme = theme.name.clone();
 
             let mut activity = ctx.log.step("Test", false).muted();
-            let kitty_dir = generator.resolve_config_directory(&ctx.paths);
+            let kitty_dir = generator.config_dir(&ctx.paths);
             let config_path = kitty_dir.join("kitty.conf");
             fs::create_dir_all(&kitty_dir).unwrap();
 
-            let content = format!("include {}", generator.target_file_name(""));
+            let content = format!("include {}", generator.file_name(""));
             fs::write(&config_path, content).unwrap();
 
             let engine = ctx.engine(&theme);

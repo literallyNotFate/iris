@@ -20,7 +20,11 @@ impl Identifiable for GhosttyGenerator {
 }
 
 impl PathResolvable for GhosttyGenerator {
-    fn target_file_name(&self, theme: &str) -> String {
+    fn base_file_name(&self) -> String {
+        "config".into()
+    }
+
+    fn file_name(&self, theme: &str) -> String {
         if theme.is_empty() {
             "current_theme.conf".into()
         } else {
@@ -29,15 +33,11 @@ impl PathResolvable for GhosttyGenerator {
     }
 
     fn link_path(&self, paths: &IrisPaths, _theme: &str) -> PathBuf {
-        self.resolve_config_directory(paths)
-            .join(self.target_file_name(""))
+        self.config_dir(paths).join(self.file_name(""))
     }
 
     fn active_link_path(&self, paths: &IrisPaths) -> Option<PathBuf> {
-        Some(
-            self.resolve_config_directory(paths)
-                .join("current_theme.conf"),
-        )
+        Some(self.config_dir(paths).join(self.file_name("")))
     }
 }
 
@@ -47,14 +47,14 @@ impl Generator for GhosttyGenerator {
     }
 
     fn pre_apply(&self, engine: &IrisEngine) -> anyhow::Result<()> {
-        let config_path: PathBuf = self.resolve_config_directory(engine.paths).join("config");
+        let config_path: PathBuf = self.config_path(engine.paths);
         if let Some(parent) = config_path.parent() {
             fs::create_dir_all(parent)?;
         }
 
         engine.inject_line(
             &config_path,
-            &format!("config-file = {}", self.target_file_name("")),
+            &format!("config-file = {}", self.file_name("")),
             InjectionPosition::Start,
         )
     }
@@ -66,8 +66,7 @@ impl Diagnosable for GhosttyGenerator {
             return HealthStatus::error(Issue::BinaryNotFound);
         }
 
-        let ghostty_dir: PathBuf = self.resolve_config_directory(paths);
-        let config_path: PathBuf = ghostty_dir.join("config");
+        let config_path: PathBuf = self.config_path(paths);
         let link_path: PathBuf = self.link_path(paths, "");
 
         let config_status = HealthStatus::check_file(&config_path, Issue::ConfigMissing);
@@ -76,7 +75,7 @@ impl Diagnosable for GhosttyGenerator {
         }
 
         let content: String = fs::read_to_string(&config_path).unwrap_or_default();
-        let import_line: String = format!("config-file = {}", self.target_file_name(""));
+        let import_line: String = format!("config-file = {}", self.file_name(""));
         if !content.contains(&import_line) {
             return HealthStatus::warn(Issue::ImportMissing);
         }
@@ -117,10 +116,6 @@ impl Cleanable for GhosttyGenerator {
 }
 
 impl Diffable for GhosttyGenerator {
-    fn config_path(&self, paths: &IrisPaths) -> PathBuf {
-        self.resolve_config_directory(paths).join("config")
-    }
-
     fn diff_style(&self) -> DiffStyle {
         DiffStyle::InjectKey {
             key_prefix: "config-file".to_string(),
@@ -145,7 +140,32 @@ mod tests {
             let generator = GhosttyGenerator;
             assert_eq!(generator.name(), "ghostty");
             assert_eq!(generator.generator_type(), GeneratorType::Terminal);
-            assert_eq!(generator.target_file_name("melange"), "melange.conf");
+            assert_eq!(generator.file_name("melange"), "melange.conf");
+        }
+
+        #[test]
+        fn should_handle_path_resolution_for_ghostty() {
+            let (_temp_dir, ctx) = IrisContext::mock();
+            let generator = GhosttyGenerator;
+            let theme = "tokyonight";
+
+            let expected_config_dir = ctx.paths.config.parent().unwrap().join("ghostty");
+            assert_eq!(generator.config_dir(&ctx.paths), expected_config_dir);
+
+            let expected_config_path = expected_config_dir.join("config");
+            assert_eq!(generator.config_path(&ctx.paths), expected_config_path);
+
+            let expected_cache_path = ctx.paths.generators.join("ghostty/tokyonight.conf");
+            assert_eq!(generator.cache_path(&ctx.paths, theme), expected_cache_path);
+
+            let expected_link_path = expected_config_dir.join("current_theme.conf");
+            assert_eq!(generator.link_path(&ctx.paths, theme), expected_link_path);
+
+            assert_eq!(
+                generator.active_link_path(&ctx.paths),
+                Some(expected_link_path)
+            );
+            assert_eq!(generator.template_path(), "terminals/ghostty");
         }
 
         #[test]
@@ -166,7 +186,7 @@ mod tests {
             let generator = GhosttyGenerator;
             let theme: Theme = Theme::mock();
 
-            let ghostty_dir = generator.resolve_config_directory(&ctx.paths);
+            let ghostty_dir = generator.config_dir(&ctx.paths);
             fs::create_dir_all(&ghostty_dir).unwrap();
 
             let mut activity = ctx.log.step("Test", false).muted();
@@ -187,7 +207,7 @@ mod tests {
 
             let cache_dir = ctx.paths.generators.join(generator.name());
             fs::create_dir_all(&cache_dir).unwrap();
-            let file = cache_dir.join(generator.target_file_name(""));
+            let file = cache_dir.join(generator.file_name(""));
             fs::write(&file, "test").unwrap();
 
             assert!(
@@ -249,17 +269,15 @@ mod tests {
             let theme: Theme = Theme::mock();
             ctx.state.theme.current_theme = theme.name.clone();
 
-            let ghostty_dir = generator.resolve_config_directory(&ctx.paths);
+            let ghostty_dir = generator.config_dir(&ctx.paths);
             fs::create_dir_all(&ghostty_dir).unwrap();
             let mut activity = ctx.log.step("Test", false).muted();
             ctx.engine(&theme)
                 .execute_apply(&generator, &mut activity)
                 .unwrap();
 
-            let config_path = generator
-                .resolve_config_directory(&ctx.paths)
-                .join("config");
-            let import_line = format!("config-file = {}", generator.target_file_name(""));
+            let config_path = generator.config_path(&ctx.paths);
+            let import_line = format!("config-file = {}", generator.file_name(""));
             fs::write(&config_path, import_line).unwrap();
 
             let status = generator.health_check(&ctx.paths, &theme.name);
@@ -273,7 +291,7 @@ mod tests {
             let (_, ctx) = IrisContext::mock();
             let generator = GhosttyGenerator;
             let theme: Theme = Theme::mock();
-            let ghostty_dir = generator.resolve_config_directory(&ctx.paths);
+            let ghostty_dir = generator.config_dir(&ctx.paths);
             fs::create_dir_all(&ghostty_dir).unwrap();
 
             let status = generator.health_check(&ctx.paths, &theme.name);
@@ -289,7 +307,7 @@ mod tests {
             let generator = GhosttyGenerator;
             let theme: Theme = Theme::mock();
             ctx.state.theme.current_theme = theme.name.clone();
-            let ghostty_dir = generator.resolve_config_directory(&ctx.paths);
+            let ghostty_dir = generator.config_dir(&ctx.paths);
             fs::create_dir_all(&ghostty_dir).unwrap();
 
             let mut activity = ctx.log.step("Test", false).muted();
@@ -297,9 +315,7 @@ mod tests {
                 .execute_apply(&generator, &mut activity)
                 .unwrap();
 
-            let config_path = generator
-                .resolve_config_directory(&ctx.paths)
-                .join("config");
+            let config_path = generator.config_path(&ctx.paths);
             fs::write(&config_path, "font-family = JetBrainsMono").unwrap();
 
             let status = generator.health_check(&ctx.paths, &theme.name);
@@ -317,7 +333,7 @@ mod tests {
             let theme: Theme = Theme::mock();
             let engine = ctx.engine(&theme);
 
-            let config_dir = generator.resolve_config_directory(&ctx.paths);
+            let config_dir = generator.config_dir(&ctx.paths);
             fs::create_dir_all(&config_dir).unwrap();
             let config_path = config_dir.join("config");
 
@@ -346,11 +362,11 @@ mod tests {
 
             let engine = ctx.engine(&theme);
             let mut activity = ctx.log.step("Test", false).muted();
-            let ghostty_dir = generator.resolve_config_directory(&ctx.paths);
+            let ghostty_dir = generator.config_dir(&ctx.paths);
             let config_path = ghostty_dir.join("config");
             fs::create_dir_all(&ghostty_dir).unwrap();
 
-            let import_line = format!("config-file = {}", generator.target_file_name(""));
+            let import_line = format!("config-file = {}", generator.file_name(""));
             fs::write(&config_path, import_line).unwrap();
 
             engine.execute_apply(&generator, &mut activity).unwrap();

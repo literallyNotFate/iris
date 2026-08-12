@@ -19,7 +19,11 @@ impl Identifiable for YaziGenerator {
 }
 
 impl PathResolvable for YaziGenerator {
-    fn target_file_name(&self, theme: &str) -> String {
+    fn base_file_name(&self) -> String {
+        "yazi.toml".into()
+    }
+
+    fn file_name(&self, theme: &str) -> String {
         if theme.is_empty() {
             "theme.toml".into()
         } else {
@@ -28,12 +32,11 @@ impl PathResolvable for YaziGenerator {
     }
 
     fn link_path(&self, paths: &IrisPaths, _theme: &str) -> PathBuf {
-        self.resolve_config_directory(paths)
-            .join(self.target_file_name(""))
+        self.config_dir(paths).join(self.file_name(""))
     }
 
     fn active_link_path(&self, paths: &IrisPaths) -> Option<PathBuf> {
-        Some(self.resolve_config_directory(paths).join("theme.toml"))
+        Some(self.config_dir(paths).join(self.file_name("")))
     }
 }
 
@@ -93,19 +96,15 @@ impl Diagnosable for YaziGenerator {
 
 impl Cleanable for YaziGenerator {
     fn cleanup(&self, paths: &IrisPaths) -> anyhow::Result<()> {
-        crate::modules::traits::default_cleanup(self, paths)
+        default_cleanup(self, paths)
     }
 
     fn remove_theme(&self, paths: &IrisPaths, theme_name: &str) -> anyhow::Result<()> {
-        crate::modules::traits::default_remove(self, paths, theme_name)
+        default_remove(self, paths, theme_name)
     }
 }
 
 impl Diffable for YaziGenerator {
-    fn config_path(&self, paths: &IrisPaths) -> PathBuf {
-        self.resolve_config_directory(paths).join("yazi.toml")
-    }
-
     fn diff(&self, _: &IrisPaths, _: &str) -> anyhow::Result<Option<String>> {
         Ok(None)
     }
@@ -126,7 +125,28 @@ mod tests {
             let generator = YaziGenerator;
             assert_eq!(generator.name(), "yazi");
             assert_eq!(generator.generator_type(), GeneratorType::Tool);
-            assert_eq!(generator.target_file_name("cattpuccin"), "cattpuccin.toml");
+            assert_eq!(generator.file_name("cattpuccin"), "cattpuccin.toml");
+        }
+
+        #[test]
+        fn should_handle_path_resolution_for_yazi() {
+            let (_temp_dir, ctx) = IrisContext::mock();
+            let generator = YaziGenerator;
+            let theme = "tokyonight";
+
+            let expected_config_dir = ctx.paths.config.parent().unwrap().join("yazi");
+            assert_eq!(generator.config_dir(&ctx.paths), expected_config_dir);
+
+            let expected_config_path = expected_config_dir.join("yazi.toml");
+            assert_eq!(generator.config_path(&ctx.paths), expected_config_path);
+
+            let expected_cache_path = ctx.paths.generators.join("yazi/tokyonight.toml");
+            assert_eq!(generator.cache_path(&ctx.paths, theme), expected_cache_path);
+
+            let expected_link_path = expected_config_dir.join("theme.toml");
+            assert_eq!(generator.link_path(&ctx.paths, theme), expected_link_path);
+
+            assert_eq!(generator.template_path(), "tools/yazi");
         }
 
         #[test]
@@ -162,7 +182,7 @@ mod tests {
                 .execute_apply(&generator, &mut activity)
                 .unwrap();
 
-            let expected_yazi_dir = generator.resolve_config_directory(&ctx.paths);
+            let expected_yazi_dir = generator.config_dir(&ctx.paths);
             let yazi_theme_link = expected_yazi_dir.join("theme.toml");
             assert!(yazi_theme_link.exists());
 

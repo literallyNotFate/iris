@@ -20,8 +20,15 @@ impl Identifiable for StarshipGenerator {
 }
 
 impl PathResolvable for StarshipGenerator {
-    fn target_file_name(&self, _theme: &str) -> String {
+    fn base_file_name(&self) -> String {
         "starship.toml".into()
+    }
+
+    fn config_source(&self) -> ConfigSource {
+        if let Ok(val) = env::var("STARSHIP_CONFIG") {
+            return ConfigSource::File(PathBuf::from(val));
+        }
+        ConfigSource::Default
     }
 
     fn cache_path(&self, paths: &IrisPaths, theme: &str) -> PathBuf {
@@ -31,21 +38,8 @@ impl PathResolvable for StarshipGenerator {
             .join(format!("{}_block.toml", theme))
     }
 
-    fn link_path(&self, paths: &IrisPaths, _theme: &str) -> PathBuf {
-        if let Some(env_path) = self.env_config_directory() {
-            return env_path;
-        }
-
-        self.resolve_config_directory(paths)
-            .join(self.target_file_name(""))
-    }
-
     fn active_link_path(&self, paths: &IrisPaths) -> Option<PathBuf> {
-        Some(self.resolve_config_directory(paths).join("starship.toml"))
-    }
-
-    fn env_config_directory(&self) -> Option<PathBuf> {
-        env::var("STARSHIP_CONFIG").ok().map(PathBuf::from)
+        Some(self.config_path(paths))
     }
 }
 
@@ -57,7 +51,7 @@ impl Generator for StarshipGenerator {
     }
 
     fn pre_apply(&self, engine: &IrisEngine) -> anyhow::Result<()> {
-        let config_path: PathBuf = self.link_path(engine.paths, "");
+        let config_path: PathBuf = self.config_path(&engine.paths);
         if let Some(parent) = config_path.parent() {
             fs::create_dir_all(parent)?;
         }
@@ -94,7 +88,7 @@ impl Diagnosable for StarshipGenerator {
             return HealthStatus::error(Issue::BinaryNotFound);
         }
 
-        let config_path: PathBuf = self.link_path(paths, "");
+        let config_path: PathBuf = self.config_path(paths);
         let config_status = HealthStatus::check_file(&config_path, Issue::ConfigMissing);
         if !config_status.is_ok() {
             return config_status;
@@ -157,10 +151,6 @@ impl Cleanable for StarshipGenerator {
 }
 
 impl Diffable for StarshipGenerator {
-    fn config_path(&self, paths: &IrisPaths) -> PathBuf {
-        self.link_path(paths, "")
-    }
-
     fn diff_style(&self) -> DiffStyle {
         let generator_name: String = self.name().to_string();
 
@@ -228,7 +218,31 @@ mod tests {
             let generator = StarshipGenerator;
             assert_eq!(generator.name(), "starship");
             assert_eq!(generator.generator_type(), GeneratorType::Prompt);
-            assert_eq!(generator.target_file_name("any"), "starship.toml");
+            assert_eq!(generator.file_name("any"), "starship.toml");
+        }
+
+        #[test]
+        fn should_handle_path_resolution_for_starship() {
+            temp_env::with_var_unset("STARSHIP_CONFIG", || {
+                let (_temp_dir, ctx) = IrisContext::mock();
+                let generator = StarshipGenerator;
+                let theme = "tokyonight";
+
+                let expected_config_dir = ctx.paths.config.parent().unwrap().join("starship");
+                assert_eq!(generator.config_dir(&ctx.paths), expected_config_dir);
+
+                let expected_config_path = expected_config_dir.join("starship.toml");
+                assert_eq!(generator.config_path(&ctx.paths), expected_config_path);
+
+                let expected_cache_path =
+                    ctx.paths.generators.join("starship/tokyonight_block.toml");
+                assert_eq!(generator.cache_path(&ctx.paths, theme), expected_cache_path);
+
+                let expected_link_path = expected_config_dir.join("starship.toml");
+                assert_eq!(generator.link_path(&ctx.paths, theme), expected_link_path);
+
+                assert_eq!(generator.template_path(), "prompts/starship");
+            });
         }
 
         #[test]

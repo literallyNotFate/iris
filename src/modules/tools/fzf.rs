@@ -19,7 +19,11 @@ impl Identifiable for FzfGenerator {
 }
 
 impl PathResolvable for FzfGenerator {
-    fn target_file_name(&self, theme: &str) -> String {
+    fn base_file_name(&self) -> String {
+        "fzf.sh".into()
+    }
+
+    fn file_name(&self, theme: &str) -> String {
         format!("{}.sh", theme.to_lowercase())
     }
 
@@ -95,12 +99,12 @@ impl Diagnosable for FzfGenerator {
 
         let zshrc: PathBuf = self.zshrc_path(paths);
         if !zshrc.exists() {
-            return HealthStatus::warn(Issue::ConfigMissing);
+            return HealthStatus::error(Issue::ConfigMissing);
         }
 
         let content: String = match fs::read_to_string(&zshrc) {
             Ok(c) => c,
-            Err(_) => return HealthStatus::warn(Issue::ConfigMissing),
+            Err(_) => return HealthStatus::error(Issue::ConfigMissing),
         };
         let start_marker: String = format!("# [iris:begin:{}]", self.name());
         let end_marker: String = format!("# [iris:end:{}]", self.name());
@@ -150,10 +154,6 @@ impl Cleanable for FzfGenerator {
 }
 
 impl Diffable for FzfGenerator {
-    fn config_path(&self, paths: &IrisPaths) -> PathBuf {
-        self.zshrc_path(paths)
-    }
-
     fn ideal_content(&self, paths: &IrisPaths, theme: &str) -> anyhow::Result<String> {
         if theme.is_empty() {
             return Ok(String::new());
@@ -180,7 +180,30 @@ mod tests {
             let generator = FzfGenerator;
             assert_eq!(generator.name(), "fzf");
             assert_eq!(generator.generator_type(), GeneratorType::Tool);
-            assert_eq!(generator.target_file_name("vesper"), "vesper.sh");
+            assert_eq!(generator.file_name("vesper"), "vesper.sh");
+        }
+
+        #[test]
+        fn should_handle_path_resolution_for_fzf() {
+            let (_temp_dir, ctx) = IrisContext::mock();
+            let generator = FzfGenerator;
+            let theme = "tokyonight";
+
+            let expected_zshrc = ctx
+                .paths
+                .config
+                .parent()
+                .unwrap()
+                .parent()
+                .unwrap()
+                .join(".zshrc");
+            assert_eq!(generator.zshrc_path(&ctx.paths), expected_zshrc);
+            assert_eq!(generator.link_path(&ctx.paths, theme), expected_zshrc);
+
+            let expected_cache_path = ctx.paths.generators.join("fzf/tokyonight.sh");
+            assert_eq!(generator.cache_path(&ctx.paths, theme), expected_cache_path);
+
+            assert_eq!(generator.template_path(), "tools/fzf");
         }
 
         #[test]
@@ -329,7 +352,7 @@ mod tests {
             }
 
             let status = generator.health_check(&ctx.paths, &theme.name);
-            assert!(status.is_error(), "Expected Error, got: {status}");
+            assert!(status.is_warning(), "Expected Warning, got: {status}");
         }
 
         #[test]

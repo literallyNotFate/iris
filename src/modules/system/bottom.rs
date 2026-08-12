@@ -24,7 +24,7 @@ impl Identifiable for BottomGenerator {
 }
 
 impl PathResolvable for BottomGenerator {
-    fn target_file_name(&self, _theme: &str) -> String {
+    fn base_file_name(&self) -> String {
         "bottom.toml".into()
     }
 
@@ -36,12 +36,11 @@ impl PathResolvable for BottomGenerator {
     }
 
     fn link_path(&self, paths: &IrisPaths, _theme: &str) -> PathBuf {
-        self.resolve_config_directory(paths)
-            .join(self.target_file_name(""))
+        self.config_path(paths)
     }
 
     fn active_link_path(&self, paths: &IrisPaths) -> Option<PathBuf> {
-        Some(self.resolve_config_directory(paths).join("bottom.toml"))
+        Some(self.config_path(paths))
     }
 }
 
@@ -149,10 +148,6 @@ impl Cleanable for BottomGenerator {
 }
 
 impl Diffable for BottomGenerator {
-    fn config_path(&self, paths: &IrisPaths) -> PathBuf {
-        self.link_path(paths, "")
-    }
-
     fn ideal_content(&self, paths: &IrisPaths, theme: &str) -> anyhow::Result<String> {
         let cache_file: PathBuf = self.cache_path(paths, theme);
         if cache_file.exists() {
@@ -179,7 +174,28 @@ mod tests {
             let generator = BottomGenerator;
             assert_eq!(generator.name(), "bottom");
             assert_eq!(generator.generator_type(), GeneratorType::System);
-            assert_eq!(generator.target_file_name("any"), "bottom.toml");
+            assert_eq!(generator.file_name("any"), "bottom.toml");
+        }
+
+        #[test]
+        fn should_handle_path_resolution_for_bottom() {
+            let (_temp_dir, ctx) = IrisContext::mock();
+            let generator = BottomGenerator;
+            let theme = "tokyonight";
+
+            let expected_config_dir = ctx.paths.config.parent().unwrap().join("bottom");
+            assert_eq!(generator.config_dir(&ctx.paths), expected_config_dir);
+
+            let expected_config_path = expected_config_dir.join("bottom.toml");
+            assert_eq!(generator.config_path(&ctx.paths), expected_config_path);
+
+            let expected_cache_path = ctx.paths.generators.join("bottom/tokyonight_block.toml");
+            assert_eq!(generator.cache_path(&ctx.paths, theme), expected_cache_path);
+
+            let expected_link_path = expected_config_path.clone();
+            assert_eq!(generator.link_path(&ctx.paths, theme), expected_link_path);
+
+            assert_eq!(generator.template_path(), "system/bottom");
         }
 
         #[test]

@@ -20,7 +20,11 @@ impl Identifiable for WezTermGenerator {
 }
 
 impl PathResolvable for WezTermGenerator {
-    fn target_file_name(&self, theme: &str) -> String {
+    fn base_file_name(&self) -> String {
+        "wezterm.lua".into()
+    }
+
+    fn file_name(&self, theme: &str) -> String {
         if theme.is_empty() {
             "current_theme.lua".into()
         } else {
@@ -29,15 +33,11 @@ impl PathResolvable for WezTermGenerator {
     }
 
     fn link_path(&self, paths: &IrisPaths, _theme: &str) -> PathBuf {
-        self.resolve_config_directory(paths)
-            .join(self.target_file_name(""))
+        self.config_dir(paths).join(self.file_name(""))
     }
 
     fn active_link_path(&self, paths: &IrisPaths) -> Option<PathBuf> {
-        Some(
-            self.resolve_config_directory(paths)
-                .join("current_theme.lua"),
-        )
+        Some(self.config_dir(paths).join(self.file_name("")))
     }
 }
 
@@ -47,10 +47,7 @@ impl Generator for WezTermGenerator {
     }
 
     fn pre_apply(&self, engine: &IrisEngine) -> anyhow::Result<()> {
-        let config_path: PathBuf = self
-            .resolve_config_directory(engine.paths)
-            .join("wezterm.lua");
-
+        let config_path: PathBuf = self.config_path(engine.paths);
         if let Some(parent) = config_path.parent() {
             fs::create_dir_all(parent)?;
         }
@@ -107,8 +104,7 @@ impl Diagnosable for WezTermGenerator {
             return HealthStatus::error(Issue::BinaryNotFound);
         }
 
-        let wezterm_dir: PathBuf = self.resolve_config_directory(paths);
-        let config_path: PathBuf = wezterm_dir.join("wezterm.lua");
+        let config_path: PathBuf = self.config_path(paths);
         let link_path: PathBuf = self.link_path(paths, "");
 
         let config_status = HealthStatus::check_file(&config_path, Issue::ConfigMissing);
@@ -148,19 +144,15 @@ impl Diagnosable for WezTermGenerator {
 
 impl Cleanable for WezTermGenerator {
     fn cleanup(&self, paths: &IrisPaths) -> anyhow::Result<()> {
-        crate::modules::traits::default_cleanup(self, paths)
+        default_cleanup(self, paths)
     }
 
     fn remove_theme(&self, paths: &IrisPaths, theme_name: &str) -> anyhow::Result<()> {
-        crate::modules::traits::default_remove(self, paths, theme_name)
+        default_remove(self, paths, theme_name)
     }
 }
 
 impl Diffable for WezTermGenerator {
-    fn config_path(&self, paths: &IrisPaths) -> PathBuf {
-        self.resolve_config_directory(paths).join("wezterm.lua")
-    }
-
     fn diff_style(&self) -> DiffStyle {
         DiffStyle::Custom(Box::new(|current_content, _, config_path, _| {
             let has_require = current_content.contains("current_theme");
@@ -229,7 +221,32 @@ mod tests {
             let generator = WezTermGenerator;
             assert_eq!(generator.name(), "wezterm");
             assert_eq!(generator.generator_type(), GeneratorType::Terminal);
-            assert_eq!(generator.target_file_name("gruvbox"), "gruvbox.lua");
+            assert_eq!(generator.file_name("gruvbox"), "gruvbox.lua");
+        }
+
+        #[test]
+        fn should_handle_path_resolution_for_wezterm() {
+            let (_temp_dir, ctx) = IrisContext::mock();
+            let generator = WezTermGenerator;
+            let theme = "tokyonight";
+
+            let expected_config_dir = ctx.paths.config.parent().unwrap().join("wezterm");
+            assert_eq!(generator.config_dir(&ctx.paths), expected_config_dir);
+
+            let expected_config_path = expected_config_dir.join("wezterm.lua");
+            assert_eq!(generator.config_path(&ctx.paths), expected_config_path);
+
+            let expected_cache_path = ctx.paths.generators.join("wezterm/tokyonight.lua");
+            assert_eq!(generator.cache_path(&ctx.paths, theme), expected_cache_path);
+
+            let expected_link_path = expected_config_dir.join("current_theme.lua");
+            assert_eq!(generator.link_path(&ctx.paths, theme), expected_link_path);
+
+            assert_eq!(
+                generator.active_link_path(&ctx.paths),
+                Some(expected_link_path)
+            );
+            assert_eq!(generator.template_path(), "terminals/wezterm");
         }
 
         #[test]
@@ -276,7 +293,7 @@ mod tests {
             let cache_dir = ctx.paths.generators.join(generator.name());
 
             fs::create_dir_all(&cache_dir).unwrap();
-            let file = cache_dir.join(generator.target_file_name(""));
+            let file = cache_dir.join(generator.file_name(""));
             fs::write(&file, "test").unwrap();
 
             assert!(
@@ -343,9 +360,7 @@ mod tests {
                 .execute_apply(&generator, &mut activity)
                 .unwrap();
 
-            let config_path = generator
-                .resolve_config_directory(&ctx.paths)
-                .join("wezterm.lua");
+            let config_path = generator.config_path(&ctx.paths);
 
             let valid_config = "local has_iris, current_theme = pcall(require, 'current_theme')\nconfig.colors = current_theme.colors";
             fs::write(&config_path, valid_config).unwrap();
@@ -381,9 +396,7 @@ mod tests {
                 .execute_apply(&generator, &mut activity)
                 .unwrap();
 
-            let config_path = generator
-                .resolve_config_directory(&ctx.paths)
-                .join("wezterm.lua");
+            let config_path = generator.config_path(&ctx.paths);
             fs::write(&config_path, "local config = wezterm.config_builder()").unwrap();
 
             let status = generator.health_check(&ctx.paths, &theme.name);
@@ -400,7 +413,7 @@ mod tests {
             let generator = WezTermGenerator;
             let theme: Theme = Theme::mock();
 
-            let config_dir = generator.resolve_config_directory(&ctx.paths);
+            let config_dir = generator.config_dir(&ctx.paths);
             fs::create_dir_all(&config_dir).unwrap();
             let config_path = config_dir.join("wezterm.lua");
 
@@ -435,7 +448,7 @@ mod tests {
             ctx.state.theme.current_theme = theme.name.clone();
 
             let mut activity = ctx.log.step("Test", false).muted();
-            let wezterm_dir = generator.resolve_config_directory(&ctx.paths);
+            let wezterm_dir = generator.config_dir(&ctx.paths);
             let config_path = wezterm_dir.join("wezterm.lua");
             fs::create_dir_all(&wezterm_dir).unwrap();
             let engine = ctx.engine(&theme);

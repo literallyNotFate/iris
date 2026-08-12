@@ -20,8 +20,16 @@ impl Identifiable for BatGenerator {
 }
 
 impl PathResolvable for BatGenerator {
-    fn target_file_name(&self, theme: &str) -> String {
+    fn base_file_name(&self) -> String {
+        "config".into()
+    }
+
+    fn file_name(&self, theme: &str) -> String {
         format!("{}.tmTheme", theme)
+    }
+
+    fn link_path(&self, paths: &IrisPaths, theme: &str) -> PathBuf {
+        self.theme_path(paths, theme)
     }
 }
 
@@ -106,9 +114,9 @@ impl Generator for BatGenerator {
 
 impl BatGenerator {
     fn theme_path(&self, paths: &IrisPaths, theme_name: &str) -> PathBuf {
-        self.resolve_config_directory(paths)
+        self.config_dir(paths)
             .join("themes")
-            .join(self.target_file_name(theme_name))
+            .join(self.file_name(theme_name))
     }
 
     fn zshrc_path(&self, paths: &IrisPaths) -> PathBuf {
@@ -141,7 +149,7 @@ impl Diagnosable for BatGenerator {
         if !theme.is_empty() {
             let link = self.theme_path(paths, theme);
             if !link.exists() {
-                return HealthStatus::warn(Issue::CacheMissing);
+                return HealthStatus::error(Issue::CacheMissing);
             }
         }
 
@@ -167,11 +175,11 @@ impl Diagnosable for BatGenerator {
 
 impl Cleanable for BatGenerator {
     fn cleanup(&self, paths: &IrisPaths) -> anyhow::Result<()> {
-        crate::modules::traits::default_cleanup(self, paths)
+        default_cleanup(self, paths)
     }
 
     fn remove_theme(&self, paths: &IrisPaths, theme_name: &str) -> anyhow::Result<()> {
-        crate::modules::traits::default_remove(self, paths, theme_name)
+        default_remove(self, paths, theme_name)
     }
 
     fn post_cleanup(&self, paths: &IrisPaths) -> anyhow::Result<()> {
@@ -189,10 +197,6 @@ impl Cleanable for BatGenerator {
 }
 
 impl Diffable for BatGenerator {
-    fn config_path(&self, paths: &IrisPaths) -> PathBuf {
-        paths.bin.join("bat.conf")
-    }
-
     fn diff_style(&self) -> DiffStyle {
         let gen_name = self.name().to_string();
 
@@ -288,7 +292,32 @@ mod tests {
             let generator = BatGenerator;
             assert_eq!(generator.name(), "bat");
             assert_eq!(generator.generator_type(), GeneratorType::Tool);
-            assert_eq!(generator.target_file_name("nord"), "nord.tmTheme");
+            assert_eq!(generator.file_name("nord"), "nord.tmTheme");
+        }
+
+        #[test]
+        fn should_handle_path_resolution_for_bat() {
+            let (_temp_dir, ctx) = IrisContext::mock();
+            let generator = BatGenerator;
+            let theme = "tokyonight";
+
+            let expected_config_dir = generator.config_dir(&ctx.paths);
+            assert_eq!(generator.config_dir(&ctx.paths), expected_config_dir);
+
+            let expected_config_path = generator.config_path(&ctx.paths);
+            assert_eq!(generator.config_path(&ctx.paths), expected_config_path);
+
+            let expected_cache_path = ctx.paths.generators.join("bat/tokyonight.tmTheme");
+            assert_eq!(generator.cache_path(&ctx.paths, theme), expected_cache_path);
+
+            let expected_link_path = generator.theme_path(&ctx.paths, theme);
+            assert!(
+                expected_link_path
+                    .to_string_lossy()
+                    .contains("tokyonight.tmTheme")
+            );
+
+            assert_eq!(generator.template_path(), "tools/bat");
         }
 
         #[test]
@@ -309,9 +338,15 @@ mod tests {
             let generator = BatGenerator;
             let theme: Theme = Theme::new("Test-Theme", Theme::mock().colors);
             let test_bat_cache = ctx.paths.generators.join("bat").join("cache");
+            let bat_conf_path: PathBuf = ctx.paths.bin.join("bat.conf");
+
+            if let Some(parent) = bat_conf_path.parent() {
+                fs::create_dir_all(parent).unwrap();
+            }
+            fs::write(&bat_conf_path, "").unwrap();
 
             temp_env::with_var("BAT_CACHE_PATH", Some(&test_bat_cache), || {
-                let expected_file_name: String = generator.target_file_name(&theme.name);
+                let expected_file_name: String = generator.file_name(&theme.name);
                 let expected_theme_name: String = theme.name.to_lowercase();
 
                 let mut activity = ctx.log.step("Test", false).muted();
@@ -319,12 +354,11 @@ mod tests {
                 assert!(result.is_ok(), "Apply failed: {:?}", result.err());
 
                 let cache_theme_path = ctx.paths.generators.join("bat").join(&expected_file_name);
-                let bat_conf_path: PathBuf = ctx.paths.bin.join("bat.conf");
 
                 assert!(cache_theme_path.exists(), "Theme file missing in cache");
                 assert!(bat_conf_path.exists(), "bat.conf missing in bin/");
 
-                let conf_content = fs::read_to_string(bat_conf_path).unwrap();
+                let conf_content = fs::read_to_string(&bat_conf_path).unwrap();
                 assert!(conf_content.contains(&format!("--theme=\"{}\"", expected_theme_name)));
             });
         }
@@ -335,6 +369,12 @@ mod tests {
             let generator = BatGenerator;
             let theme: Theme = Theme::mock();
             let test_bat_cache = ctx.paths.generators.join("bat").join("cache");
+            let bat_conf_path: PathBuf = ctx.paths.bin.join("bat.conf");
+
+            if let Some(parent) = bat_conf_path.parent() {
+                fs::create_dir_all(parent).unwrap();
+            }
+            fs::write(&bat_conf_path, "").unwrap();
 
             temp_env::with_var("BAT_CACHE_PATH", Some(&test_bat_cache), || {
                 let mut activity = ctx.log.step("Test", false).muted();
@@ -343,7 +383,6 @@ mod tests {
                     .unwrap();
 
                 let cache_dir: PathBuf = ctx.paths.generators.join(generator.name());
-                let bat_conf_path: PathBuf = ctx.paths.bin.join("bat.conf");
 
                 assert!(cache_dir.exists());
                 assert!(bat_conf_path.exists());
@@ -361,6 +400,12 @@ mod tests {
             let generator = BatGenerator;
             let theme: Theme = Theme::mock();
             let test_bat_cache = ctx.paths.generators.join("bat").join("cache");
+            let bat_conf_path: PathBuf = ctx.paths.bin.join("bat.conf");
+
+            if let Some(parent) = bat_conf_path.parent() {
+                fs::create_dir_all(parent).unwrap();
+            }
+            fs::write(&bat_conf_path, "").unwrap();
 
             temp_env::with_var("BAT_CACHE_PATH", Some(&test_bat_cache), || {
                 let mut activity = ctx.log.step("Test", false).muted();
@@ -419,7 +464,7 @@ mod tests {
             let (_tmp_dir, ctx) = IrisContext::mock();
             let generator = BatGenerator;
 
-            temp_env::with_var("BAT_CONFIG_PATH", Some("/wrong/path/to/bat/config"), || {
+            temp_env::with_var("BAT_CONFIG_PATH", Some("/wrong/path/config.conf"), || {
                 let status = generator.health_check(&ctx.paths, &ctx.state.theme.current_theme);
                 assert!(status.is_warning(), "Expected Warning, got: {status}");
                 assert!(status.contains("Environment variable mismatch"));
@@ -453,10 +498,16 @@ mod tests {
 
             let base_tmp: TempDir = TempDir::new("missing_test").unwrap();
             let home_dir = base_tmp.path();
-            let (_iris_dir, ctx) = IrisContext::mock();
+            let (_iris_dir, ctx) = IrisContext::with_templates(vec![("tools/bat", MOCK_TEMPLATE)]);
             let generator = BatGenerator;
             let theme: Theme = Theme::mock();
             let test_bat_cache = ctx.paths.generators.join("bat").join("cache");
+            let expected_env = ctx.paths.bin.join("bat.conf");
+
+            if let Some(parent) = expected_env.parent() {
+                fs::create_dir_all(parent).unwrap();
+            }
+            fs::write(&expected_env, "").unwrap();
 
             temp_env::with_vars(
                 [
@@ -464,8 +515,6 @@ mod tests {
                     ("BAT_CACHE_PATH", Some(test_bat_cache.as_os_str())),
                 ],
                 || {
-                    let expected_env = ctx.paths.bin.join("bat.conf");
-
                     temp_env::with_var("BAT_CONFIG_PATH", Some(expected_env.as_os_str()), || {
                         let mut activity = ctx.log.step("Test", false).muted();
                         let engine = ctx.engine(&theme);

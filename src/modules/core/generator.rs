@@ -111,8 +111,16 @@ impl Identifiable for GeneratorMock {
 
 #[cfg(test)]
 impl PathResolvable for GeneratorMock {
-    fn target_file_name(&self, _theme: &str) -> String {
+    fn base_file_name(&self) -> String {
+        "mock.conf".into()
+    }
+
+    fn file_name(&self, _theme: &str) -> String {
         format!("{}.conf", self.name)
+    }
+
+    fn config_path(&self, _paths: &IrisPaths) -> std::path::PathBuf {
+        std::path::PathBuf::new()
     }
 }
 

@@ -25,10 +25,6 @@ pub enum DiffStyle {
 
 /// A trait that provides a unified, declarative way to compute and render configuration diffs
 pub trait Diffable: super::PathResolvable {
-    fn config_path(&self, _paths: &IrisPaths) -> PathBuf {
-        PathBuf::new()
-    }
-
     fn ideal_content(&self, _paths: &IrisPaths, _theme: &str) -> anyhow::Result<String> {
         Ok(String::new())
     }

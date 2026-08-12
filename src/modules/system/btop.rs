@@ -20,14 +20,18 @@ impl Identifiable for BtopGenerator {
 }
 
 impl PathResolvable for BtopGenerator {
-    fn target_file_name(&self, theme: &str) -> String {
+    fn base_file_name(&self) -> String {
+        "btop.conf".into()
+    }
+
+    fn file_name(&self, theme: &str) -> String {
         format!("{}.theme", theme.to_lowercase())
     }
 
     fn link_path(&self, paths: &IrisPaths, theme: &str) -> PathBuf {
-        self.resolve_config_directory(paths)
+        self.config_dir(paths)
             .join("themes")
-            .join(self.target_file_name(theme))
+            .join(self.file_name(theme))
     }
 }
 
@@ -37,10 +41,13 @@ impl Generator for BtopGenerator {
     }
 
     fn pre_apply(&self, engine: &IrisEngine) -> anyhow::Result<()> {
-        let config_path: PathBuf = self
-            .resolve_config_directory(engine.paths)
-            .join("btop.conf");
+        let config_path: PathBuf = self.config_path(engine.paths);
         if let Some(parent) = config_path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+
+        let link_path: PathBuf = self.link_path(engine.paths, &engine.theme.name);
+        if let Some(parent) = link_path.parent() {
             fs::create_dir_all(parent)?;
         }
 
@@ -59,7 +66,7 @@ impl Diagnosable for BtopGenerator {
             return HealthStatus::error(Issue::BinaryNotFound);
         }
 
-        let conf_path: PathBuf = self.resolve_config_directory(paths).join("btop.conf");
+        let conf_path: PathBuf = self.config_path(paths);
         let link_path: PathBuf = self.link_path(paths, theme);
 
         let config_status = HealthStatus::check_file(&conf_path, Issue::ConfigMissing);
@@ -112,10 +119,6 @@ impl Cleanable for BtopGenerator {
 }
 
 impl Diffable for BtopGenerator {
-    fn config_path(&self, paths: &IrisPaths) -> PathBuf {
-        self.resolve_config_directory(paths).join("btop.conf")
-    }
-
     fn diff_style(&self) -> DiffStyle {
         DiffStyle::InjectKey {
             key_prefix: "color_theme".to_string(),
@@ -143,7 +146,28 @@ mod tests {
             let generator = BtopGenerator;
             assert_eq!(generator.name(), "btop");
             assert_eq!(generator.generator_type(), GeneratorType::System);
-            assert_eq!(generator.target_file_name("iris-dark"), "iris-dark.theme");
+            assert_eq!(generator.file_name("iris-dark"), "iris-dark.theme");
+        }
+
+        #[test]
+        fn should_handle_path_resolution_for_btop() {
+            let (_temp_dir, ctx) = IrisContext::mock();
+            let generator = BtopGenerator;
+            let theme = "tokyonight";
+
+            let expected_config_dir = ctx.paths.config.parent().unwrap().join("btop");
+            assert_eq!(generator.config_dir(&ctx.paths), expected_config_dir);
+
+            let expected_config_path = expected_config_dir.join("btop.conf");
+            assert_eq!(generator.config_path(&ctx.paths), expected_config_path);
+
+            let expected_cache_path = ctx.paths.generators.join("btop/tokyonight.theme");
+            assert_eq!(generator.cache_path(&ctx.paths, theme), expected_cache_path);
+
+            let expected_link_path = expected_config_dir.join("themes/tokyonight.theme");
+            assert_eq!(generator.link_path(&ctx.paths, theme), expected_link_path);
+
+            assert_eq!(generator.template_path(), "system/btop");
         }
 
         #[test]
@@ -166,10 +190,10 @@ mod tests {
             let generator = BtopGenerator;
             let theme: Theme = Theme::mock();
 
-            let btop_root = generator.resolve_config_directory(&ctx.paths);
-            let btop_conf = btop_root.join("btop.conf");
+            let btop_conf = generator.config_path(&ctx.paths);
+            let btop_root = btop_conf.parent().unwrap();
 
-            fs::create_dir_all(&btop_root).unwrap();
+            fs::create_dir_all(btop_root).unwrap();
             fs::write(
                 &btop_conf,
                 "graph_symbol = \"braille\"\ncolor_theme = \"old-theme\"\n",
@@ -221,7 +245,7 @@ mod tests {
             let generator = BtopGenerator;
 
             let cache_file = generator.cache_path(&ctx.paths, "test");
-            let link_file = generator.theme_path(&ctx.paths, "test");
+            let link_file = generator.link_path(&ctx.paths, "test");
 
             fs::create_dir_all(cache_file.parent().unwrap()).unwrap();
             fs::create_dir_all(link_file.parent().unwrap()).unwrap();
@@ -261,19 +285,14 @@ mod tests {
             let generator = BtopGenerator;
             let theme: Theme = Theme::mock();
 
+            let conf_path = generator.config_path(&ctx.paths);
+            fs::create_dir_all(conf_path.parent().unwrap()).unwrap();
+
             let mut activity = ctx.log.step("Test", false).muted();
             ctx.state.theme.current_theme = theme.name.clone();
             ctx.engine(&theme)
                 .execute_apply(&generator, &mut activity)
                 .unwrap();
-
-            let btop_dir = generator
-                .resolve_config_directory(&ctx.paths)
-                .parent()
-                .unwrap()
-                .to_path_buf();
-            fs::create_dir_all(&btop_dir).unwrap();
-            let conf_path = btop_dir.join("btop.conf");
 
             let expected_line = format!("color_theme = \"{}\"", theme.name);
             fs::write(
@@ -306,10 +325,10 @@ mod tests {
             let generator = BtopGenerator;
             let theme: Theme = Theme::mock();
 
-            let btop_root = generator.resolve_config_directory(&ctx.paths);
-            let btop_conf = btop_root.join("btop.conf");
+            let btop_conf = generator.config_path(&ctx.paths);
+            let btop_root = btop_conf.parent().unwrap();
 
-            fs::create_dir_all(&btop_root).unwrap();
+            fs::create_dir_all(btop_root).unwrap();
             fs::write(&btop_conf, "color_theme = \"default\"\n").unwrap();
             let status = generator.health_check(&ctx.paths, &theme.name);
 
@@ -324,14 +343,13 @@ mod tests {
         fn should_fix_broken_conf_for_btop() {
             skip_if_not_installed!(BtopGenerator);
 
-            let (tmp_dir, ctx) = IrisContext::mock();
+            let (_, ctx) = IrisContext::mock();
             let generator = BtopGenerator;
             let theme: Theme = Theme::mock();
-            let root = tmp_dir.path();
 
-            let btop_dir = root.join(".config/btop");
-            fs::create_dir_all(&btop_dir).unwrap();
-            let conf_path = btop_dir.join("btop.conf");
+            let conf_path = generator.config_path(&ctx.paths);
+            let btop_dir = conf_path.parent().unwrap();
+            fs::create_dir_all(btop_dir).unwrap();
             fs::write(
                 &conf_path,
                 "color_theme = \"wrong_theme\"\nother_setting = true",
@@ -358,20 +376,16 @@ mod tests {
         fn should_fix_missing_theme_file_for_btop() {
             skip_if_not_installed!(BtopGenerator);
 
-            let (tmp_dir, mut ctx) = IrisContext::mock();
+            let (_, mut ctx) = IrisContext::mock();
             let generator = BtopGenerator;
             let theme: Theme = Theme::mock();
-            let root = tmp_dir.path();
 
             ctx.state.theme.current_theme = theme.name.clone();
-            let btop_dir = root.join(".config/btop");
+            let conf_path = generator.config_path(&ctx.paths);
+            let btop_dir = conf_path.parent().unwrap();
             fs::create_dir_all(btop_dir.join("themes")).unwrap();
 
-            fs::write(
-                btop_dir.join("btop.conf"),
-                format!("color_theme = \"{}\"", theme.name),
-            )
-            .unwrap();
+            fs::write(&conf_path, format!("color_theme = \"{}\"", theme.name)).unwrap();
 
             let mut activity = ctx.log.step("Test", false).muted();
             let engine = ctx.engine(&theme);

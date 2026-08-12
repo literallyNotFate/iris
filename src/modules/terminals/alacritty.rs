@@ -20,7 +20,11 @@ impl Identifiable for AlacrittyGenerator {
 }
 
 impl PathResolvable for AlacrittyGenerator {
-    fn target_file_name(&self, theme: &str) -> String {
+    fn base_file_name(&self) -> String {
+        "alacritty.toml".into()
+    }
+
+    fn file_name(&self, theme: &str) -> String {
         if theme.is_empty() {
             "current_theme.toml".into()
         } else {
@@ -29,15 +33,11 @@ impl PathResolvable for AlacrittyGenerator {
     }
 
     fn link_path(&self, paths: &IrisPaths, _theme: &str) -> PathBuf {
-        self.resolve_config_directory(paths)
-            .join(self.target_file_name(""))
+        self.config_dir(paths).join(self.file_name(""))
     }
 
     fn active_link_path(&self, paths: &IrisPaths) -> Option<PathBuf> {
-        Some(
-            self.resolve_config_directory(paths)
-                .join("current_theme.toml"),
-        )
+        Some(self.config_dir(paths).join(self.file_name("")))
     }
 }
 
@@ -47,9 +47,7 @@ impl Generator for AlacrittyGenerator {
     }
 
     fn pre_apply(&self, engine: &IrisEngine) -> anyhow::Result<()> {
-        let config_path: PathBuf = self
-            .resolve_config_directory(engine.paths)
-            .join("alacritty.toml");
+        let config_path: PathBuf = self.config_path(engine.paths);
         if let Some(parent) = config_path.parent() {
             fs::create_dir_all(parent)?;
         }
@@ -68,8 +66,7 @@ impl Diagnosable for AlacrittyGenerator {
             return HealthStatus::error(Issue::BinaryNotFound);
         }
 
-        let alacritty_dir: PathBuf = self.resolve_config_directory(paths);
-        let config_path: PathBuf = alacritty_dir.join("alacritty.toml");
+        let config_path: PathBuf = self.config_path(paths);
         let link_path: PathBuf = self.link_path(paths, "");
 
         let config_status = HealthStatus::check_file(&config_path, Issue::ConfigMissing);
@@ -119,10 +116,6 @@ impl Cleanable for AlacrittyGenerator {
 }
 
 impl Diffable for AlacrittyGenerator {
-    fn config_path(&self, paths: &IrisPaths) -> PathBuf {
-        self.resolve_config_directory(paths).join("alacritty.toml")
-    }
-
     fn diff_style(&self) -> DiffStyle {
         DiffStyle::Custom(Box::new(|current_content, _, config_path, _| {
             let expected = "~/.config/alacritty/current_theme.toml";
@@ -183,7 +176,32 @@ mod tests {
             let generator = AlacrittyGenerator;
             assert_eq!(generator.name(), "alacritty");
             assert_eq!(generator.generator_type(), GeneratorType::Terminal);
-            assert_eq!(generator.target_file_name("nord"), "nord.toml");
+            assert_eq!(generator.file_name("nord"), "nord.toml");
+        }
+
+        #[test]
+        fn should_handle_path_resolution_for_alacritty() {
+            let (_temp_dir, ctx) = IrisContext::mock();
+            let generator = AlacrittyGenerator;
+            let theme = "tokyonight";
+
+            let expected_config_dir = ctx.paths.config.parent().unwrap().join("alacritty");
+            assert_eq!(generator.config_dir(&ctx.paths), expected_config_dir);
+
+            let expected_config_path = expected_config_dir.join("alacritty.toml");
+            assert_eq!(generator.config_path(&ctx.paths), expected_config_path);
+
+            let expected_cache_path = ctx.paths.generators.join("alacritty/tokyonight.toml");
+            assert_eq!(generator.cache_path(&ctx.paths, theme), expected_cache_path);
+
+            let expected_link_path = expected_config_dir.join("current_theme.toml");
+            assert_eq!(generator.link_path(&ctx.paths, theme), expected_link_path);
+
+            assert_eq!(
+                generator.active_link_path(&ctx.paths),
+                Some(expected_link_path)
+            );
+            assert_eq!(generator.template_path(), "terminals/alacritty");
         }
 
         #[test]
@@ -208,7 +226,7 @@ mod tests {
             let generator = AlacrittyGenerator;
             let theme: Theme = Theme::mock();
 
-            let alacritty_dir = generator.resolve_config_directory(&ctx.paths);
+            let alacritty_dir = generator.config_dir(&ctx.paths);
             fs::create_dir_all(&alacritty_dir).unwrap();
 
             let mut activity = ctx.log.step("Test", false).muted();
@@ -222,12 +240,8 @@ mod tests {
                 .join("test-theme.toml");
             assert!(cache_file.exists(), "Theme missing in Iris cache");
 
-            let alacritty_dir = generator.resolve_config_directory(&ctx.paths);
-            let link_path = alacritty_dir.join("current_theme.toml");
-            assert!(
-                link_path.exists(),
-                "Symlink missing in Alacritty config dir"
-            );
+            let link_path = generator.config_dir(&ctx.paths).join("current_theme.toml");
+            assert!(link_path.exists());
 
             let content = fs::read_to_string(cache_file).unwrap();
             assert!(content.contains(&format!("background = \"{}\"", theme.colors.bg)));
@@ -240,7 +254,7 @@ mod tests {
 
             let cache_dir = ctx.paths.generators.join(generator.name());
             fs::create_dir_all(&cache_dir).unwrap();
-            let file = cache_dir.join(generator.target_file_name(""));
+            let file = cache_dir.join(generator.file_name(""));
             fs::write(&file, "test").unwrap();
 
             assert!(
@@ -300,8 +314,6 @@ mod tests {
             let (_, mut ctx) = IrisContext::mock();
             let generator = AlacrittyGenerator;
             let theme: Theme = Theme::mock();
-            let alacritty_dir = generator.resolve_config_directory(&ctx.paths);
-            fs::create_dir_all(&alacritty_dir).unwrap();
 
             let mut activity = ctx.log.step("Test", false).muted();
             ctx.state.theme.current_theme = theme.name.clone();
@@ -309,8 +321,7 @@ mod tests {
                 .execute_apply(&generator, &mut activity)
                 .unwrap();
 
-            let alacritty_dir = generator.resolve_config_directory(&ctx.paths);
-            let main_config = alacritty_dir.join("alacritty.toml");
+            let main_config = generator.config_path(&ctx.paths);
             fs::write(
                 &main_config,
                 "import = [\"~/.config/alacritty/current_theme.toml\"]",
@@ -328,8 +339,6 @@ mod tests {
             let (_, mut ctx) = IrisContext::mock();
             let generator = AlacrittyGenerator;
             let theme: Theme = Theme::mock();
-            let alacritty_dir = generator.resolve_config_directory(&ctx.paths);
-            fs::create_dir_all(&alacritty_dir).unwrap();
 
             let mut activity = ctx.log.step("Test", false).muted();
             ctx.state.theme.current_theme = theme.name.clone();
@@ -337,9 +346,7 @@ mod tests {
                 .execute_apply(&generator, &mut activity)
                 .unwrap();
 
-            let main_config = generator
-                .resolve_config_directory(&ctx.paths)
-                .join("alacritty.toml");
+            let main_config = generator.config_path(&ctx.paths);
             fs::write(&main_config, "[window]\ndecorations = \"none\"").unwrap();
 
             let status = generator.health_check(&ctx.paths, &theme.name);
@@ -355,8 +362,6 @@ mod tests {
             let (_, mut ctx) = IrisContext::mock();
             let generator = AlacrittyGenerator;
             let theme: Theme = Theme::mock();
-            let alacritty_dir = generator.resolve_config_directory(&ctx.paths);
-            fs::create_dir_all(&alacritty_dir).unwrap();
 
             let mut activity = ctx.log.step("Test", false).muted();
             ctx.state.theme.current_theme = theme.name.clone();
@@ -364,9 +369,7 @@ mod tests {
                 .execute_apply(&generator, &mut activity)
                 .unwrap();
 
-            let main_config = generator
-                .resolve_config_directory(&ctx.paths)
-                .join("alacritty.toml");
+            let main_config = generator.config_path(&ctx.paths);
             if main_config.exists() {
                 fs::remove_file(main_config).unwrap();
             }
@@ -385,13 +388,11 @@ mod tests {
             let generator = AlacrittyGenerator;
             let theme: Theme = Theme::mock();
 
-            let alacritty_dir = generator.resolve_config_directory(&ctx.paths);
-            fs::create_dir_all(&alacritty_dir).unwrap();
-            let config_path = alacritty_dir.join("alacritty.toml");
-
             let mut activity = ctx.log.step("Test", false).muted();
             let engine = ctx.engine(&theme);
             engine.execute_apply(&generator, &mut activity).unwrap();
+
+            let config_path = generator.config_path(&ctx.paths);
             fs::write(&config_path, "[window]\ndecorations = \"none\"").unwrap();
 
             let status = generator.health_check(&ctx.paths, &theme.name);
@@ -416,10 +417,10 @@ mod tests {
             let generator = AlacrittyGenerator;
             let theme: Theme = Theme::mock();
 
-            let alacritty_dir = generator.resolve_config_directory(&ctx.paths);
+            let alacritty_dir = generator.config_dir(&ctx.paths);
             fs::create_dir_all(&alacritty_dir).unwrap();
 
-            let config_path = alacritty_dir.join("alacritty.toml");
+            let config_path = generator.config_path(&ctx.paths);
             fs::write(
                 &config_path,
                 "import = [\"~/.config/alacritty/current_theme.toml\"]",
