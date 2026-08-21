@@ -106,6 +106,15 @@ impl GeneratorRegistry {
             .collect()
     }
 
+    /// Get all generators that are currently enabled in state
+    pub fn enabled(&self, state: &State) -> Vec<&dyn Generator> {
+        self.generators
+            .iter()
+            .filter(|g| state.is_enabled(g.name()))
+            .map(|b| b.as_ref())
+            .collect()
+    }
+
     /// Check whether this generator is installed in system
     pub fn is_installed(&self, name: &str) -> bool {
         self.get(name).map(|g| g.is_installed()).unwrap_or(false)

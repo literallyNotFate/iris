@@ -1,21 +1,25 @@
 use crate::modules::{GeneratorFilter, GeneratorType};
-use clap::Subcommand;
 
-#[derive(Subcommand)]
+#[derive(clap::Subcommand)]
 pub enum GenAction {
-    /// Automatically enable generators for all supported apps found in the system
-    Auto,
-
-    /// Enable a specific generator
+    /// Enable a specific generator or all discovered ones
     Enable {
-        #[arg(value_name = "GENERATOR")]
-        name: String,
+        #[arg(value_name = "GENERATOR", required_unless_present = "all")]
+        name: Option<String>,
+
+        /// Enable all discovered supported apps
+        #[arg(long, conflicts_with = "name")]
+        all: bool,
     },
 
-    /// Disable a specific generator
+    /// Disable a specific generator or all active ones
     Disable {
-        #[arg(value_name = "GENERATOR")]
-        name: String,
+        #[arg(value_name = "GENERATOR", required_unless_present = "all")]
+        name: Option<String>,
+
+        /// Disable all active generators
+        #[arg(long, conflicts_with = "name")]
+        all: bool,
     },
 
     /// Open an interactive TUI selector to manage generators

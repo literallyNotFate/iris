@@ -14,9 +14,20 @@ use std::collections::BTreeSet;
 pub fn exec(action: GenAction, ctx: &mut IrisContext) -> anyhow::Result<()> {
     match action {
         GenAction::Select => handle_select(ctx)?,
-        GenAction::Enable { name } => handle_status_change(name, true, ctx)?,
-        GenAction::Disable { name } => handle_status_change(name, false, ctx)?,
-        GenAction::Auto => handle_auto(ctx)?,
+        GenAction::Enable { name, all } => {
+            if all {
+                handle_enable_all(ctx)?
+            } else {
+                handle_status_change(name.unwrap(), true, ctx)?
+            }
+        }
+        GenAction::Disable { name, all } => {
+            if all {
+                handle_disable_all(ctx)?
+            } else {
+                handle_status_change(name.unwrap(), false, ctx)?
+            }
+        }
         GenAction::List {
             generator_type,
             status,
@@ -158,8 +169,8 @@ fn handle_status_change(name: String, enable: bool, ctx: &mut IrisContext) -> an
     Ok(())
 }
 
-/// Autodiscovering generators
-pub fn handle_auto(ctx: &mut IrisContext) -> anyhow::Result<()> {
+/// Autodiscover and enable all supported generators
+fn handle_enable_all(ctx: &mut IrisContext) -> anyhow::Result<()> {
     ui::render_header("Autodiscovering generators...", "󰩊");
     ctx.log.info("Scanning system for generators...");
 
@@ -188,6 +199,42 @@ pub fn handle_auto(ctx: &mut IrisContext) -> anyhow::Result<()> {
             .action("Saved configuration to state file!", || ctx.save())?;
     } else {
         ctx.log.info("All discovered apps are already active.");
+    }
+
+    println!();
+    Ok(())
+}
+
+/// Disable all active generators
+fn handle_disable_all(ctx: &mut IrisContext) -> anyhow::Result<()> {
+    ui::render_header("Disabling all generators...", "󰩊");
+    ctx.log.info("Checking active generators...");
+
+    let enabled_generators = ctx.registry.enabled(&ctx.state);
+    let mut disabled = 0;
+
+    for g in enabled_generators {
+        ctx.state.disable_generator(g.name());
+        println!("    Disabling {}...", g.name().yellow().bold());
+        disabled += 1;
+    }
+
+    if disabled > 0 {
+        println!(
+            "{} {} {} {}",
+            "└──".dimmed(),
+            "Disabled".bold(),
+            format!("{} generators from configuration!", disabled)
+                .cyan()
+                .bold(),
+            "✓".green()
+        );
+
+        println!();
+        ctx.log
+            .action("Saved configuration to state file!", || ctx.save())?;
+    } else {
+        ctx.log.info("No active generators found to disable.");
     }
 
     println!();
@@ -241,8 +288,9 @@ fn render_list(
     if ctx.log.is_detailed() {
         ui::render_list_footer(total, enabled_count, filter.is_none());
     } else if total > 0 {
-        println!("\nTotal: {} (Enabled: {})\n", total, enabled_count);
+        println!("\nTotal: {} (Enabled: {})", total, enabled_count);
     }
 
+    println!();
     Ok(())
 }
