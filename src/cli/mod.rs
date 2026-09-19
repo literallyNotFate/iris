@@ -122,3 +122,22 @@ pub enum Commands {
     #[command(hide = true)]
     CompleteList,
 }
+
+impl Commands {
+    pub fn requires_lock(&self) -> bool {
+        match self {
+            Commands::Status
+            | Commands::Preview { .. }
+            | Commands::Diff { .. }
+            | Commands::Current
+            | Commands::CompleteList => false,
+            Commands::Cache { action } => action.requires_lock(),
+            Commands::Config { action } => match action {
+                Some(act) => act.requires_lock(),
+                None => false,
+            },
+
+            _ => true,
+        }
+    }
+}

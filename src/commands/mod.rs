@@ -1,6 +1,7 @@
 use crate::{
     cli::Commands,
     core::{IrisContext, IrisSetup},
+    guards::LockGuard,
     log::LoggingVerbosity,
     models::Theme,
 };
@@ -23,6 +24,11 @@ pub mod watch;
 /// Main entry point for command execution.
 /// Routes CLI commands to their respective logic modules
 pub fn handle(command: Commands, ctx: &mut IrisContext) -> anyhow::Result<()> {
+    let _lock = command
+        .requires_lock()
+        .then(|| LockGuard::acquire(&ctx.paths))
+        .transpose()?;
+
     match command {
         Commands::Init => {
             if ctx.log.verbosity == LoggingVerbosity::Silent {

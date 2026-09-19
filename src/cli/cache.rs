@@ -31,3 +31,15 @@ pub enum CacheAction {
     /// Show cache directory paths and disk usage
     Info,
 }
+
+impl CacheAction {
+    pub fn requires_lock(&self) -> bool {
+        match self {
+            CacheAction::List | CacheAction::Info => false,
+            CacheAction::Clear { .. }
+            | CacheAction::Purge
+            | CacheAction::Clean
+            | CacheAction::Remove { .. } => true,
+        }
+    }
+}

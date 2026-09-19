@@ -1,6 +1,4 @@
-use clap::Args;
-
-#[derive(Args)]
+#[derive(clap::Args)]
 pub struct SwitchArgs {
     /// Name of the theme to apply (e.g., 'melange', 'gruvbox')
     #[arg(value_name = "THEME")]
@@ -19,7 +17,7 @@ pub struct SwitchArgs {
     pub parallel: bool,
 }
 
-#[derive(Args)]
+#[derive(clap::Args)]
 pub struct ApplyArgs {
     /// Generator name (e.g., tmux, fzf, alacritty)
     #[arg(value_name = "GENERATOR")]

@@ -1,6 +1,4 @@
-use clap::{Subcommand, ValueEnum};
-
-#[derive(Subcommand)]
+#[derive(clap::Subcommand)]
 pub enum ConfigAction {
     /// Show current active configuration
     Show,
@@ -25,10 +23,19 @@ pub enum ConfigAction {
     Reset,
 }
 
-#[derive(ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(clap::ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ConfigKey {
     /// Neovim plugin manager (lazy, packer, default)
     Manager,
     /// Fallback theme name
     Fallback,
+}
+
+impl ConfigAction {
+    pub fn requires_lock(&self) -> bool {
+        match self {
+            ConfigAction::Show | ConfigAction::Check => false,
+            ConfigAction::Edit | ConfigAction::Set { .. } | ConfigAction::Reset => true,
+        }
+    }
 }
