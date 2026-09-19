@@ -150,7 +150,7 @@ impl IrisContext {
     /// Check if there are any generators with broken configs
     pub fn is_any_config_broken(&self) -> bool {
         self.registry.all().iter().any(|g| {
-            g.health_check(&self.paths, &self.state.theme.current_theme)
+            g.check(&self.paths, &self.state.theme.current_theme)
                 .is_error()
         })
     }
@@ -215,18 +215,9 @@ impl IrisContext {
 
         let temp_dir: TempDir = TempDir::new("iris_test").unwrap();
         let root = temp_dir.path();
-        let config: PathBuf = root.join(".config/iris");
-        let cache: PathBuf = root.join(".cache/iris");
 
-        let paths = IrisPaths {
-            config: config.clone(),
-            cache: cache.clone(),
-            generators: cache.join("gen"),
-            bin: cache.join("bin"),
-            state_file: config.join("state.toml"),
-            current_theme: root.join(".cache/nvim/iris_current_theme"),
-            themes: cache.join("themes"),
-        };
+        let paths =
+            IrisPaths::with_base(root.join(".config"), root.join(".cache"), root.join("home"));
 
         for dir in [
             &paths.config,

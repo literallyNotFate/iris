@@ -25,19 +25,11 @@ impl PathResolvable for KittyGenerator {
     }
 
     fn file_name(&self, theme: &str) -> String {
-        if theme.is_empty() {
-            "current_theme.conf".into()
-        } else {
-            format!("{}.conf", theme.to_lowercase())
-        }
+        format!("{}.conf", theme.to_lowercase())
     }
 
-    fn link_path(&self, paths: &IrisPaths, _theme: &str) -> PathBuf {
-        self.config_dir(paths).join(self.file_name(""))
-    }
-
-    fn active_link_path(&self, paths: &IrisPaths) -> Option<PathBuf> {
-        Some(self.config_dir(paths).join(self.file_name("")))
+    fn static_file_name(&self) -> Option<String> {
+        Some("current_theme.conf".into())
     }
 }
 
@@ -54,54 +46,29 @@ impl Generator for KittyGenerator {
 
         engine.inject_line(
             &config_path,
-            &format!("include {}", self.file_name("")),
+            &format!("include {}", self.static_file_name().unwrap()),
             InjectionPosition::Start,
         )
     }
 }
 
 impl Diagnosable for KittyGenerator {
-    fn health_check(&self, paths: &IrisPaths, theme: &str) -> HealthStatus {
-        if !self.is_installed() {
-            return HealthStatus::error(Issue::BinaryNotFound);
-        }
+    fn check_rules(&self) -> &[CheckRule] {
+        &[
+            CheckRule::ConfigExists,
+            CheckRule::ContentValid,
+            CheckRule::SymlinkValid,
+            CheckRule::CacheExists,
+        ]
+    }
 
-        let config_path: PathBuf = self.config_path(paths);
-        let link_path: PathBuf = self.link_path(paths, "");
-
-        let config_status = HealthStatus::check_file(&config_path, Issue::ConfigMissing);
-        if !config_status.is_ok() {
-            return config_status;
-        }
-
-        let content: String = fs::read_to_string(&config_path).unwrap_or_default();
-        let import_line: String = format!("include {}", self.file_name(""));
+    fn validate_content(&self, content: &str, _theme: &str) -> Option<HealthStatus> {
+        let import_line: String = format!("include {}", self.static_file_name().unwrap());
         if !content.contains(&import_line) {
-            return HealthStatus::warn(Issue::ImportMissing);
+            return Some(HealthStatus::warn(Issue::ImportMissing));
         }
 
-        let link_status = HealthStatus::check_symlink(&link_path, Issue::SymlinkInvalid);
-        if !link_status.is_ok() {
-            return link_status;
-        }
-
-        let expected_cache: PathBuf = self.cache_path(paths, theme);
-        if let Ok(target) = fs::read_link(&link_path) {
-            let resolved_target: PathBuf = if target.is_relative() {
-                link_path
-                    .parent()
-                    .map(|p| p.join(&target))
-                    .unwrap_or(target)
-            } else {
-                target
-            };
-
-            if resolved_target != expected_cache {
-                return HealthStatus::warn(Issue::CacheMismatch);
-            }
-        }
-
-        HealthStatus::Ok
+        None
     }
 }
 
@@ -140,7 +107,7 @@ mod tests {
             let generator = KittyGenerator;
             assert_eq!(generator.name(), "kitty");
             assert_eq!(generator.generator_type(), GeneratorType::Terminal);
-            assert_eq!(generator.file_name(""), "current_theme.conf");
+            assert_eq!(generator.file_name("gruvbox"), "gruvbox.conf");
         }
 
         #[test]
@@ -160,11 +127,6 @@ mod tests {
 
             let expected_link_path = expected_config_dir.join("current_theme.conf");
             assert_eq!(generator.link_path(&ctx.paths, theme), expected_link_path);
-
-            assert_eq!(
-                generator.active_link_path(&ctx.paths),
-                Some(expected_link_path)
-            );
             assert_eq!(generator.template_path(), "terminals/kitty");
         }
 
@@ -274,10 +236,10 @@ mod tests {
 
             let config_path = generator.config_path(&ctx.paths);
 
-            let content = format!("include {}", generator.file_name(""));
+            let content = format!("include {}", generator.static_file_name().unwrap());
             fs::write(&config_path, content).unwrap();
 
-            let status = generator.health_check(&ctx.paths, &theme.name);
+            let status = generator.check(&ctx.paths, &theme.name);
             assert!(status.is_ok(), "Expected Ok, got: {status}");
         }
 
@@ -289,9 +251,9 @@ mod tests {
             let generator = KittyGenerator;
             let theme: Theme = Theme::mock();
 
-            let status = generator.health_check(&ctx.paths, &theme.name);
+            let status = generator.check(&ctx.paths, &theme.name);
             assert!(status.is_error(), "Expected Error, got: {status}");
-            assert!(status.contains("Configuration file missing"));
+            assert!(status.is_issue(Issue::ConfigMissing));
         }
 
         #[test]
@@ -312,10 +274,10 @@ mod tests {
             fs::create_dir_all(config_path.parent().unwrap()).unwrap();
             fs::write(&config_path, "font_size 18").unwrap();
 
-            let status = generator.health_check(&ctx.paths, &theme.name);
+            let status = generator.check(&ctx.paths, &theme.name);
 
             assert!(status.is_warning(), "Expected Warning, got: {status}");
-            assert!(status.contains("Theme not imported"));
+            assert!(status.is_issue(Issue::ImportMissing));
         }
 
         #[test]
@@ -335,14 +297,14 @@ mod tests {
             engine.execute_apply(&generator, &mut activity).unwrap();
             fs::write(&config_path, "font_size 12").unwrap();
 
-            let status = generator.health_check(&ctx.paths, &theme.name);
+            let status = generator.check(&ctx.paths, &theme.name);
             engine
                 .execute_fix(&generator, &status, &mut activity)
                 .unwrap();
 
             let content = fs::read_to_string(&config_path).unwrap();
             assert!(content.contains("current_theme.conf"));
-            assert!(generator.health_check(&ctx.paths, &theme.name).is_ok());
+            assert!(generator.check(&ctx.paths, &theme.name).is_ok());
         }
 
         #[test]
@@ -370,14 +332,14 @@ mod tests {
                 fs::remove_file(&link_path_empty).unwrap();
             }
 
-            let status = generator.health_check(&ctx.paths, &theme.name);
+            let status = generator.check(&ctx.paths, &theme.name);
             assert!(status.is_error());
-            assert!(status.contains("Invalid symlink"));
+            assert!(status.is_issue(Issue::SymlinkInvalid));
 
             engine
                 .execute_fix(&generator, &status, &mut activity)
                 .unwrap();
-            assert!(generator.health_check(&ctx.paths, &theme.name).is_ok());
+            assert!(generator.check(&ctx.paths, &theme.name).is_ok());
         }
     }
 }

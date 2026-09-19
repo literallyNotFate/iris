@@ -4,7 +4,7 @@ use colored::*;
 use std::{fs, path::PathBuf, process::Command};
 
 /// Paths manager for application
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct IrisPaths {
     pub config: PathBuf, // ~/.config/iris
     pub cache: PathBuf,  // ~/.cache/iris
@@ -18,28 +18,30 @@ pub struct IrisPaths {
 }
 
 impl IrisPaths {
+    /// Production constructor: reads XDG variables or falls back to home directory
     pub fn new() -> Result<Self> {
         let home: PathBuf = dirs::home_dir().with_context(|| "Could not find home directory!")?;
 
-        let config: PathBuf = std::env::var("XDG_CONFIG_HOME")
+        let config_base: PathBuf = std::env::var("XDG_CONFIG_HOME")
             .map(PathBuf::from)
-            .unwrap_or_else(|_| home.join(".config"))
-            .join("iris");
+            .unwrap_or_else(|_| home.join(".config"));
 
-        let cache: PathBuf = std::env::var("XDG_CACHE_HOME")
+        let cache_base: PathBuf = std::env::var("XDG_CACHE_HOME")
             .map(PathBuf::from)
-            .unwrap_or_else(|_| home.join(".cache"))
-            .join("iris");
+            .unwrap_or_else(|_| home.join(".cache"));
 
-        let nvim_cache: PathBuf = std::env::var("XDG_CACHE_HOME")
-            .map(PathBuf::from)
-            .unwrap_or_else(|_| home.join(".cache"))
-            .join("nvim");
+        Ok(Self::with_base(config_base, cache_base, home))
+    }
 
+    /// Custom constructor: explicitly sets base directories
+    pub fn with_base(config_base: PathBuf, cache_base: PathBuf, _home: PathBuf) -> Self {
+        let config: PathBuf = config_base.join("iris");
+        let cache: PathBuf = cache_base.join("iris");
+        let nvim_cache: PathBuf = cache_base.join("nvim");
         let generators: PathBuf = cache.join("gen");
         let bin: PathBuf = cache.join("bin");
 
-        Ok(Self {
+        Self {
             state_file: config.join("state.toml"),
             current_theme: nvim_cache.join("iris_current_theme"),
             themes: cache.join("themes"),
@@ -47,7 +49,7 @@ impl IrisPaths {
             cache,
             generators,
             bin,
-        })
+        }
     }
 
     /// Creates all folders for iris if there none
@@ -234,20 +236,15 @@ mod tests {
     use super::*;
     use tempdir::TempDir;
 
-    // Helper function to setup paths
-    fn setup_paths() -> IrisPaths {
+    // Helper function to setup isolated paths using TempDir.
+    fn setup_paths() -> (TempDir, IrisPaths) {
         let temp_dir: TempDir = TempDir::new("iris_paths_test").expect("Failed to create temp dir");
         let base = temp_dir.path();
 
-        IrisPaths {
-            config: base.join("config"),
-            cache: base.join("cache"),
-            generators: base.join("cache/generators"),
-            bin: base.join("cache/bin"),
-            state_file: base.join("config/state.toml"),
-            current_theme: base.join("cache/nvim/iris_current_theme"),
-            themes: base.join("cache/themes"),
-        }
+        let paths =
+            IrisPaths::with_base(base.join("config"), base.join("cache"), base.join("home"));
+
+        (temp_dir, paths)
     }
 
     #[test]
@@ -288,7 +285,7 @@ mod tests {
 
     #[test]
     fn should_create_folders_with_ensure_dirs() {
-        let paths: IrisPaths = setup_paths();
+        let (_temp, paths) = setup_paths();
 
         assert!(!paths.config.exists());
         assert!(!paths.themes.exists());
@@ -304,8 +301,8 @@ mod tests {
 
     #[test]
     fn should_clean_gen_folder_with_bin() {
-        let paths: IrisPaths = setup_paths();
-        let gen_path = paths.cache.join("generators");
+        let (_temp, paths) = setup_paths();
+        let gen_path = paths.generators.clone();
         let gen_dummy_file = gen_path.join("bat/bat.conf");
         let bin_dummy_file = paths.bin.join("fzf.sh");
 
@@ -337,7 +334,7 @@ mod tests {
 
     #[test]
     fn should_purge_all() {
-        let paths = setup_paths();
+        let (_temp, paths) = setup_paths();
         let theme_file = paths.themes.join("melange.json");
         let gen_file = paths.generators.join("bat/bat.conf");
 
@@ -360,7 +357,7 @@ mod tests {
 
     #[test]
     fn should_calculate_size_of_directory() {
-        let paths = setup_paths();
+        let (_temp, paths) = setup_paths();
         let root = paths.cache.to_path_buf();
         fs::create_dir_all(&root).unwrap();
 
@@ -386,7 +383,7 @@ mod tests {
 
     #[test]
     fn should_handle_theme_cached_case_insensitivity() {
-        let paths = setup_paths();
+        let (_temp, paths) = setup_paths();
         let palettes_dir = paths.themes.to_path_buf();
         fs::create_dir_all(&palettes_dir).unwrap();
         fs::write(palettes_dir.join("gruvbox.json"), "{}").unwrap();
@@ -399,7 +396,7 @@ mod tests {
 
     #[test]
     fn should_return_all_cached_themes() {
-        let paths = setup_paths();
+        let (_temp, paths) = setup_paths();
         let palettes_dir = paths.themes.to_path_buf();
         fs::create_dir_all(&palettes_dir).unwrap();
 
@@ -423,7 +420,7 @@ mod tests {
 
     #[test]
     fn should_return_theme_cache_path() {
-        let paths = setup_paths();
+        let (_temp, paths) = setup_paths();
         let expected = paths.cache.join("themes/melange.json");
         let path = paths.cached_theme("melange");
         assert_eq!(path, expected);
@@ -431,7 +428,7 @@ mod tests {
 
     #[test]
     fn should_check_health_and_return_correct_error_count() {
-        let paths = setup_paths();
+        let (_temp, paths) = setup_paths();
         let errors_missing = paths.check_health(LoggingVerbosity::Silent);
         assert!(
             errors_missing >= 2,

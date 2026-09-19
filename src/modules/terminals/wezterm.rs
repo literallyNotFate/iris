@@ -25,19 +25,11 @@ impl PathResolvable for WezTermGenerator {
     }
 
     fn file_name(&self, theme: &str) -> String {
-        if theme.is_empty() {
-            "current_theme.lua".into()
-        } else {
-            format!("{}.lua", theme.to_lowercase())
-        }
+        format!("{}.lua", theme.to_lowercase())
     }
 
-    fn link_path(&self, paths: &IrisPaths, _theme: &str) -> PathBuf {
-        self.config_dir(paths).join(self.file_name(""))
-    }
-
-    fn active_link_path(&self, paths: &IrisPaths) -> Option<PathBuf> {
-        Some(self.config_dir(paths).join(self.file_name("")))
+    fn static_file_name(&self) -> Option<String> {
+        Some("current_theme.lua".into())
     }
 }
 
@@ -99,46 +91,20 @@ impl Generator for WezTermGenerator {
 }
 
 impl Diagnosable for WezTermGenerator {
-    fn health_check(&self, paths: &IrisPaths, theme: &str) -> HealthStatus {
-        if !self.is_installed() {
-            return HealthStatus::error(Issue::BinaryNotFound);
-        }
+    fn check_rules(&self) -> &[CheckRule] {
+        &[
+            CheckRule::ConfigExists,
+            CheckRule::ContentValid,
+            CheckRule::SymlinkValid,
+            CheckRule::CacheExists,
+        ]
+    }
 
-        let config_path: PathBuf = self.config_path(paths);
-        let link_path: PathBuf = self.link_path(paths, "");
-
-        let config_status = HealthStatus::check_file(&config_path, Issue::ConfigMissing);
-        if !config_status.is_ok() {
-            return config_status;
-        }
-
-        let content: String = fs::read_to_string(&config_path).unwrap_or_default();
+    fn validate_content(&self, content: &str, _theme: &str) -> Option<HealthStatus> {
         if !content.contains("current_theme") || !content.contains("config.colors") {
-            return HealthStatus::warn(Issue::ImportMissing);
+            return Some(HealthStatus::warn(Issue::ImportMissing));
         }
-
-        let link_status = HealthStatus::check_symlink(&link_path, Issue::SymlinkInvalid);
-        if !link_status.is_ok() {
-            return link_status;
-        }
-
-        let expected_cache: PathBuf = self.cache_path(paths, theme);
-        if let Ok(target) = fs::read_link(&link_path) {
-            let resolved_target: PathBuf = if target.is_relative() {
-                link_path
-                    .parent()
-                    .map(|p| p.join(&target))
-                    .unwrap_or(target)
-            } else {
-                target
-            };
-
-            if resolved_target != expected_cache {
-                return HealthStatus::warn(Issue::CacheMismatch);
-            }
-        }
-
-        HealthStatus::Ok
+        None
     }
 }
 
@@ -241,11 +207,6 @@ mod tests {
 
             let expected_link_path = expected_config_dir.join("current_theme.lua");
             assert_eq!(generator.link_path(&ctx.paths, theme), expected_link_path);
-
-            assert_eq!(
-                generator.active_link_path(&ctx.paths),
-                Some(expected_link_path)
-            );
             assert_eq!(generator.template_path(), "terminals/wezterm");
         }
 
@@ -365,7 +326,7 @@ mod tests {
             let valid_config = "local has_iris, current_theme = pcall(require, 'current_theme')\nconfig.colors = current_theme.colors";
             fs::write(&config_path, valid_config).unwrap();
 
-            let status = generator.health_check(&ctx.paths, &theme.name);
+            let status = generator.check(&ctx.paths, &theme.name);
             assert!(status.is_ok(), "Expected Ok, got: {status}");
         }
 
@@ -377,9 +338,9 @@ mod tests {
             let generator = WezTermGenerator;
             let theme: Theme = Theme::mock();
 
-            let status = generator.health_check(&ctx.paths, &theme.name);
+            let status = generator.check(&ctx.paths, &theme.name);
             assert!(status.is_error(), "Expected Error, got: {status}");
-            assert!(status.contains("Configuration file missing"));
+            assert!(status.is_issue(Issue::ConfigMissing));
         }
 
         #[test]
@@ -399,10 +360,10 @@ mod tests {
             let config_path = generator.config_path(&ctx.paths);
             fs::write(&config_path, "local config = wezterm.config_builder()").unwrap();
 
-            let status = generator.health_check(&ctx.paths, &theme.name);
+            let status = generator.check(&ctx.paths, &theme.name);
 
             assert!(status.is_warning(), "Expected Warning, got: {status}");
-            assert!(status.contains("Theme not imported"));
+            assert!(status.is_issue(Issue::ImportMissing));
         }
 
         #[test]
@@ -427,7 +388,8 @@ mod tests {
             )
             .unwrap();
 
-            let status = generator.health_check(&ctx.paths, &theme.name);
+            let status = generator.check(&ctx.paths, &theme.name);
+            assert!(status.is_issue(Issue::ImportMissing));
             engine
                 .execute_fix(&generator, &status, &mut activity)
                 .unwrap();
@@ -435,7 +397,7 @@ mod tests {
             let content = fs::read_to_string(&config_path).unwrap();
             assert!(content.contains("current_theme"));
             assert!(content.contains("config.colors = current_theme.colors"));
-            assert!(generator.health_check(&ctx.paths, &theme.name).is_ok());
+            assert!(generator.check(&ctx.paths, &theme.name).is_ok());
         }
 
         #[test]
@@ -458,24 +420,19 @@ mod tests {
 
             engine.execute_apply(&generator, &mut activity).unwrap();
 
-            let link_path_empty = generator.link_path(&ctx.paths, "");
-            if link_path_empty.exists() {
-                fs::remove_file(&link_path_empty).unwrap();
+            let link_path = generator.link_path(&ctx.paths, &theme.name);
+            if link_path.exists() || link_path.is_symlink() {
+                let _ = fs::remove_file(&link_path);
             }
 
-            let link_path_theme = generator.link_path(&ctx.paths, &theme.name);
-            if link_path_theme.exists() && link_path_theme != link_path_empty {
-                fs::remove_file(&link_path_theme).unwrap();
-            }
-
-            let status = generator.health_check(&ctx.paths, &theme.name);
-            assert!(status.is_error());
-            assert!(status.contains("Invalid symlink"));
+            let status = generator.check(&ctx.paths, &theme.name);
+            assert!(status.is_error(), "Expected Error, got: {status}");
+            assert!(status.is_issue(Issue::SymlinkInvalid));
 
             engine
                 .execute_fix(&generator, &status, &mut activity)
                 .unwrap();
-            assert!(generator.health_check(&ctx.paths, &theme.name).is_ok());
+            assert!(generator.check(&ctx.paths, &theme.name).is_ok());
         }
     }
 }

@@ -22,6 +22,11 @@ pub trait PathResolvable: super::Identifiable {
         self.base_file_name()
     }
 
+    /// Name of the static/fixed configuration or theme file (e.g., "current_theme.toml")
+    fn static_file_name(&self) -> Option<String> {
+        None
+    }
+
     /// Defines the configuration source for a specific generator
     fn config_source(&self) -> ConfigSource {
         ConfigSource::Default
@@ -59,15 +64,13 @@ pub trait PathResolvable: super::Identifiable {
     }
 
     /// Returns the path where the application expects its theme file or link.
-    /// Default: `~/.config/[name]/[file_name(theme)]`
+    /// Default: Uses `static_file_name` if available, otherwise `file_name(theme)`
     fn link_path(&self, paths: &IrisPaths, theme: &str) -> PathBuf {
-        self.config_dir(paths).join(self.file_name(theme))
-    }
+        let file_name: String = self
+            .static_file_name()
+            .unwrap_or_else(|| self.file_name(theme));
 
-    /// Returns the path to a static active symlink, if used by the application.
-    /// Default: `None` (meaning the application uses dynamic theme imports)
-    fn active_link_path(&self, _paths: &IrisPaths) -> Option<PathBuf> {
-        None
+        self.config_dir(paths).join(file_name)
     }
 
     /// Returns the path to the current active theme file

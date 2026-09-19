@@ -61,50 +61,26 @@ impl Generator for BtopGenerator {
 }
 
 impl Diagnosable for BtopGenerator {
-    fn health_check(&self, paths: &IrisPaths, theme: &str) -> HealthStatus {
-        if !self.is_installed() {
-            return HealthStatus::error(Issue::BinaryNotFound);
+    fn check_rules(&self) -> &[CheckRule] {
+        &[
+            CheckRule::ConfigExists,
+            CheckRule::ContentValid,
+            CheckRule::SymlinkValid,
+            CheckRule::CacheExists,
+        ]
+    }
+
+    fn validate_content(&self, content: &str, theme: &str) -> Option<HealthStatus> {
+        if theme.is_empty() {
+            return None;
         }
 
-        let conf_path: PathBuf = self.config_path(paths);
-        let link_path: PathBuf = self.link_path(paths, theme);
-
-        let config_status = HealthStatus::check_file(&conf_path, Issue::ConfigMissing);
-        if !config_status.is_ok() {
-            return config_status;
+        let expected_line: String = format!("color_theme = \"{}\"", theme.to_lowercase());
+        if !content.contains(&expected_line) {
+            return Some(HealthStatus::warn(Issue::MarkerMissing));
         }
 
-        if !theme.is_empty() {
-            let content: String = fs::read_to_string(&conf_path).unwrap_or_default();
-            let expected_line: String = format!("color_theme = \"{}\"", theme.to_lowercase());
-
-            if !content.contains(&expected_line) {
-                return HealthStatus::warn(Issue::MarkerMissing);
-            }
-
-            let link_status = HealthStatus::check_symlink(&link_path, Issue::SymlinkInvalid);
-            if !link_status.is_ok() {
-                return link_status;
-            }
-
-            let expected_cache: PathBuf = self.cache_path(paths, theme);
-            if let Ok(target) = fs::read_link(&link_path) {
-                let resolved_target: PathBuf = if target.is_relative() {
-                    link_path
-                        .parent()
-                        .map(|p| p.join(&target))
-                        .unwrap_or(target)
-                } else {
-                    target
-                };
-
-                if resolved_target != expected_cache {
-                    return HealthStatus::warn(Issue::CacheMismatch);
-                }
-            }
-        }
-
-        HealthStatus::Ok
+        None
     }
 }
 
@@ -301,7 +277,7 @@ mod tests {
             )
             .unwrap();
 
-            let status = generator.health_check(&ctx.paths, &theme.name);
+            let status = generator.check(&ctx.paths, &theme.name);
             assert!(status.is_ok(), "Expected Ok, got: {status}");
         }
 
@@ -311,10 +287,10 @@ mod tests {
 
             let (_, ctx) = IrisContext::mock();
             let generator = BtopGenerator;
-            let status = generator.health_check(&ctx.paths, &ctx.state.theme.current_theme);
+            let status = generator.check(&ctx.paths, &ctx.state.theme.current_theme);
 
             assert!(status.is_error(), "Expected Error, got: {status}");
-            assert!(status.contains("Configuration file missing"));
+            assert!(status.is_issue(Issue::ConfigMissing));
         }
 
         #[test]
@@ -330,13 +306,10 @@ mod tests {
 
             fs::create_dir_all(btop_root).unwrap();
             fs::write(&btop_conf, "color_theme = \"default\"\n").unwrap();
-            let status = generator.health_check(&ctx.paths, &theme.name);
+            let status = generator.check(&ctx.paths, &theme.name);
 
             assert!(status.is_warning(), "Expected Warning, got: {status}");
-            assert!(
-                status.contains("Marker missing"),
-                "Expected Warning, got: {status}"
-            );
+            assert!(status.is_issue(Issue::MarkerMissing));
         }
 
         #[test]
@@ -356,10 +329,10 @@ mod tests {
             )
             .unwrap();
 
-            let status = generator.health_check(&ctx.paths, &theme.name);
+            let status = generator.check(&ctx.paths, &theme.name);
 
             assert!(status.is_warning(), "Expected Warning, got: {status}");
-            assert!(status.contains("Marker missing"));
+            assert!(status.is_issue(Issue::MarkerMissing));
 
             let mut activity = ctx.log.step("Test", false).muted();
             let engine = ctx.engine(&theme);
@@ -396,7 +369,7 @@ mod tests {
 
             fs::remove_file(&link_path).unwrap();
 
-            let status = generator.health_check(&ctx.paths, &theme.name);
+            let status = generator.check(&ctx.paths, &theme.name);
             assert!(status.is_error(), "Expected Error, got: {status}");
 
             engine
@@ -404,7 +377,7 @@ mod tests {
                 .unwrap();
 
             assert!(link_path.exists(), "Fix should restore the symlink");
-            assert!(generator.health_check(&ctx.paths, &theme.name).is_ok());
+            assert!(generator.check(&ctx.paths, &theme.name).is_ok());
         }
     }
 }

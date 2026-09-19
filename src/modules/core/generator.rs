@@ -137,7 +137,7 @@ impl Cleanable for GeneratorMock {
 
 #[cfg(test)]
 impl Diagnosable for GeneratorMock {
-    fn health_check(&self, _paths: &IrisPaths, _theme: &str) -> crate::models::HealthStatus {
+    fn check(&self, _paths: &IrisPaths, _theme: &str) -> crate::models::HealthStatus {
         crate::models::HealthStatus::Ok
     }
 }

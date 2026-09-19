@@ -27,6 +27,10 @@ impl PathResolvable for FzfGenerator {
         format!("{}.sh", theme.to_lowercase())
     }
 
+    fn config_path(&self, paths: &IrisPaths) -> PathBuf {
+        self.zshrc_path(paths)
+    }
+
     fn link_path(&self, paths: &IrisPaths, _theme: &str) -> PathBuf {
         self.zshrc_path(paths)
     }
@@ -82,7 +86,7 @@ impl FzfGenerator {
 
         if content != cleaned {
             let backup = target.with_extension("zshrc.bak");
-            let rollback_guard = crate::guards::FsRollbackGuard::new(target.clone(), backup);
+            let rollback_guard = crate::guards::RollbackGuard::new(target.clone(), backup);
             fs::write(target, cleaned.trim())?;
             rollback_guard.commit();
         }
@@ -92,39 +96,20 @@ impl FzfGenerator {
 }
 
 impl Diagnosable for FzfGenerator {
-    fn health_check(&self, paths: &IrisPaths, theme: &str) -> HealthStatus {
-        if !self.is_installed() {
-            return HealthStatus::error(Issue::BinaryNotFound);
+    fn check_rules(&self) -> &[CheckRule] {
+        &[
+            CheckRule::ConfigExists,
+            CheckRule::MarkersExist,
+            CheckRule::ContentValid,
+            CheckRule::CacheExists,
+        ]
+    }
+
+    fn validate_content(&self, content: &str, _theme: &str) -> Option<HealthStatus> {
+        if !content.contains("fzf") || !content.contains("source") {
+            return Some(HealthStatus::warn(Issue::ImportMissing));
         }
-
-        let zshrc: PathBuf = self.zshrc_path(paths);
-        if !zshrc.exists() {
-            return HealthStatus::error(Issue::ConfigMissing);
-        }
-
-        let content: String = match fs::read_to_string(&zshrc) {
-            Ok(c) => c,
-            Err(_) => return HealthStatus::error(Issue::ConfigMissing),
-        };
-        let start_marker: String = format!("# [iris:begin:{}]", self.name());
-        let end_marker: String = format!("# [iris:end:{}]", self.name());
-
-        if !content.contains(&start_marker) || !content.contains(&end_marker) {
-            return HealthStatus::warn(Issue::MarkerMissing);
-        }
-
-        if !content.contains("fzf") {
-            return HealthStatus::warn(Issue::ImportMissing);
-        }
-
-        if !theme.is_empty() {
-            let cache_file: PathBuf = self.cache_path(paths, theme);
-            if !cache_file.exists() {
-                return HealthStatus::warn(Issue::CacheMissing);
-            }
-        }
-
-        HealthStatus::Ok
+        None
     }
 }
 
@@ -202,7 +187,6 @@ mod tests {
 
             let expected_cache_path = ctx.paths.generators.join("fzf/tokyonight.sh");
             assert_eq!(generator.cache_path(&ctx.paths, theme), expected_cache_path);
-
             assert_eq!(generator.template_path(), "tools/fzf");
         }
 
@@ -296,7 +280,7 @@ mod tests {
                 .execute_apply(&generator, &mut activity)
                 .unwrap();
 
-            let status = generator.health_check(&ctx.paths, &theme.name);
+            let status = generator.check(&ctx.paths, &theme.name);
             assert!(status.is_ok(), "Expected Ok, got: {status}");
         }
 
@@ -306,9 +290,10 @@ mod tests {
 
             let (_, ctx) = IrisContext::mock();
             let generator = FzfGenerator;
-            let status = generator.health_check(&ctx.paths, &ctx.state.theme.current_theme);
+            let status = generator.check(&ctx.paths, &ctx.state.theme.current_theme);
 
             assert!(status.is_error(), "Expected Error, got: {status}");
+            assert!(status.is_issue(Issue::ConfigMissing));
         }
 
         #[test]
@@ -322,7 +307,7 @@ mod tests {
 
             fs::write(&zshrc_path, "alias ls='ls --color=auto'").unwrap();
 
-            let status = generator.health_check(&ctx.paths, &ctx.state.theme.current_theme);
+            let status = generator.check(&ctx.paths, &ctx.state.theme.current_theme);
             assert!(status.is_warning(), "Expected Warning, got: {status}");
         }
 
@@ -351,7 +336,7 @@ mod tests {
                 fs::remove_file(&cache_file).unwrap();
             }
 
-            let status = generator.health_check(&ctx.paths, &theme.name);
+            let status = generator.check(&ctx.paths, &theme.name);
             assert!(status.is_warning(), "Expected Warning, got: {status}");
         }
 
@@ -379,7 +364,7 @@ mod tests {
             }
             fs::write(&cache_file, "echo 'test'").unwrap();
 
-            let status = generator.health_check(&ctx.paths, &theme.name);
+            let status = generator.check(&ctx.paths, &theme.name);
             assert!(status.is_warning(), "Expected warning, got: {status}");
 
             engine
@@ -389,7 +374,7 @@ mod tests {
             let updated_content = fs::read_to_string(&zshrc).unwrap();
             assert!(updated_content.contains("[iris:begin:fzf]"));
 
-            let final_status = generator.health_check(&ctx.paths, &theme.name);
+            let final_status = generator.check(&ctx.paths, &theme.name);
             assert!(final_status.is_ok(), "Should be Ok, got: {final_status}");
         }
 

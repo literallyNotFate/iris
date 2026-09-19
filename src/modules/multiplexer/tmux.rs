@@ -61,52 +61,29 @@ impl Generator for TmuxGenerator {
 }
 
 impl Diagnosable for TmuxGenerator {
-    fn health_check(&self, paths: &IrisPaths, theme: &str) -> HealthStatus {
-        if !self.is_installed() {
-            return HealthStatus::error(Issue::BinaryNotFound);
+    fn check_rules(&self) -> &[CheckRule] {
+        &[
+            CheckRule::ConfigExists,
+            CheckRule::ContentValid,
+            CheckRule::SymlinkValid,
+            CheckRule::CacheExists,
+        ]
+    }
+
+    fn validate_content(&self, content: &str, theme: &str) -> Option<HealthStatus> {
+        if theme.is_empty() {
+            return None;
         }
 
-        let conf_path: PathBuf = self.config_path(paths);
-        let link_path: PathBuf = self.link_path(paths, theme);
-
-        let config_status = HealthStatus::check_file(&conf_path, Issue::ConfigMissing);
-        if !config_status.is_ok() {
-            return config_status;
+        let expected_import: String = format!(
+            "source-file \"~/.config/tmux/themes/{}.conf\"",
+            theme.to_lowercase()
+        );
+        if !content.contains(&expected_import) {
+            return Some(HealthStatus::warn(Issue::ImportMissing));
         }
 
-        if !theme.is_empty() {
-            let content: String = fs::read_to_string(&conf_path).unwrap_or_default();
-            let expected_import: String = format!(
-                "source-file \"~/.config/tmux/themes/{}.conf\"",
-                theme.to_lowercase()
-            );
-            if !content.contains(&expected_import) {
-                return HealthStatus::warn(Issue::ImportMissing);
-            }
-
-            let link_status = HealthStatus::check_symlink(&link_path, Issue::SymlinkInvalid);
-            if !link_status.is_ok() {
-                return link_status;
-            }
-
-            let expected_cache: PathBuf = self.cache_path(paths, theme);
-            if let Ok(target) = fs::read_link(&link_path) {
-                let resolved_target: PathBuf = if target.is_relative() {
-                    link_path
-                        .parent()
-                        .map(|p| p.join(&target))
-                        .unwrap_or(target)
-                } else {
-                    target
-                };
-
-                if resolved_target != expected_cache {
-                    return HealthStatus::warn(Issue::CacheMismatch);
-                }
-            }
-        }
-
-        HealthStatus::Ok
+        None
     }
 }
 
@@ -312,7 +289,7 @@ mod tests {
                 .execute_apply(&generator, &mut activity)
                 .unwrap();
 
-            let status = generator.health_check(&ctx.paths, &theme.name);
+            let status = generator.check(&ctx.paths, &theme.name);
             assert!(status.is_ok(), "Expected Ok, got: {status}");
         }
 
@@ -335,9 +312,9 @@ mod tests {
             fs::write(&tmux_conf, "set -g mouse on").unwrap();
             ctx.state.theme.current_theme = theme.name.clone();
 
-            let status = generator.health_check(&ctx.paths, &theme.name);
+            let status = generator.check(&ctx.paths, &theme.name);
             assert!(status.is_warning(), "Expected Warning, got: {status}");
-            assert!(status.contains("Theme not imported"));
+            assert!(status.is_issue(Issue::ImportMissing));
         }
 
         #[test]
@@ -359,9 +336,9 @@ mod tests {
             ctx.state.theme.current_theme = theme.name.clone();
             fs::write(&tmux_conf, "source-file ~/.config/tmux/themes/wrong.conf").unwrap();
 
-            let status = generator.health_check(&ctx.paths, &theme.name);
+            let status = generator.check(&ctx.paths, &theme.name);
             assert!(status.is_warning(), "Expected Warning, got: {status}");
-            assert!(status.contains("Theme not imported"));
+            assert!(status.is_issue(Issue::ImportMissing));
         }
 
         #[test]
@@ -401,9 +378,9 @@ mod tests {
                 fs::remove_file(&link).unwrap();
             }
 
-            let status = generator.health_check(&ctx.paths, &theme.name);
+            let status = generator.check(&ctx.paths, &theme.name);
             assert!(status.is_error(), "Expected Error, got: {status}");
-            assert!(status.contains("Invalid symlink"));
+            assert!(status.is_issue(Issue::SymlinkInvalid));
         }
 
         #[test]
@@ -432,7 +409,7 @@ mod tests {
             fs::write(&tmux_conf, "run '~/.tmux/plugins/tpm/tpm'").unwrap();
 
             let mut activity = ctx.log.step("Test", false).muted();
-            let status = generator.health_check(&ctx.paths, &theme.name);
+            let status = generator.check(&ctx.paths, &theme.name);
             ctx.engine(&theme)
                 .execute_fix(&generator, &status, &mut activity)
                 .unwrap();
@@ -475,16 +452,16 @@ mod tests {
             )
             .unwrap();
 
-            let status = generator.health_check(&ctx.paths, &theme.name);
+            let status = generator.check(&ctx.paths, &theme.name);
             assert!(
                 status.is_warning() || status.is_error(),
-                "Expected Warning/Error for wrong theme, got: {status}"
+                "Expected Warn/Err, got: {status}"
             );
 
             engine
                 .execute_fix(&generator, &status, &mut activity)
                 .unwrap();
-            assert!(generator.health_check(&ctx.paths, &theme.name).is_ok());
+            assert!(generator.check(&ctx.paths, &theme.name).is_ok());
         }
 
         #[test]
@@ -518,14 +495,14 @@ mod tests {
                 fs::remove_file(&link_path).unwrap();
             }
 
-            let status = generator.health_check(&ctx.paths, &theme.name);
+            let status = generator.check(&ctx.paths, &theme.name);
             assert!(status.is_error(), "Expected Error , got: {status}");
 
             engine
                 .execute_fix(&generator, &status, &mut activity)
                 .unwrap();
             assert!(link_path.exists(), "Symlink should be recreated after fix");
-            assert!(generator.health_check(&ctx.paths, &theme.name).is_ok());
+            assert!(generator.check(&ctx.paths, &theme.name).is_ok());
         }
     }
 }

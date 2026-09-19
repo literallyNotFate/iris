@@ -16,7 +16,6 @@ pub enum DiffStyle {
     /// Simple string line injection strictly at the top of the file (e.g., Kitty `include`)
     InjectTop {
         build_ideal_line: fn(&str) -> String,
-        /// Функция или префикс для фильтрации старых строк (чтобы удалять старые инклюды)
         line_filter: fn(&str) -> bool,
     },
     /// Complex custom composite layout handled by an isolated closure

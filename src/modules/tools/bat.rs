@@ -4,7 +4,7 @@ use crate::{
     models::{HealthStatus, Issue, Theme},
     modules::{Generator, GeneratorType, Strategy, strategy::PipelineStep, traits::*},
 };
-use std::{env, fs, path::PathBuf, process::Command};
+use std::{fs, path::PathBuf, process::Command};
 
 /// Config generator for bat
 pub struct BatGenerator;
@@ -30,6 +30,10 @@ impl PathResolvable for BatGenerator {
 
     fn link_path(&self, paths: &IrisPaths, theme: &str) -> PathBuf {
         self.theme_path(paths, theme)
+    }
+
+    fn config_path(&self, paths: &IrisPaths) -> PathBuf {
+        self.zshrc_path(paths)
     }
 }
 
@@ -141,35 +145,21 @@ impl BatGenerator {
 }
 
 impl Diagnosable for BatGenerator {
-    fn health_check(&self, paths: &IrisPaths, theme: &str) -> HealthStatus {
-        if !self.is_installed() {
-            return HealthStatus::error(Issue::BinaryNotFound);
+    fn check_rules(&self) -> &[CheckRule] {
+        &[
+            CheckRule::EnvValid("BAT_CONFIG_PATH", |paths| paths.bin.join("bat.conf")),
+            CheckRule::ContentValid,
+            CheckRule::CacheExists,
+            CheckRule::SymlinkValid,
+            CheckRule::ConfigExists,
+        ]
+    }
+
+    fn validate_content(&self, content: &str, _theme: &str) -> Option<HealthStatus> {
+        if !content.contains("BAT_CONFIG_PATH") {
+            return Some(HealthStatus::warn(Issue::ImportMissing));
         }
-
-        if !theme.is_empty() {
-            let link = self.theme_path(paths, theme);
-            if !link.exists() {
-                return HealthStatus::error(Issue::CacheMissing);
-            }
-        }
-
-        let zshrc: PathBuf = self.zshrc_path(paths);
-        if zshrc.exists() {
-            if let Ok(content) = fs::read_to_string(&zshrc) {
-                if !content.contains("BAT_CONFIG_PATH") {
-                    return HealthStatus::warn(Issue::ConfigMissing);
-                }
-            }
-        }
-
-        let expected_env: PathBuf = paths.bin.join("bat.conf");
-        let current_env: String = env::var("BAT_CONFIG_PATH").unwrap_or_default();
-
-        if current_env != expected_env.to_string_lossy() {
-            return HealthStatus::warn(Issue::EnvMismatch);
-        }
-
-        HealthStatus::Ok
+        None
     }
 }
 
@@ -451,7 +441,7 @@ mod tests {
 
                 let expected_config = ctx.paths.bin.join("bat.conf");
                 temp_env::with_var("BAT_CONFIG_PATH", Some(expected_config), || {
-                    let status = generator.health_check(&ctx.paths, &theme.name);
+                    let status = generator.check(&ctx.paths, &theme.name);
                     assert!(status.is_ok(), "Expected Ok, got: {status}");
                 });
             });
@@ -465,9 +455,9 @@ mod tests {
             let generator = BatGenerator;
 
             temp_env::with_var("BAT_CONFIG_PATH", Some("/wrong/path/config.conf"), || {
-                let status = generator.health_check(&ctx.paths, &ctx.state.theme.current_theme);
+                let status = generator.check(&ctx.paths, &ctx.state.theme.current_theme);
                 assert!(status.is_warning(), "Expected Warning, got: {status}");
-                assert!(status.contains("Environment variable mismatch"));
+                assert!(status.is_issue(Issue::EnvMismatch));
             });
         }
 
@@ -475,20 +465,25 @@ mod tests {
         fn should_return_health_error_missing_zshrc_import_for_bat() {
             skip_if_not_installed!(BatGenerator);
 
-            let (_, ctx) = IrisContext::mock();
+            let (_, mut ctx) = IrisContext::with_templates(vec![("tools/bat", MOCK_TEMPLATE)]);
             let generator = BatGenerator;
+            let theme: Theme = Theme::mock();
+
+            let mut activity = ctx.log.step("Test", false).muted();
+            ctx.state.theme.current_theme = theme.name.clone();
+
+            ctx.engine(&theme)
+                .execute_apply(&generator, &mut activity)
+                .unwrap();
+
             let zshrc = generator.zshrc_path(&ctx.paths);
+            fs::write(&zshrc, "# broken zshrc without import").unwrap();
 
-            if let Some(parent) = zshrc.parent() {
-                fs::create_dir_all(parent).unwrap();
-            }
-            fs::write(&zshrc, "# empty zshrc").unwrap();
-
-            let expected_env = ctx.paths.bin.join("bat.conf");
-            temp_env::with_var("BAT_CONFIG_PATH", Some(expected_env.as_os_str()), || {
-                let status = generator.health_check(&ctx.paths, "");
-                assert!(status.is_warning());
-                assert!(status.contains("Configuration file missing"));
+            let expected_config = ctx.paths.bin.join("bat.conf");
+            temp_env::with_var("BAT_CONFIG_PATH", Some(expected_config), || {
+                let status = generator.check(&ctx.paths, &theme.name);
+                assert!(status.is_warning(), "Expected Warning, got: {status}");
+                assert!(status.is_issue(Issue::ImportMissing));
             });
         }
 
@@ -525,13 +520,13 @@ mod tests {
                             fs::remove_file(&link).unwrap();
                         }
 
-                        let status = generator.health_check(&ctx.paths, &theme.name);
+                        let status = generator.check(&ctx.paths, &theme.name);
                         assert!(status.is_error(), "Expected Error, got: {status}");
 
                         engine
                             .execute_fix(&generator, &status, &mut activity)
                             .unwrap();
-                        assert!(generator.health_check(&ctx.paths, &theme.name).is_ok());
+                        assert!(generator.check(&ctx.paths, &theme.name).is_ok());
                     });
                 },
             );

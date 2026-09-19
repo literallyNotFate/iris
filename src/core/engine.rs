@@ -1,5 +1,5 @@
 use crate::{
-    guards::FsRollbackGuard,
+    guards::RollbackGuard,
     infra::{IrisPaths, Templater},
     log::Activity,
     models::{HealthStatus, Theme},
@@ -134,7 +134,7 @@ impl<'a, 't> IrisEngine<'a, 't> {
                 .with_context(|| format!("Failed to copy file: {}", dst.to_string_lossy()))?;
         }
 
-        let guard = FsRollbackGuard::new(dst.to_path_buf(), backup);
+        let guard = RollbackGuard::new(dst.to_path_buf(), backup);
         let tmp: PathBuf = dst.with_extension(format!("tmp-{}", std::process::id()));
 
         std::fs::write(&tmp, content).context("Failed to write to a tmp file")?;
@@ -258,7 +258,7 @@ impl<'a, 't> IrisEngine<'a, 't> {
         F: FnOnce() -> Result<()>,
     {
         let backup_path: PathBuf = link_path.with_extension("bak");
-        let guard = FsRollbackGuard::new(link_path.clone(), backup_path);
+        let guard = RollbackGuard::new(link_path.clone(), backup_path);
 
         op()?;
 

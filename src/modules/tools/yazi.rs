@@ -1,9 +1,8 @@
 use crate::{
     infra::IrisPaths,
-    models::{HealthStatus, Issue, Theme},
+    models::Theme,
     modules::{Generator, GeneratorType, Strategy, traits::*},
 };
-use std::{fs, path::PathBuf};
 
 /// Config generator for yazi
 pub struct YaziGenerator;
@@ -24,19 +23,16 @@ impl PathResolvable for YaziGenerator {
     }
 
     fn file_name(&self, theme: &str) -> String {
-        if theme.is_empty() {
-            "theme.toml".into()
-        } else {
-            format!("{}.toml", theme.to_lowercase())
-        }
+        format!("{}.toml", theme.to_lowercase())
     }
 
-    fn link_path(&self, paths: &IrisPaths, _theme: &str) -> PathBuf {
-        self.config_dir(paths).join(self.file_name(""))
+    fn static_file_name(&self) -> Option<String> {
+        Some("theme.toml".into())
     }
 
-    fn active_link_path(&self, paths: &IrisPaths) -> Option<PathBuf> {
-        Some(self.config_dir(paths).join(self.file_name("")))
+    fn link_path(&self, paths: &IrisPaths, _theme: &str) -> std::path::PathBuf {
+        self.config_dir(paths)
+            .join(self.static_file_name().unwrap())
     }
 }
 
@@ -58,39 +54,8 @@ impl Generator for YaziGenerator {
 }
 
 impl Diagnosable for YaziGenerator {
-    fn health_check(&self, paths: &IrisPaths, theme: &str) -> HealthStatus {
-        if !self.is_installed() {
-            return HealthStatus::error(Issue::BinaryNotFound);
-        }
-
-        let link_path: PathBuf = self.link_path(paths, "");
-
-        let link_status = HealthStatus::check_symlink(&link_path, Issue::SymlinkInvalid);
-        if !link_status.is_ok() {
-            return link_status;
-        }
-
-        let expected_cache: PathBuf = self.cache_path(paths, theme);
-        if !expected_cache.exists() {
-            return HealthStatus::warn(Issue::CacheMissing);
-        }
-
-        if let Ok(target) = fs::read_link(&link_path) {
-            let resolved_target: PathBuf = if target.is_relative() {
-                link_path
-                    .parent()
-                    .map(|p| p.join(&target))
-                    .unwrap_or(target)
-            } else {
-                target
-            };
-
-            if resolved_target != expected_cache {
-                return HealthStatus::warn(Issue::CacheMismatch);
-            }
-        }
-
-        HealthStatus::Ok
+    fn check_rules(&self) -> &[CheckRule] {
+        &[CheckRule::SymlinkValid, CheckRule::CacheExists]
     }
 }
 
@@ -114,7 +79,7 @@ impl Diffable for YaziGenerator {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::IrisContext;
+    use crate::{core::IrisContext, models::Issue};
 
     /// Unit-tests for yazi
     mod unit {
@@ -145,7 +110,6 @@ mod tests {
 
             let expected_link_path = expected_config_dir.join("theme.toml");
             assert_eq!(generator.link_path(&ctx.paths, theme), expected_link_path);
-
             assert_eq!(generator.template_path(), "tools/yazi");
         }
 
@@ -186,7 +150,7 @@ mod tests {
             let yazi_theme_link = expected_yazi_dir.join("theme.toml");
             assert!(yazi_theme_link.exists());
 
-            let cache_content = fs::read_to_string(yazi_theme_link).unwrap();
+            let cache_content = std::fs::read_to_string(yazi_theme_link).unwrap();
             assert!(cache_content.contains("[manager]"));
         }
 
@@ -258,7 +222,7 @@ mod tests {
                 .execute_apply(&generator, &mut activity)
                 .unwrap();
 
-            let status = generator.health_check(&ctx.paths, &theme.name);
+            let status = generator.check(&ctx.paths, &theme.name);
             assert!(status.is_ok(), "Expected Ok, got: {status}");
         }
 
@@ -271,12 +235,12 @@ mod tests {
             let link = generator.link_path(&ctx.paths, "");
 
             if link.exists() || link.is_symlink() {
-                let _ = fs::remove_file(&link);
+                let _ = std::fs::remove_file(&link);
             }
 
-            let status = generator.health_check(&ctx.paths, &ctx.state.theme.current_theme);
+            let status = generator.check(&ctx.paths, &ctx.state.theme.current_theme);
             assert!(status.is_error(), "Expected Error, got: {status}");
-            assert!(status.contains("Invalid symlink"));
+            assert!(status.is_issue(Issue::SymlinkInvalid));
         }
 
         #[test]
@@ -295,16 +259,16 @@ mod tests {
 
             let link_path = generator.link_path(&ctx.paths, "");
             let fake_wrong_target = ctx.paths.cache.join("wrong_theme.toml");
-            fs::write(&fake_wrong_target, "").unwrap();
+            std::fs::write(&fake_wrong_target, "").unwrap();
 
             if link_path.is_symlink() || link_path.exists() {
-                fs::remove_file(&link_path).unwrap();
+                std::fs::remove_file(&link_path).unwrap();
             }
             std::os::unix::fs::symlink(&fake_wrong_target, &link_path).unwrap();
 
-            let status = generator.health_check(&ctx.paths, &theme.name);
+            let status = generator.check(&ctx.paths, &theme.name);
             assert!(status.is_warning(), "Expected Warning, got: {status}");
-            assert!(status.contains("Cache mismatch"));
+            assert!(status.is_issue(Issue::CacheMismatch));
         }
 
         #[test]
@@ -322,11 +286,11 @@ mod tests {
             let link_path = generator.link_path(&ctx.paths, &theme.name);
             let cache_file = generator.cache_path(&ctx.paths, &theme.name);
 
-            fs::remove_file(&link_path).unwrap();
+            std::fs::remove_file(&link_path).unwrap();
 
-            let status = generator.health_check(&ctx.paths, &theme.name);
+            let status = generator.check(&ctx.paths, &theme.name);
             assert!(status.is_error());
-            assert!(status.contains("Invalid symlink"));
+            assert!(status.is_issue(Issue::SymlinkInvalid));
 
             engine
                 .execute_fix(&generator, &status, &mut activity)
@@ -335,11 +299,11 @@ mod tests {
 
             #[cfg(unix)]
             {
-                let target = fs::read_link(&link_path).unwrap();
+                let target = std::fs::read_link(&link_path).unwrap();
                 assert_eq!(target, cache_file);
             }
 
-            assert!(generator.health_check(&ctx.paths, &theme.name).is_ok());
+            assert!(generator.check(&ctx.paths, &theme.name).is_ok());
         }
 
         #[test]
@@ -357,12 +321,12 @@ mod tests {
             let cache_file = generator.cache_path(&ctx.paths, &theme.name);
             let link_file = generator.link_path(&ctx.paths, "");
 
-            fs::remove_file(&cache_file).unwrap();
+            std::fs::remove_file(&cache_file).unwrap();
             if link_file.exists() || link_file.is_symlink() {
-                fs::remove_file(&link_file).unwrap();
+                std::fs::remove_file(&link_file).unwrap();
             }
 
-            let status = generator.health_check(&ctx.paths, &theme.name);
+            let status = generator.check(&ctx.paths, &theme.name);
             assert!(status.is_error() || status.is_warning());
 
             engine
@@ -370,7 +334,7 @@ mod tests {
                 .unwrap();
 
             assert!(cache_file.exists());
-            assert!(generator.health_check(&ctx.paths, &theme.name).is_ok());
+            assert!(generator.check(&ctx.paths, &theme.name).is_ok());
         }
     }
 }

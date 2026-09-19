@@ -38,10 +38,6 @@ impl PathResolvable for BottomGenerator {
     fn link_path(&self, paths: &IrisPaths, _theme: &str) -> PathBuf {
         self.config_path(paths)
     }
-
-    fn active_link_path(&self, paths: &IrisPaths) -> Option<PathBuf> {
-        Some(self.config_path(paths))
-    }
 }
 
 impl Generator for BottomGenerator {
@@ -83,38 +79,30 @@ impl BottomGenerator {
 }
 
 impl Diagnosable for BottomGenerator {
-    fn health_check(&self, paths: &IrisPaths, theme: &str) -> HealthStatus {
-        if !self.is_installed() {
-            return HealthStatus::error(Issue::BinaryNotFound);
+    fn check_rules(&self) -> &[CheckRule] {
+        &[
+            CheckRule::ConfigExists,
+            CheckRule::MarkersExist,
+            CheckRule::ContentValid,
+        ]
+    }
+
+    fn validate_content(&self, content: &str, theme: &str) -> Option<HealthStatus> {
+        if theme.is_empty() {
+            return None;
         }
 
-        let config_path: PathBuf = self.link_path(paths, "");
-        let file_status = HealthStatus::check_file(&config_path, Issue::ConfigMissing);
-        if !file_status.is_ok() {
-            return file_status;
+        let theme_lower: String = theme.to_lowercase();
+        let expected_marker: String = format!("# iris_theme: {}", theme_lower);
+        if !content.contains(&expected_marker) {
+            return Some(HealthStatus::warn(Issue::MarkerMissing));
         }
 
-        let content: String = fs::read_to_string(&config_path).unwrap_or_default();
-
-        let start_marker: String = format!("# [iris:begin:{}]", self.name());
-        let end_marker: String = format!("# [iris:end:{}]", self.name());
-        if !content.contains(&start_marker) || !content.contains(&end_marker) {
-            return HealthStatus::warn(Issue::MarkerMissing);
+        if !content.contains("[styles]") && !content.contains("[styles") {
+            return Some(HealthStatus::error(Issue::BlockMissing));
         }
 
-        if !theme.is_empty() {
-            let theme_lower: String = theme.to_lowercase();
-            let expected_marker: String = format!("# iris_theme: {}", theme_lower);
-            if !content.contains(&expected_marker) {
-                return HealthStatus::warn(Issue::MarkerMissing);
-            }
-
-            if !content.contains("[styles]") && !content.contains("[styles") {
-                return HealthStatus::error(Issue::BlockMissing);
-            }
-        }
-
-        HealthStatus::Ok
+        None
     }
 }
 
@@ -346,7 +334,7 @@ bg_colour = "#000000"
                 .execute_apply(&generator, &mut activity)
                 .unwrap();
 
-            let status = generator.health_check(&ctx.paths, &theme.name);
+            let status = generator.check(&ctx.paths, &theme.name);
             assert!(status.is_ok(), "Expected Ok, got: {status}");
         }
 
@@ -370,10 +358,10 @@ bg_colour = "#000000"
                 .unwrap();
 
             fs::write(&config_path, "[styles]\nbg_colour = \"#ffffff\"").unwrap();
-            let status = generator.health_check(&ctx.paths, &theme.name);
+            let status = generator.check(&ctx.paths, &theme.name);
 
             assert!(status.is_warning(), "Expected Warning, got: {status}");
-            assert!(status.contains("Marker missing") || status.contains("missing"));
+            assert!(status.is_issue(Issue::MarkerMissing));
         }
 
         #[test]
@@ -388,10 +376,10 @@ bg_colour = "#000000"
                 fs::remove_file(&config_path).unwrap();
             }
 
-            let status = generator.health_check(&ctx.paths, "any");
+            let status = generator.check(&ctx.paths, "any");
 
             assert!(status.is_error(), "Expected Error, got: {status}");
-            assert!(status.contains("Configuration file missing"));
+            assert!(status.is_issue(Issue::ConfigMissing));
         }
 
         #[test]
@@ -421,7 +409,7 @@ bg_colour = "#000000"
             fs::write(&config_path, old_complex_config).unwrap();
 
             let theme: Theme = Theme::mock();
-            let status = generator.health_check(&ctx.paths, &theme.name);
+            let status = generator.check(&ctx.paths, &theme.name);
 
             let mut activity = ctx.log.step("Test", false).muted();
             let engine = ctx.engine(&theme);
@@ -455,7 +443,7 @@ bg_colour = "#000000"
             fs::write(&config_path, "[flags]\nrate = 1000\n").unwrap();
 
             let theme: Theme = Theme::mock();
-            let status = generator.health_check(&ctx.paths, &theme.name);
+            let status = generator.check(&ctx.paths, &theme.name);
 
             assert!(status.is_warning(), "Expected Warning, got: {status}");
 
@@ -469,7 +457,7 @@ bg_colour = "#000000"
             assert!(content.contains("[flags]"));
             assert!(content.contains("# [iris:begin:bottom]"));
             assert!(content.contains("# [iris:end:bottom]"));
-            assert!(generator.health_check(&ctx.paths, &theme.name).is_ok());
+            assert!(generator.check(&ctx.paths, &theme.name).is_ok());
         }
     }
 }

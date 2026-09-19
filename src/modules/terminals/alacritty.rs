@@ -25,19 +25,11 @@ impl PathResolvable for AlacrittyGenerator {
     }
 
     fn file_name(&self, theme: &str) -> String {
-        if theme.is_empty() {
-            "current_theme.toml".into()
-        } else {
-            format!("{}.toml", theme.to_lowercase())
-        }
+        format!("{}.toml", theme.to_lowercase())
     }
 
-    fn link_path(&self, paths: &IrisPaths, _theme: &str) -> PathBuf {
-        self.config_dir(paths).join(self.file_name(""))
-    }
-
-    fn active_link_path(&self, paths: &IrisPaths) -> Option<PathBuf> {
-        Some(self.config_dir(paths).join(self.file_name("")))
+    fn static_file_name(&self) -> Option<String> {
+        Some("current_theme.toml".into())
     }
 }
 
@@ -61,47 +53,22 @@ impl Generator for AlacrittyGenerator {
 }
 
 impl Diagnosable for AlacrittyGenerator {
-    fn health_check(&self, paths: &IrisPaths, theme: &str) -> HealthStatus {
-        if !self.is_installed() {
-            return HealthStatus::error(Issue::BinaryNotFound);
-        }
+    fn check_rules(&self) -> &[CheckRule] {
+        &[
+            CheckRule::ConfigExists,
+            CheckRule::ContentValid,
+            CheckRule::SymlinkValid,
+            CheckRule::CacheExists,
+        ]
+    }
 
-        let config_path: PathBuf = self.config_path(paths);
-        let link_path: PathBuf = self.link_path(paths, "");
-
-        let config_status = HealthStatus::check_file(&config_path, Issue::ConfigMissing);
-        if !config_status.is_ok() {
-            return config_status;
-        }
-
-        let content: String = fs::read_to_string(&config_path).unwrap_or_default();
+    fn validate_content(&self, content: &str, _theme: &str) -> Option<HealthStatus> {
         let import_line: &str = "import = [\"~/.config/alacritty/current_theme.toml\"]";
-        if !content.contains(&import_line) {
-            return HealthStatus::warn(Issue::ImportMissing);
+        if !content.contains(import_line) {
+            return Some(HealthStatus::warn(Issue::ImportMissing));
         }
 
-        let link_status = HealthStatus::check_symlink(&link_path, Issue::SymlinkInvalid);
-        if !link_status.is_ok() {
-            return link_status;
-        }
-
-        let expected_cache: PathBuf = self.cache_path(paths, theme);
-        if let Ok(target) = fs::read_link(&link_path) {
-            let resolved_target: PathBuf = if target.is_relative() {
-                link_path
-                    .parent()
-                    .map(|p| p.join(&target))
-                    .unwrap_or(target)
-            } else {
-                target
-            };
-
-            if resolved_target != expected_cache {
-                return HealthStatus::warn(Issue::CacheMismatch);
-            }
-        }
-
-        HealthStatus::Ok
+        None
     }
 }
 
@@ -196,11 +163,6 @@ mod tests {
 
             let expected_link_path = expected_config_dir.join("current_theme.toml");
             assert_eq!(generator.link_path(&ctx.paths, theme), expected_link_path);
-
-            assert_eq!(
-                generator.active_link_path(&ctx.paths),
-                Some(expected_link_path)
-            );
             assert_eq!(generator.template_path(), "terminals/alacritty");
         }
 
@@ -328,7 +290,7 @@ mod tests {
             )
             .unwrap();
 
-            let status = generator.health_check(&ctx.paths, &theme.name);
+            let status = generator.check(&ctx.paths, &theme.name);
             assert!(status.is_ok(), "Expected Ok, got: {status}");
         }
 
@@ -349,10 +311,10 @@ mod tests {
             let main_config = generator.config_path(&ctx.paths);
             fs::write(&main_config, "[window]\ndecorations = \"none\"").unwrap();
 
-            let status = generator.health_check(&ctx.paths, &theme.name);
+            let status = generator.check(&ctx.paths, &theme.name);
 
             assert!(status.is_warning(), "Expected Warning, got: {status}");
-            assert!(status.contains("Theme not imported"));
+            assert!(status.is_issue(Issue::ImportMissing));
         }
 
         #[test]
@@ -374,10 +336,10 @@ mod tests {
                 fs::remove_file(main_config).unwrap();
             }
 
-            let status = generator.health_check(&ctx.paths, &theme.name);
+            let status = generator.check(&ctx.paths, &theme.name);
 
             assert!(status.is_error(), "Expected Error, got: {status}");
-            assert!(status.contains("Configuration file missing"));
+            assert!(status.is_issue(Issue::ConfigMissing));
         }
 
         #[test]
@@ -395,10 +357,10 @@ mod tests {
             let config_path = generator.config_path(&ctx.paths);
             fs::write(&config_path, "[window]\ndecorations = \"none\"").unwrap();
 
-            let status = generator.health_check(&ctx.paths, &theme.name);
+            let status = generator.check(&ctx.paths, &theme.name);
 
             assert!(status.is_warning(), "Expected Warning, but got: {status}");
-            assert!(status.contains("Theme not imported"));
+            assert!(status.is_issue(Issue::ImportMissing));
 
             engine
                 .execute_fix(&generator, &status, &mut activity)
@@ -406,7 +368,7 @@ mod tests {
 
             let content = fs::read_to_string(&config_path).unwrap();
             assert!(content.contains("current_theme.toml"));
-            assert!(generator.health_check(&ctx.paths, &theme.name).is_ok());
+            assert!(generator.check(&ctx.paths, &theme.name).is_ok());
         }
 
         #[test]
@@ -436,14 +398,14 @@ mod tests {
                 fs::remove_file(&link_path).unwrap();
             }
 
-            let status = generator.health_check(&ctx.paths, &theme.name);
+            let status = generator.check(&ctx.paths, &theme.name);
             assert!(status.is_error(), "Should be Error, got: {status}");
 
             engine
                 .execute_fix(&generator, &status, &mut activity)
                 .unwrap();
 
-            let final_status = generator.health_check(&ctx.paths, &theme.name);
+            let final_status = generator.check(&ctx.paths, &theme.name);
             assert!(final_status.is_ok());
         }
     }

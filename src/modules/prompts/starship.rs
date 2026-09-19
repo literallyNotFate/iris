@@ -37,10 +37,6 @@ impl PathResolvable for StarshipGenerator {
             .join(self.name())
             .join(format!("{}_block.toml", theme))
     }
-
-    fn active_link_path(&self, paths: &IrisPaths) -> Option<PathBuf> {
-        Some(self.config_path(paths))
-    }
 }
 
 impl Generator for StarshipGenerator {
@@ -83,40 +79,31 @@ impl StarshipGenerator {
 }
 
 impl Diagnosable for StarshipGenerator {
-    fn health_check(&self, paths: &IrisPaths, theme: &str) -> HealthStatus {
-        if !self.is_installed() {
-            return HealthStatus::error(Issue::BinaryNotFound);
+    fn check_rules(&self) -> &[CheckRule] {
+        &[
+            CheckRule::ConfigExists,
+            CheckRule::MarkersExist,
+            CheckRule::ContentValid,
+        ]
+    }
+
+    fn validate_content(&self, content: &str, theme: &str) -> Option<HealthStatus> {
+        if theme.is_empty() {
+            return None;
         }
 
-        let config_path: PathBuf = self.config_path(paths);
-        let config_status = HealthStatus::check_file(&config_path, Issue::ConfigMissing);
-        if !config_status.is_ok() {
-            return config_status;
+        let theme_lower: String = theme.to_lowercase();
+        let expected_key: String = format!("palette = \"{}\"", theme_lower);
+        if !content.contains(&expected_key) {
+            return Some(HealthStatus::warn(Issue::ImportMissing));
         }
 
-        let content: String = fs::read_to_string(&config_path).unwrap_or_default();
-
-        let start_marker: String = format!("# [iris:begin:{}]", self.name());
-        let end_marker: String = format!("# [iris:end:{}]", self.name());
-        if !content.contains(&start_marker) || !content.contains(&end_marker) {
-            return HealthStatus::warn(Issue::MarkerMissing);
+        let palette_block: String = format!("[palettes.{}]", theme_lower);
+        if !content.contains(&palette_block) {
+            return Some(HealthStatus::error(Issue::BlockMissing));
         }
 
-        if !theme.is_empty() {
-            let theme_lower: String = theme.to_lowercase();
-
-            let expected_key: String = format!("palette = \"{}\"", theme_lower);
-            if !content.contains(&expected_key) {
-                return HealthStatus::warn(Issue::ImportMissing);
-            }
-
-            let palette_block: String = format!("[palettes.{}]", theme_lower);
-            if !content.contains(&palette_block) {
-                return HealthStatus::error(Issue::BlockMissing);
-            }
-        }
-
-        HealthStatus::Ok
+        None
     }
 }
 
@@ -437,7 +424,7 @@ base = "#000000"
                         .execute_apply(&generator, &mut activity)
                         .unwrap();
 
-                    let status = generator.health_check(&ctx.paths, &theme.name);
+                    let status = generator.check(&ctx.paths, &theme.name);
                     assert!(status.is_ok(), "Expected Ok, got: {status}");
                 },
             );
@@ -473,10 +460,10 @@ base = "#000000"
                     );
                     fs::write(&config_path, corrupted).unwrap();
 
-                    let status = generator.health_check(&ctx.paths, &theme.name);
+                    let status = generator.check(&ctx.paths, &theme.name);
 
                     assert!(status.is_warning(), "Expected Warning, got: {status}");
-                    assert!(status.contains("Theme not imported"));
+                    assert!(status.is_issue(Issue::ImportMissing));
                 },
             );
         }
@@ -496,9 +483,9 @@ base = "#000000"
                 ],
                 || {
                     let generator = StarshipGenerator;
-                    let status = generator.health_check(&ctx.paths, "any");
+                    let status = generator.check(&ctx.paths, "any");
                     assert!(status.is_error(), "Expected Error, got: {status}");
-                    assert!(status.contains("Configuration file missing"));
+                    assert!(status.is_issue(Issue::ConfigMissing));
                 },
             );
         }
@@ -529,9 +516,9 @@ base = "#000000"
                     let generator = StarshipGenerator;
                     let theme: Theme = Theme::mock();
 
-                    let status = generator.health_check(&ctx.paths, &theme.name);
+                    let status = generator.check(&ctx.paths, &theme.name);
                     assert!(status.is_warning(), "Expected Warning, got: {status}");
-                    assert!(status.contains("Theme not imported"));
+                    assert!(status.is_issue(Issue::ImportMissing));
 
                     let mut activity = ctx.log.step("Fix", false);
                     let engine = ctx.engine(&theme);
@@ -541,7 +528,7 @@ base = "#000000"
 
                     let content = fs::read_to_string(&config_path).unwrap();
                     assert!(content.contains(&format!("palette = \"{}\"", theme.name)));
-                    assert!(generator.health_check(&ctx.paths, &theme.name).is_ok());
+                    assert!(generator.check(&ctx.paths, &theme.name).is_ok());
                 },
             );
         }
@@ -575,8 +562,7 @@ base = "#000000"
                     )
                     .unwrap();
 
-                    let status = generator.health_check(&ctx.paths, &theme.name);
-
+                    let status = generator.check(&ctx.paths, &theme.name);
                     assert!(status.is_warning(), "Expected Warning, got: {status}");
 
                     let mut activity = ctx.log.step("Fix", false);
@@ -590,7 +576,7 @@ base = "#000000"
                     assert!(content.contains(&theme.colors.bg));
                     assert!(content.contains("# [iris:begin:starship]"));
                     assert!(content.contains("# [iris:end:starship]"));
-                    assert!(generator.health_check(&ctx.paths, &theme.name).is_ok());
+                    assert!(generator.check(&ctx.paths, &theme.name).is_ok());
                 },
             );
         }

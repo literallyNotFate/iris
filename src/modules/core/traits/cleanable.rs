@@ -34,35 +34,35 @@ pub trait Cleanable: super::PathResolvable {
 
 /// Default cleanup logic implementation
 pub fn default_cleanup<T: Cleanable + ?Sized>(g: &T, paths: &IrisPaths) -> anyhow::Result<()> {
-    let config_path: PathBuf = g.link_path(paths, "");
+    let config_path: PathBuf = g.config_path(paths);
+    let name: &str = g.name();
+
     g.cleanup_config(&config_path)?;
     g.pre_cleanup(paths)?;
 
-    let name: &str = g.name();
-    if let Some(active_link) = g.active_link_path(paths) {
-        if active_link.exists() || active_link.is_symlink() {
-            fs::remove_file(&active_link).with_context(|| {
+    let link_to_remove: Option<PathBuf> = g
+        .static_file_name()
+        .map(|static_name| g.config_dir(paths).join(static_name));
+
+    if let Some(path) = link_to_remove {
+        if path.exists() || path.is_symlink() {
+            let remove_fn = if path.is_dir() {
+                fs::remove_dir_all(&path)
+            } else {
+                fs::remove_file(&path)
+            };
+
+            remove_fn.with_context(|| {
                 format!(
-                    "Failed to remove active link for {}: {}",
+                    "Failed to remove theme link/file for {}: {}",
                     name.bold(),
-                    active_link.display()
+                    path.display()
                 )
             })?;
         }
     }
 
-    let static_link: PathBuf = g.link_path(paths, "");
-    if static_link.is_symlink() || static_link.exists() {
-        let _ = fs::remove_file(&static_link).with_context(|| {
-            format!(
-                "Failed to remove static link for {}: {}",
-                name.bold(),
-                static_link.display()
-            )
-        })?;
-    }
-
-    let app_config_dir: PathBuf = g.config_path(paths);
+    let app_config_dir: PathBuf = g.config_dir(paths);
     if app_config_dir.exists() && app_config_dir.is_dir() {
         if app_config_dir.file_name().map_or(false, |n| n == "themes") {
             let _ = fs::remove_dir_all(&app_config_dir)
@@ -102,10 +102,13 @@ pub fn default_remove<T: Cleanable + ?Sized>(
         cache_file.clone()
     };
 
-    let static_theme_file: PathBuf = g.link_path(paths, "");
+    let static_theme_file = g.static_file_name().map(|s| g.config_dir(paths).join(s));
     let custom_theme_file: PathBuf = g.link_path(paths, &theme_name_lower);
 
-    let mut targets = vec![static_theme_file, custom_theme_file];
+    let mut targets = vec![custom_theme_file];
+    if let Some(static_path) = static_theme_file {
+        targets.push(static_path);
+    }
     targets.dedup();
 
     for theme_file in targets {

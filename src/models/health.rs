@@ -70,9 +70,12 @@ impl HealthStatus {
         matches!(self, HealthStatus::Issue(IssueSeverity::Warning, ..))
     }
 
-    /// Checks whether status message contains certain text (case insensitive)
-    pub fn contains(&self, text: &str) -> bool {
-        self.message().to_lowercase().contains(&text.to_lowercase())
+    /// Returns true if the status corresponds to a specific issue
+    pub fn is_issue(&self, target: Issue) -> bool {
+        match self {
+            HealthStatus::Issue(_, issue, _) => *issue == target,
+            HealthStatus::Ok => false,
+        }
     }
 
     /// Returns current issue message
@@ -206,27 +209,13 @@ mod tests {
     }
 
     #[test]
-    fn should_perform_case_insensitive_contains_matching() {
-        let warn = HealthStatus::warn(Issue::CacheMismatch);
-        let err = HealthStatus::error_with_hint(Issue::ConfigMissing, "Hint");
-
-        assert!(warn.contains("cache"));
-        assert!(warn.contains("MISMATCH"));
-        assert!(!warn.contains("tmux"));
-
-        assert!(err.contains("config"));
-        assert!(err.contains("missing"));
-        assert!(!err.contains("healthy"));
-    }
-
-    #[test]
     fn should_check_file_existence() {
         let tmp_dir: TempDir = TempDir::new("health_test").expect("Cannot create temp folder");
         let file_path = tmp_dir.path().join("config.toml");
 
         let status = HealthStatus::check_file(&file_path, Issue::ConfigMissing);
         assert!(status.is_error());
-        assert!(status.contains("missing"));
+        assert!(status.is_issue(Issue::ConfigMissing));
         assert!(status.hint().unwrap().contains("config.toml"));
 
         std::fs::write(&file_path, "content").unwrap();
@@ -248,11 +237,11 @@ mod tests {
 
         let status = HealthStatus::check_symlink(&link_path, Issue::SymlinkInvalid);
         assert!(status.is_error());
-        assert!(status.contains("invalid symlink"));
+        assert!(status.is_issue(Issue::SymlinkInvalid));
 
         let status = HealthStatus::check_symlink(&regular_file, Issue::SymlinkInvalid);
         assert!(status.is_error());
-        assert!(status.contains("invalid symlink"));
+        assert!(status.is_issue(Issue::SymlinkInvalid));
 
         #[cfg(unix)]
         std::os::unix::fs::symlink(&target_file, &link_path).unwrap();

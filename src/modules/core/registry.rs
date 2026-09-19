@@ -162,7 +162,7 @@ impl GeneratorRegistry {
                 continue;
             }
 
-            let status = generator.health_check(paths, theme);
+            let status = generator.check(paths, theme);
             if status.is_ok() {
                 healthy.push((generator, status));
             } else {

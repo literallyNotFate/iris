@@ -30,10 +30,6 @@ impl PathResolvable for HerdrGenerator {
             .join(self.name())
             .join(format!("{}_block.toml", theme))
     }
-
-    fn active_link_path(&self, paths: &IrisPaths) -> Option<PathBuf> {
-        Some(self.config_path(paths))
-    }
 }
 
 impl Generator for HerdrGenerator {
@@ -61,38 +57,31 @@ impl Generator for HerdrGenerator {
 }
 
 impl Diagnosable for HerdrGenerator {
-    fn health_check(&self, paths: &IrisPaths, theme: &str) -> HealthStatus {
-        if !self.is_installed() {
-            return HealthStatus::error(Issue::BinaryNotFound);
+    fn check_rules(&self) -> &[CheckRule] {
+        &[
+            CheckRule::ConfigExists,
+            CheckRule::MarkersExist,
+            CheckRule::ContentValid,
+        ]
+    }
+
+    fn validate_content(&self, content: &str, theme: &str) -> Option<HealthStatus> {
+        if theme.is_empty() {
+            return None;
         }
 
-        let config_path: PathBuf = self.link_path(paths, "");
-        let config_status = HealthStatus::check_file(&config_path, Issue::ConfigMissing);
-        if !config_status.is_ok() {
-            return config_status;
+        let theme_lower: String = theme.to_lowercase();
+        let expected_marker: String = format!("# iris_theme: {}", theme_lower);
+
+        if !content.contains(&expected_marker) {
+            return Some(HealthStatus::warn(Issue::MarkerMissing));
         }
 
-        let content: String = fs::read_to_string(&config_path).unwrap_or_default();
-
-        let start_marker: String = format!("# [iris:begin:{}]", self.name());
-        let end_marker: String = format!("# [iris:end:{}]", self.name());
-        if !content.contains(&start_marker) || !content.contains(&end_marker) {
-            return HealthStatus::warn(Issue::MarkerMissing);
+        if !content.contains("[theme.custom]") {
+            return Some(HealthStatus::error(Issue::BlockMissing));
         }
 
-        if !theme.is_empty() {
-            let theme_lower = theme.to_lowercase();
-            let expected_marker = format!("# iris_theme: {}", theme_lower);
-            if !content.contains(&expected_marker) {
-                return HealthStatus::warn(Issue::MarkerMissing);
-            }
-
-            if !content.contains("[theme.custom]") {
-                return HealthStatus::error(Issue::BlockMissing);
-            }
-        }
-
-        HealthStatus::Ok
+        None
     }
 }
 
@@ -350,7 +339,7 @@ accent = "#000000"
                 .execute_apply(&generator, &mut activity)
                 .unwrap();
 
-            let status = generator.health_check(&ctx.paths, &theme.name);
+            let status = generator.check(&ctx.paths, &theme.name);
             assert!(status.is_ok(), "Expected Ok, got: {status}");
         }
 
@@ -380,10 +369,10 @@ accent = "#000000"
             );
             fs::write(&config_path, corrupted).unwrap();
 
-            let status = generator.health_check(&ctx.paths, &theme.name);
+            let status = generator.check(&ctx.paths, &theme.name);
 
             assert!(status.is_warning(), "Expected Warning, got: {status}");
-            assert!(status.contains("Marker missing") || status.contains("missing"));
+            assert!(status.is_issue(Issue::MarkerMissing));
         }
 
         #[test]
@@ -398,10 +387,10 @@ accent = "#000000"
                 fs::remove_file(&config_path).unwrap();
             }
 
-            let status = generator.health_check(&ctx.paths, "any");
+            let status = generator.check(&ctx.paths, "any");
 
             assert!(status.is_error(), "Expected Error, got: {status}");
-            assert!(status.contains("Configuration file missing"));
+            assert!(status.is_issue(Issue::ConfigMissing));
         }
 
         #[test]
@@ -435,7 +424,7 @@ accent = "#000000"
             let theme: Theme = Theme::mock();
             ctx.state.theme.current_theme = theme.name.clone();
 
-            let status = generator.health_check(&ctx.paths, &theme.name);
+            let status = generator.check(&ctx.paths, &theme.name);
             assert!(
                 status.is_warning() || status.is_error(),
                 "Expected Warn/Err, got: {status}"
@@ -474,10 +463,10 @@ accent = "#000000"
             fs::write(&config_path, "[kafka]\nbrokers = []\n").unwrap();
 
             let theme: Theme = Theme::mock();
-            let status = generator.health_check(&ctx.paths, &theme.name);
+            let status = generator.check(&ctx.paths, &theme.name);
 
             assert!(status.is_warning(), "Expected Warning, got: {status}");
-            assert!(status.contains("Marker missing") || status.contains("missing"));
+            assert!(status.is_issue(Issue::MarkerMissing));
 
             let mut activity = ctx.log.step("Fix", false);
             let engine = ctx.engine(&theme);
@@ -489,7 +478,7 @@ accent = "#000000"
             assert!(content.contains("[kafka]"));
             assert!(content.contains("# [iris:begin:herdr]"));
             assert!(content.contains("# [iris:end:herdr]"));
-            assert!(generator.health_check(&ctx.paths, &theme.name).is_ok());
+            assert!(generator.check(&ctx.paths, &theme.name).is_ok());
         }
     }
 }

@@ -74,7 +74,7 @@ fn ensure_generator_health(
     engine: &IrisEngine<'_, '_>,
     is_last: bool,
 ) -> anyhow::Result<()> {
-    let status = g.health_check(&ctx.paths, &engine.theme.name);
+    let status = g.check(&ctx.paths, &engine.theme.name);
 
     if !status.is_ok() {
         let mut fix_step = ctx.log.step(
