@@ -7,11 +7,9 @@ use std::{collections::BTreeSet, fs, path::PathBuf};
 /// Handle application cache command and its subcommands
 pub fn exec(action: CacheAction, ctx: &IrisContext) -> Result<()> {
     match action {
-        CacheAction::Clear {
-            all,
-            generator,
-            auto,
-        } => handle_clear(all, generator, auto, ctx)?,
+        CacheAction::Clear { generator } => handle_clear(generator, ctx)?,
+        CacheAction::Purge => handle_purge(ctx)?,
+        CacheAction::Clean => handle_clean(ctx)?,
         CacheAction::Remove { theme } => handle_remove(&theme, ctx)?,
         CacheAction::List => render_list(ctx)?,
         CacheAction::Info => render_info(ctx)?,
@@ -20,8 +18,8 @@ pub fn exec(action: CacheAction, ctx: &IrisContext) -> Result<()> {
     Ok(())
 }
 
-/// Cache clear (all, auto, for generator or config)
-fn handle_clear(all: bool, gen_name: Option<String>, auto: bool, ctx: &IrisContext) -> Result<()> {
+/// Clear generated configurations cache (or specific generator)
+fn handle_clear(gen_name: Option<String>, ctx: &IrisContext) -> Result<()> {
     println!();
 
     let generator = if let Some(ref name) = gen_name {
@@ -31,30 +29,16 @@ fn handle_clear(all: bool, gen_name: Option<String>, auto: bool, ctx: &IrisConte
         None
     };
 
-    let prompt_message = match (&generator, all, auto) {
-        (Some(g), _, _) => format!(
+    let prompt_message: String = if let Some(ref g) = generator {
+        format!(
             "Do you want to clear the cache for the `{}` generator?",
             g.name().cyan().bold()
-        ),
-        (None, true, _) => format!(
-            "{}: This will wipe all Iris caches and configurations. Are you sure?",
-            "DANGER".bold()
-        ),
-        (None, false, true) => {
-            "Do you want to clean orphaned cache directories for removed generators?".to_string()
-        }
-        (None, false, false) => "Do you want to clean generated configurations?".to_string(),
+        )
+    } else {
+        "Do you want to clean generated configurations?".to_string()
     };
 
-    if all {
-        ctx.log.warn(&format!(
-            "{}: Nuclear option. Purging everything.",
-            "DANGER".bold()
-        ));
-    } else if auto {
-        ctx.log
-            .info("Scanning and cleaning orphaned cache directories...");
-    } else if let Some(ref g) = generator {
+    if let Some(ref g) = generator {
         ctx.log.info(&format!(
             "Cleaning cache for generator: {}",
             g.name().green().bold()
@@ -73,33 +57,7 @@ fn handle_clear(all: bool, gen_name: Option<String>, auto: bool, ctx: &IrisConte
         return Ok(());
     }
 
-    if all {
-        ctx.log.action("Purged all Iris caches\n", || {
-            ctx.paths.purge_all()?;
-            utils::external::clear_bat_cache();
-            Ok(())
-        })
-    } else if auto {
-        ctx.log.action("Cleaned orphaned cache directories\n", || {
-            let generators_cache_dir = &ctx.paths.generators;
-            if generators_cache_dir.exists() {
-                let valid_names: BTreeSet<String> = ctx.registry.names().into_iter().collect();
-
-                for entry in fs::read_dir(generators_cache_dir)? {
-                    let entry = entry?;
-                    let path: PathBuf = entry.path();
-                    if path.is_dir() {
-                        if let Some(dir_name) = path.file_name().and_then(|n| n.to_str()) {
-                            if !valid_names.contains(dir_name) {
-                                fs::remove_dir_all(&path)?;
-                            }
-                        }
-                    }
-                }
-            }
-            Ok(())
-        })
-    } else if let Some(g) = generator {
+    if let Some(g) = generator {
         ctx.log.action(
             &format!("Cleaned `{}` cache\n", g.name().cyan().bold()),
             || g.cleanup(&ctx.paths),
@@ -109,6 +67,69 @@ fn handle_clear(all: bool, gen_name: Option<String>, auto: bool, ctx: &IrisConte
             ctx.paths.clean_gen()
         })
     }
+}
+
+/// Nuclear option: purge all caches
+fn handle_purge(ctx: &IrisContext) -> Result<()> {
+    println!();
+
+    ctx.log.warn(&format!(
+        "{}: This will wipe all Iris caches and configurations. Are you sure?",
+        "DANGER".bold()
+    ));
+
+    if !Confirm::with_theme(&utils::colors::select_theme())
+        .with_prompt("Do you want to purge everything?")
+        .default(false)
+        .interact()?
+    {
+        ctx.log.info("Canceled.");
+        println!();
+        return Ok(());
+    }
+
+    ctx.log.action("Purged all Iris caches\n", || {
+        ctx.paths.purge_all()?;
+        utils::external::clear_bat_cache();
+        Ok(())
+    })
+}
+
+/// Automatically clean orphaned cache directories
+fn handle_clean(ctx: &IrisContext) -> Result<()> {
+    println!();
+    ctx.log
+        .info("Scanning and cleaning orphaned cache directories...");
+
+    if !Confirm::with_theme(&utils::colors::select_theme())
+        .with_prompt("Do you want to clean orphaned cache directories for removed generators?")
+        .default(false)
+        .interact()?
+    {
+        ctx.log.info("Canceled.");
+        println!();
+        return Ok(());
+    }
+
+    ctx.log.action("Cleaned orphaned cache directories\n", || {
+        let generators_cache_dir = &ctx.paths.generators;
+        if generators_cache_dir.exists() {
+            let valid_names: BTreeSet<String> = ctx.registry.names().into_iter().collect();
+
+            for entry in fs::read_dir(generators_cache_dir)? {
+                let entry = entry?;
+                let path: PathBuf = entry.path();
+                if path.is_dir() {
+                    if let Some(dir_name) = path.file_name().and_then(|n| n.to_str()) {
+                        if !valid_names.contains(dir_name) {
+                            fs::remove_dir_all(&path)?;
+                        }
+                    }
+                }
+            }
+        }
+        Ok(())
+    })
 }
 
 /// Removes requested theme from the cache along with the config files for generator

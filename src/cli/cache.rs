@@ -1,6 +1,4 @@
-use clap::Subcommand;
-
-#[derive(Subcommand)]
+#[derive(clap::Subcommand)]
 pub enum CacheAction {
     /// Clear the generated configurations cache
     #[command(arg_required_else_help = false)]
@@ -8,15 +6,13 @@ pub enum CacheAction {
         /// Target a specific generator's cache
         #[arg(value_name = "GENERATOR")]
         generator: Option<String>,
-
-        /// Nuclear option: clear everything
-        #[arg(short, long)]
-        all: bool,
-
-        /// Automatically clean cache from orphaned generators not present in the registry
-        #[arg(long)]
-        auto: bool,
     },
+
+    /// Nuclear option: purge all cached data and directories
+    Purge,
+
+    /// Automatically clean cache from orphaned generators
+    Clean,
 
     /// Remove a specific theme palette from the cache
     Remove {
